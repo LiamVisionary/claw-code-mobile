@@ -12,13 +12,13 @@ const xai = createOpenAI({
   apiKey: process.env.XAI_API_KEY ?? "",
 });
 
-export async function callServer() {
+export async function onSubmit(message: string) {
   let textStream: undefined | ReturnType<typeof createStreamableValue<string>>;
   let textNode: undefined | React.ReactNode;
 
   const result = await streamUI({
     model: xai("grok-beta"),
-    prompt: "What is the weather in Austin Texas?",
+    prompt: message, //"What is the weather in Austin Texas?",
     text: ({ content, done, delta }) => {
       if (!textStream) {
         textStream = createStreamableValue("");
@@ -91,6 +91,11 @@ export async function callServer() {
     }
   });
   //   //   return result.toDataStreamResponse();
-    return result.value;
+    // return result.value;
+    return {
+      id: Date.now(),
+      display: result.value,
+    };
+    
   // return <div>hey</div>;
 }

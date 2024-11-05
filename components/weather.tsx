@@ -19,6 +19,7 @@ function Card({ title, children, style }: any) {
     return (
         <View
             style={{
+                margin: 16,
             padding: 16,
             borderRadius: 16,
             backgroundColor: "white",

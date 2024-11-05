@@ -37,8 +37,10 @@ export function BotMessage({
 
   return (
     <Text
-      style={{   
+      style={{
+        color: "white",
         paddingHorizontal: 16,
+
         fontSize: 16,
       }}
     >
