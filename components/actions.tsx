@@ -3,6 +3,8 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import { createStreamableValue, streamUI } from "ai/rsc";
 import { BotMessage } from "./stream-text";
+import { z } from "zod";
+import { getWeatherAsync, WeatherCard } from "./weather";
 
 const xai = createOpenAI({
   name: "xai",
@@ -16,7 +18,7 @@ export async function callServer() {
 
   const result = await streamUI({
     model: xai("grok-beta"),
-    prompt: "Invent a new holiday and describe its traditions.",
+    prompt: "What is the weather in Austin Texas?",
     text: ({ content, done, delta }) => {
       if (!textStream) {
         textStream = createStreamableValue("");
@@ -42,6 +44,51 @@ export async function callServer() {
 
       return textNode;
     },
+    tools: {
+      get_weather: {
+        description: "Get the current weather for a city",
+        parameters: z
+          .object({
+            city: z.string().describe("the city to get the weather for"),
+          })
+          .required(),
+        async *generate({ city }) {
+          // const codeJsx = getColoredFunctionJsx("queryWeather", city);
+          // // Show a spinner on the client while we wait for the response.
+          // yield (
+          //   <>
+          //     {codeJsx}
+          //     <WeatherSkeleton />
+          //   </>
+          // );
+
+          // await sleep(1000);
+
+          // Fetch the weather information from an external API.
+          const weatherInfo = await getWeatherAsync(city);
+
+          // Update the final AI state.
+          // aiState.done([
+          //   ...aiState.get(),
+          //   {
+          //     role: 'function',
+          //     name: 'get_weather',
+          //     // Content can be any string to provide context to the LLM in the rest of the conversation.
+          //     // content: '',
+          //     content: JSON.stringify(weatherInfo.current.feelslike_f),
+          //   },
+          // ]);
+
+          // Return the weather card to the client.
+          return (
+            <>
+              
+              <WeatherCard city={city} data={weatherInfo} />
+            </>
+          );
+        },
+      },
+    }
   });
   //   //   return result.toDataStreamResponse();
     return result.value;
