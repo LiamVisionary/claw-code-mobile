@@ -30,16 +30,9 @@ import Animated, {
   FadeInDown,
 } from "react-native-reanimated";
 
-// import type { AI } from "@/lib/ai-actions";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-// import UpSvg from "@/components/svg/up";
-// import SparkleSvg from "@/components/svg/sparkle";
-// import { PromptOnTap } from "./prompt-on-tap";
-// import { UserMessage } from "./user-message";
-// import { HEADER_HEIGHT } from "./header";
 import { BlurView } from "expo-blur";
 import { onSubmit } from "./actions";
-// import { TestMoviesCard } from '../components/movies/movie-card';
 
 const HEADER_HEIGHT = 0;
 
@@ -196,7 +189,7 @@ function ScrollToBottomScrollView({ children, ...props }: ScrollViewProps) {
 }
 
 function MessagesScrollView({ messages }) {
-//   const [messages] = useUIState<typeof AI>();
+  //   const [messages] = useUIState<typeof AI>();
 
   const { top } = useSafeAreaInsets();
 
@@ -243,7 +236,7 @@ function MessagesScrollView({ messages }) {
 }
 
 export function ChatUI() {
-    const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState([]);
 
   const { width } = useWindowDimensions();
 
@@ -264,84 +257,86 @@ export function ChatUI() {
           },
         ]}
       >
-        <MessagesScrollView messages={messages} setMessages={setMessages}/>
+        <MessagesScrollView messages={messages} setMessages={setMessages} />
 
-        <ChatToolbar messages={messages} setMessages={setMessages} onSubmit={onSubmit}/>
+        <ChatToolbar
+          messages={messages}
+          setMessages={setMessages}
+          onSubmit={onSubmit}
+        />
       </View>
     </Animated.View>
   );
 }
 
-
 export function PromptOnTap({
-    prompt,
-    onPress,
-    ...props
-  }: { prompt: string | [string, string] } & TouchableOpacityProps) {
-    return (
-      <TouchableOpacity
-        {...props}
-        onPress={async (e) => {
-          onPress?.(e);
-          onSubmit(prompt);
-        }}
-      />
-    );
-  }
-
-  
+  prompt,
+  onPress,
+  ...props
+}: { prompt: string | [string, string] } & TouchableOpacityProps) {
+  return (
+    <TouchableOpacity
+      {...props}
+      onPress={async (e) => {
+        onPress?.(e);
+        onSubmit(prompt);
+      }}
+    />
+  );
+}
 
 function FirstSuggestions() {
   return (
-    
-      <Animated.View entering={FadeInDown} style={{ flexDirection: "row", gap: 8, paddingHorizontal: 16 }}>
-        {[
-          // ['server rendering apps', 'for native platforms'],
-          ["Get the weather", "for my area"],
-          ["List new movies", "playing around me"],
-        ].map(([title, subtitle], index) => (
-          <PromptOnTap
-            key={String(index)}
+    <Animated.View
+      entering={FadeInDown}
+      style={{ flexDirection: "row", gap: 8, paddingHorizontal: 16 }}
+    >
+      {[
+        // ['server rendering apps', 'for native platforms'],
+        ["Get the weather", "for my area"],
+        ["List new movies", "playing around me"],
+      ].map(([title, subtitle], index) => (
+        <PromptOnTap
+          key={String(index)}
+          style={{
+            borderRadius: 12,
+            padding: 24,
+            flex: 1,
+            // borderWidth: 1,
+            // borderColor: 'white',
+            backgroundColor: "rgba(255,255,255,0.1)",
+          }}
+          activeOpacity={0.7}
+          prompt={title}
+        >
+          <Text
             style={{
-              borderRadius: 12,
-              padding: 24,
-              flex: 1,
-              // borderWidth: 1,
-              // borderColor: 'white',
-              backgroundColor: "rgba(255,255,255,0.1)",
+              color: "white",
+              fontSize: 16,
+              fontWeight: "bold",
             }}
-            activeOpacity={0.7}
-            prompt={title}
           >
-            <Text
-              style={{
-                color: "white",
-                fontSize: 16,
-                fontWeight: "bold",
-              }}
-            >
-              {title}
-            </Text>
-            <Text
-              style={{
-                color: "white",
-                fontSize: 14,
-                opacity: 0.8,
-              }}
-            >
-              {subtitle}
-            </Text>
-          </PromptOnTap>
-        ))}
-      </Animated.View>
-    
+            {title}
+          </Text>
+          <Text
+            style={{
+              color: "white",
+              fontSize: 14,
+              opacity: 0.8,
+            }}
+          >
+            {subtitle}
+          </Text>
+        </PromptOnTap>
+      ))}
+    </Animated.View>
   );
 }
 
 function ChatToolbar({ messages, setMessages, onSubmit }) {
   const [inputValue, setInputValue] = useState("");
-//   const [, setMessages] = useUIState<typeof AI>();
-//   const { submitUserMessage } = useActions<typeof AI>();
+  //   const [, setMessages] = useUIState<typeof AI>();
+  //   const { submitUserMessage } = useActions<typeof AI>();
   const textInput = useRef<TextInput>(null);
   const { bottom } = useSafeAreaInsets();
   const keyboard = useAnimatedKeyboard();
@@ -461,7 +456,7 @@ function ChatToolbar({ messages, setMessages, onSubmit }) {
     },
     [onSubmitMessage]
   );
-//   const [messages] = useUIState<typeof AI>();
+  //   const [messages] = useUIState<typeof AI>();
 
   return (
     <Animated.View
@@ -549,8 +544,6 @@ function ChatToolbar({ messages, setMessages, onSubmit }) {
   );
 }
 
-
-
 export function UserMessage({ children }) {
   return (
     <View
@@ -584,7 +577,6 @@ export function UserMessage({ children }) {
       </View>
 
       <View
-
         style={{
           overflow: "hidden",
           backgroundColor: "#83189F",
