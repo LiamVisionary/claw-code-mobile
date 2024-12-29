@@ -12,12 +12,23 @@ const xai = createOpenAI({
   apiKey: process.env.XAI_API_KEY ?? "",
 });
 
+import { unstable_headers } from "expo-router/rsc/headers";
+
 export async function onSubmit(message: string) {
   let textStream: undefined | ReturnType<typeof createStreamableValue<string>>;
   let textNode: undefined | React.ReactNode;
-
+  const headers = await unstable_headers();
   const result = await streamUI({
     model: xai("grok-beta"),
+    system: `
+    You are a chatbot assistant that can help with a variety of tasks.
+
+    User info:
+    - city: ${headers.get("eas-ip-city") ?? (__DEV__ ? "Austin" : "unknown")}
+    - country: ${headers.get("eas-ip-country") ?? (__DEV__ ? "US" : "unknown")}
+    - region: ${headers.get("eas-ip-region") ?? (__DEV__ ? "TX" : "unknown")}
+    - device platform: ${headers.get("expo-platform") ?? "unknown"}
+    `,
     prompt: message, //"What is the weather in Austin Texas?",
     text: ({ content, done, delta }) => {
       if (!textStream) {
@@ -82,20 +93,19 @@ export async function onSubmit(message: string) {
           // Return the weather card to the client.
           return (
             <>
-              
               <WeatherCard city={city} data={weatherInfo} />
             </>
           );
         },
       },
-    }
+    },
   });
   //   //   return result.toDataStreamResponse();
-    // return result.value;
-    return {
-      id: Date.now(),
-      display: result.value,
-    };
-    
+  // return result.value;
+  return {
+    id: Date.now(),
+    display: result.value,
+  };
+
   // return <div>hey</div>;
 }

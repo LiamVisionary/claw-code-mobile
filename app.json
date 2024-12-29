@@ -15,6 +15,7 @@
       "backgroundColor": "#000"
     },
     "ios": {
+      "appleTeamId": "QQ57RJ5UTD",
       "supportsTablet": true,
       "bundleIdentifier": "app.bacon.expoai",
       "infoPlist": {
@@ -37,6 +38,9 @@
       "reactServerFunctions": true
     },
     "extra": {
+      "router": {
+        "origin": "https://exai--ios.expo.app/"
+      },
       "eas": {
         "projectId": "95d2c7db-33a6-4055-8297-0198c13734ca"
       }

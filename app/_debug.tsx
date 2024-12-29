@@ -1,7 +1,11 @@
 import { Stack } from "expo-router";
-import { Button, ScrollView, Text, View } from "react-native";
+import { Text, View } from "react-native";
 import Constants from "expo-constants";
-import { pingServer, pingServerError } from "@/components/debug/debug-actions";
+import {
+  getRequestHeaders,
+  pingServer,
+  pingServerError,
+} from "@/components/debug/debug-actions";
 import { useState } from "react";
 import { BodyScrollView } from "@/components/ui/BodyScrollView";
 import * as Form from "@/components/ui/Form";
@@ -11,6 +15,10 @@ export { ErrorBoundary } from "expo-router";
 
 export default function DebugRoute() {
   const [error, setError] = useState<Error | null>(null);
+  const [headers, setHeaders] = useState<Record<
+    string,
+    string | string[]
+  > | null>(null);
   return (
     <>
       <BodyScrollView
@@ -70,6 +78,25 @@ export default function DebugRoute() {
         </Form.Section>
 
         {error && <NetworkErrorView error={error} />}
+
+        <Form.Section title="Request Headers">
+          <Form.Text
+            systemImage={{ name: "bolt.fill" }}
+            onPress={async () => {
+              try {
+                setHeaders(await getRequestHeaders());
+              } catch (error: any) {
+                setError(error);
+                alert(`Error: ${error}`);
+              }
+            }}
+          >
+            Fetch headers
+          </Form.Text>
+          <View>
+            <Form.Text>{JSON.stringify(headers, null, 2)}</Form.Text>
+          </View>
+        </Form.Section>
 
         <Form.Section title="Manifest">
           <View>
