@@ -333,7 +333,7 @@ function FirstSuggestions() {
   );
 }
 
-function ChatToolbar({ messages, setMessages, onSubmit }) {
+function ChatToolbar({ messages, setMessages }) {
   const [inputValue, setInputValue] = useState("");
   //   const [, setMessages] = useUIState<typeof AI>();
   //   const { submitUserMessage } = useActions<typeof AI>();
@@ -439,6 +439,7 @@ function ChatToolbar({ messages, setMessages, onSubmit }) {
         // },
       ]);
 
+      console.log('send', onSubmit);
       // Submit and get response message
       onSubmit(value).then((responseMessage) => {
         // console.log('responseMessage', responseMessage);

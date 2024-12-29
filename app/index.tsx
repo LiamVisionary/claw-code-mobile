@@ -6,10 +6,5 @@ import { Suspense } from "react";
 import { Text } from "react-native";
 
 export default function Index() {
-  // const { messages, handleSubmit, input, setInput, append } = useChat();
-
-
   return <ChatUI />
-
-  // return <Suspense fallback={<Text>Loading...</Text>}>{callServer()}</Suspense>;
 }
