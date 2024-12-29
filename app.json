@@ -1,11 +1,12 @@
 {
   "expo": {
-    "name": "nov5-xai",
-    "slug": "nov5-xai",
+    "name": "Expo xAI",
+    "slug": "expo-ai",
+    "owner": "bacon",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
-    "scheme": "myapp",
+    "icon": "https://github.com/evanbacon.png",
+    "scheme": "expoai",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
@@ -14,7 +15,8 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "app.bacon.expoai"
     },
     "android": {
       "adaptiveIcon": {
@@ -27,12 +29,25 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
-      "expo-router",
+      [
+        "expo-router",
+        {
+          "origin": "http://localhost:8081"
+        }
+      ],
       "expo-font"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactServerFunctions": true
+    },
+    "extra": {
+      "router": {
+        "origin": "http://localhost:8081"
+      },
+      "eas": {
+        "projectId": "95d2c7db-33a6-4055-8297-0198c13734ca"
+      }
     }
   }
 }

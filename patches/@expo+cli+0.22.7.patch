@@ -1,0 +1,15 @@
+diff --git a/node_modules/@expo/cli/build/src/export/embed/exportServer.js b/node_modules/@expo/cli/build/src/export/embed/exportServer.js
+index c57876f..759fc18 100644
+--- a/node_modules/@expo/cli/build/src/export/embed/exportServer.js
++++ b/node_modules/@expo/cli/build/src/export/embed/exportServer.js
+@@ -181,10 +181,6 @@ async function runServerDeployCommandAsync(projectRoot, { distDirectory , deploy
+         logOfflineError();
+         return false;
+     }
+-    // TODO: Only allow EAS deployments when staging is enabled, this is because the feature is still staging-only.
+-    if (!deployScript && !_env.env.EXPO_STAGING) {
+-        return false;
+-    }
+     const globalBin = getCommandBin("eas");
+     if (!globalBin) {
+         // This should never happen from EAS Builds.
