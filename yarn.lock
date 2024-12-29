@@ -885,6 +885,11 @@
     "@babel/helper-string-parser" "^7.25.9"
     "@babel/helper-validator-identifier" "^7.25.9"
 
+"@bacons/apple-colors@^0.0.8":
+  version "0.0.8"
+  resolved "https://registry.yarnpkg.com/@bacons/apple-colors/-/apple-colors-0.0.8.tgz#1d393d5e1774dbedc48f1b461d9cdcafe50e2e2e"
+  integrity sha512-Fd23H9b8ge3hjMn2VQzhSyN5SHKeOP+NyDXRit45q0I7aVkD2OcheiLoGGmpPm2RiH+PW+8vikgDcrL0SCsIow==
+
 "@bcoe/v8-coverage@^0.2.3":
   version "0.2.3"
   resolved "https://registry.yarnpkg.com/@bcoe/v8-coverage/-/v8-coverage-0.2.3.tgz#75a2e8b51cb758a7553d6804a5932d7aace75c39"
@@ -4058,6 +4063,11 @@ expo-blur@~14.0.1:
   version "14.0.1"
   resolved "https://registry.yarnpkg.com/expo-blur/-/expo-blur-14.0.1.tgz#4bdbec43b5015891990e78d31d8ff2f1f5d27464"
   integrity sha512-3Q6jFBLbY8n2vwk28ycUC+eIlVhnlqwkXUKk/Lfaj+SGV3AZMQyrixe7OYwJdUfwqETBrnYYMB6uNrJzOSbG+g==
+
+expo-clipboard@~7.0.0:
+  version "7.0.0"
+  resolved "https://registry.yarnpkg.com/expo-clipboard/-/expo-clipboard-7.0.0.tgz#066b1a781fdaf05e30f282522d3a58f2e651e4cf"
+  integrity sha512-4Vuv1zZPTOiKzIeC0BIGUN8nyzkXlE6jKchtLxcoksBjHPdG5W2eH05B+hppTrK9N3+Xh02z4j3h1cFRqPJ1fw==
 
 expo-constants@~17.0.0, expo-constants@~17.0.3:
   version "17.0.3"

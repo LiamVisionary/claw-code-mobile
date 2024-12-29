@@ -1,0 +1,31 @@
+diff --git a/node_modules/expo-router/build/rsc/router/host.js b/node_modules/expo-router/build/rsc/router/host.js
+index 6b3c0ea..77a4fb8 100644
+--- a/node_modules/expo-router/build/rsc/router/host.js
++++ b/node_modules/expo-router/build/rsc/router/host.js
+@@ -72,7 +72,9 @@ const checkStatus = async (responsePromise) => {
+                 errorJson = JSON.parse(errorText);
+             }
+             catch {
+-                throw new errors_1.ReactServerError(errorText, response.url, response.status);
++                const err = new errors_1.ReactServerError(errorText, response.url, response.status);
++                err.headers = response.headers;
++                throw err;
+             }
+             // TODO: This should be a dev-only error. Add handling for production equivalent.
+             throw new errors_1.MetroServerError(errorJson, response.url);
+@@ -82,9 +84,13 @@ const checkStatus = async (responsePromise) => {
+             responseText = await response.text();
+         }
+         catch {
+-            throw new errors_1.ReactServerError(response.statusText, response.url, response.status);
++            const err = new errors_1.ReactServerError(response.statusText, response.url, response.status);
++            err.headers = response.headers;
++            throw err;
+         }
+-        throw new errors_1.ReactServerError(responseText, response.url, response.status);
++        const err = new errors_1.ReactServerError(responseText, response.url, response.status);
++        err.headers = response.headers;
++        throw err;
+     }
+     return response;
+ };

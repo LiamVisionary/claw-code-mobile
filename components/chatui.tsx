@@ -273,7 +273,7 @@ export function PromptOnTap({
   prompt,
   onPress,
   ...props
-}: { prompt: string | [string, string] } & TouchableOpacityProps) {
+}: { prompt: string } & TouchableOpacityProps) {
   return (
     <TouchableOpacity
       {...props}
@@ -439,10 +439,8 @@ function ChatToolbar({ messages, setMessages }) {
         // },
       ]);
 
-      console.log('send', onSubmit);
       // Submit and get response message
       onSubmit(value).then((responseMessage) => {
-        // console.log('responseMessage', responseMessage);
         setMessages((currentMessages) => [...currentMessages, responseMessage]);
       });
 

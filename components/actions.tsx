@@ -13,7 +13,6 @@ const xai = createOpenAI({
 });
 
 export async function onSubmit(message: string) {
-  console.log('call');
   let textStream: undefined | ReturnType<typeof createStreamableValue<string>>;
   let textNode: undefined | React.ReactNode;
 
