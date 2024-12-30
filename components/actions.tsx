@@ -1,5 +1,6 @@
 "use server";
 
+import "server-only";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createStreamableValue, streamUI } from "ai/rsc";
 import { BotMessage } from "./stream-text";
@@ -95,11 +96,7 @@ export async function onSubmit(message: string) {
           // ]);
 
           // Return the weather card to the client.
-          return (
-            <>
-              <WeatherCard city={city} data={weatherInfo} />
-            </>
-          );
+          return <WeatherCard city={city} data={weatherInfo} />;
         },
       },
     },
