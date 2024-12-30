@@ -6,6 +6,10 @@ import { BotMessage } from "./stream-text";
 import { z } from "zod";
 import { getWeatherAsync, WeatherCard } from "./weather";
 
+if (!process.env.XAI_API_KEY) {
+  throw new Error("XAI_API_KEY is required");
+}
+
 const xai = createOpenAI({
   name: "xai",
   baseURL: "https://api.x.ai/v1",
