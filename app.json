@@ -32,7 +32,15 @@
       "bundler": "metro",
       "favicon": "./assets/images/favicon.png"
     },
-    "plugins": ["expo-router", "expo-font"],
+    "plugins": [
+      [
+        "expo-router",
+        {
+          "origin": "https://exai--ios.expo.app"
+        }
+      ],
+      "expo-font"
+    ],
     "experiments": {
       "typedRoutes": true,
       "reactServerFunctions": true
