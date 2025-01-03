@@ -1,13 +1,8 @@
 "use client";
 
 import { useActions, useUIState } from "ai/rsc";
-import React, { useCallback, useRef, useState } from "react";
-import {
-  TextInput,
-  View,
-  ScrollViewProps,
-  useWindowDimensions,
-} from "react-native";
+import React, { useCallback, useRef } from "react";
+import { View, ScrollViewProps, useWindowDimensions } from "react-native";
 
 import Animated, {
   KeyboardState,
@@ -224,7 +219,6 @@ function MessagesScrollView() {
 }
 
 export function ChatUI() {
-  // const [messages, setMessages] = useState([]);
   const { width } = useWindowDimensions();
 
   return (
