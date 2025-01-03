@@ -3,16 +3,13 @@
 import { useActions, useUIState } from "ai/rsc";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Image,
   Text,
   TextInput,
   View,
   NativeSyntheticEvent,
   TextInputSubmitEditingEventData,
   ScrollViewProps,
-  TouchableHighlight,
   useWindowDimensions,
-  Easing,
   TouchableOpacityProps,
   TouchableOpacity,
 } from "react-native";
@@ -33,6 +30,8 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BlurView } from "expo-blur";
 import { AI } from "./ai-context";
+import { UserMessage } from "./user-message";
+import { PromptOnTap } from "./prompt-on-tap";
 // import { onSubmit } from "./actions";
 // import { useActions} from 'ai/rsc'
 
@@ -191,7 +190,7 @@ function ScrollToBottomScrollView({ children, ...props }: ScrollViewProps) {
 }
 
 function MessagesScrollView() {
-// { messages }
+  // { messages }
   const [messages] = useUIState<typeof AI>();
 
   const { top } = useSafeAreaInsets();
@@ -273,22 +272,6 @@ export function ChatUI() {
   );
 }
 
-export function PromptOnTap({
-  prompt,
-  onPress,
-  ...props
-}: { prompt: string } & TouchableOpacityProps) {
-  return (
-    <TouchableOpacity
-      {...props}
-      onPress={async (e) => {
-        onPress?.(e);
-        onSubmit(prompt);
-      }}
-    />
-  );
-}
-
 function FirstSuggestions() {
   return (
     <Animated.View
@@ -338,7 +321,7 @@ function FirstSuggestions() {
 }
 
 function ChatToolbar() {
-// { messages, setMessages }
+  // { messages, setMessages }
   const [inputValue, setInputValue] = useState("");
   const [messages, setMessages] = useUIState<typeof AI>();
   const { onSubmit } = useActions<typeof AI>();
@@ -545,50 +528,5 @@ function ChatToolbar() {
         </SubtleScaleAndFadeIn> */}
       </AnimatedBlurView>
     </Animated.View>
-  );
-}
-
-export function UserMessage({ children }) {
-  return (
-    <View
-      style={{
-        alignItems: "center",
-        justifyContent: "flex-end",
-        flexDirection: "row",
-        maxWidth: "100%",
-        paddingHorizontal: 16,
-        gap: 8,
-      }}
-    >
-      <View style={{ flex: 1, alignItems: "flex-end" }}>
-        <Text
-          numberOfLines={100}
-          style={{
-            borderCurve: "continuous",
-            backgroundColor: "white",
-            borderRadius: 20,
-            flexWrap: "wrap",
-            wordWrap: "break-word",
-            textAlign: "right",
-            color: "#102151",
-            padding: 12,
-            fontSize: 16,
-          }}
-          selectable
-        >
-          {children}
-        </Text>
-      </View>
-
-      <View
-        style={{
-          overflow: "hidden",
-          backgroundColor: "#83189F",
-          borderRadius: 777,
-          width: 48,
-          height: 48,
-        }}
-      />
-    </View>
   );
 }
