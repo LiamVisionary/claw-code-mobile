@@ -40,7 +40,7 @@ export function Suggestions({
               />
               <Text
                 style={{
-                  fontFamily: "AnonymousPro-Bold",
+                  // fontFamily: "AnonymousPro-Bold",
                   color: "white",
                   fontWeight: "500",
                 }}
