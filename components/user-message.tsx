@@ -1,5 +1,5 @@
 "use client";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React from "react";
 import { Text, View } from "react-native";
 
 export function UserMessage({ children }: { children?: React.ReactNode }) {

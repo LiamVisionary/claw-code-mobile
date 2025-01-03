@@ -3,11 +3,8 @@
 import { useActions, useUIState } from "ai/rsc";
 import React, { useCallback, useRef, useState } from "react";
 import {
-  Text,
   TextInput,
   View,
-  NativeSyntheticEvent,
-  TextInputSubmitEditingEventData,
   ScrollViewProps,
   useWindowDimensions,
 } from "react-native";
@@ -20,22 +17,14 @@ import Animated, {
   useDerivedValue,
   useSharedValue,
   scrollTo,
-  BounceIn,
-  FadeInUp,
-  FadeInDown,
 } from "react-native-reanimated";
 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { BlurView } from "expo-blur";
-import { AI } from "./ai-context";
-import { UserMessage } from "./user-message";
-import { PromptOnTap } from "./prompt-on-tap";
 
-const nanoid = () => String(Math.random().toString(36).slice(2));
+import { AI } from "./ai-context";
+import { ChatToolbarInner } from "./chat-toolbar";
 
 const HEADER_HEIGHT = 0;
-
-const AnimatedBlurView = Animated.createAnimatedComponent(BlurView);
 
 function ScrollToBottomScrollView({ children, ...props }: ScrollViewProps) {
   const ref = useAnimatedRef<Animated.ScrollView>();
@@ -263,233 +252,15 @@ export function ChatUI() {
   );
 }
 
-function FirstSuggestions() {
-  return (
-    <Animated.View
-      entering={FadeInDown}
-      style={{ flexDirection: "row", gap: 8, paddingHorizontal: 16 }}
-    >
-      {[
-        // ['server rendering apps', 'for native platforms'],
-        ["Get the weather", "for my area"],
-        ["List new movies", "playing around me"],
-      ].map(([title, subtitle], index) => (
-        <PromptOnTap
-          key={String(index)}
-          style={{
-            borderRadius: 12,
-            padding: 24,
-            flex: 1,
-            // borderWidth: 1,
-            // borderColor: 'white',
-            backgroundColor: "rgba(255,255,255,0.1)",
-          }}
-          activeOpacity={0.7}
-          prompt={title}
-        >
-          <Text
-            style={{
-              color: "white",
-              fontSize: 16,
-              fontWeight: "bold",
-            }}
-          >
-            {title}
-          </Text>
-          <Text
-            style={{
-              color: "white",
-              fontSize: 14,
-              opacity: 0.8,
-            }}
-          >
-            {subtitle}
-          </Text>
-        </PromptOnTap>
-      ))}
-    </Animated.View>
-  );
-}
-
 function ChatToolbar() {
-  // { messages, setMessages }
-  const [, setInputValue] = useState("");
   const [messages, setMessages] = useUIState<typeof AI>();
   const { onSubmit } = useActions<typeof AI>();
-  const textInput = useRef<TextInput>(null);
-  const { bottom } = useSafeAreaInsets();
-  const keyboard = useAnimatedKeyboard();
-
-  // useEffect(() => {
-  //   setMessages((currentMessages) => [
-  //     ...currentMessages.filter((message) => message.id !== 'movies'),
-  //     {
-  //       id: 'movies',
-  //       display: <TestMoviesCard />,
-  //     },
-  //   ]);
-  // }, []);
-
-  // useEffect(() => {
-  //   setMessages((currentMessages) => [
-  //     ...currentMessages,
-  //     {
-  //       id: Date.now(),
-  //       display: (
-  //         <>
-  //           <UserMessage>
-  //             {
-  //               '1 wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip '
-  //             }
-  //           </UserMessage>
-  //           <UserMessage>
-  //             {
-  //               '2 wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip '
-  //             }
-  //           </UserMessage>
-  //           <UserMessage>
-  //             {
-  //               '3 wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip '
-  //             }
-  //           </UserMessage>
-  //           <UserMessage>
-  //             {
-  //               '4 wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip '
-  //             }
-  //           </UserMessage>
-  //           <UserMessage>
-  //             {
-  //               '5 wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip '
-  //             }
-  //           </UserMessage>
-  //           <UserMessage>
-  //             {
-  //               '6 wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip wip '
-  //             }
-  //           </UserMessage>
-  //         </>
-  //       ),
-  //     },
-  //   ]);
-  // }, []);
-
-  const translateStyle = useAnimatedStyle(() => {
-    return {
-      transform: [{ translateY: -keyboard.height.value }],
-    };
-  }, [bottom]);
-
-  const blurStyle = useAnimatedStyle(() => {
-    const assumedKeyboardHeight = 100;
-
-    const inverse = Math.max(
-      0,
-      Math.min(
-        1,
-        (assumedKeyboardHeight - keyboard.height.value) / assumedKeyboardHeight
-      )
-    );
-
-    return {
-      paddingBottom: 8 + bottom * inverse,
-    };
-  }, [bottom]);
-
-  const onSubmitMessage = useCallback(
-    (value: string) => {
-      if (value.trim() === "") {
-        return;
-      }
-
-      setTimeout(() => {
-        textInput.current?.clear();
-      });
-
-      // Add user message to UI state
-      setMessages((currentMessages) => [
-        ...currentMessages,
-        {
-          id: nanoid(),
-          display: <UserMessage>{value}</UserMessage>,
-        },
-      ]);
-
-      // Submit and get response message
-      onSubmit(value).then((responseMessage) => {
-        setMessages((currentMessages) => [...currentMessages, responseMessage]);
-      });
-
-      setInputValue("");
-    },
-    [textInput, setMessages, onSubmit, setInputValue]
-  );
-
-  const onSubmitEditing = useCallback(
-    (e: NativeSyntheticEvent<TextInputSubmitEditingEventData>) => {
-      onSubmitMessage(e.nativeEvent.text);
-    },
-    [onSubmitMessage]
-  );
-  //   const [messages] = useUIState<typeof AI>();
 
   return (
-    <Animated.View
-      style={[
-        {
-          position: "absolute",
-          bottom: 0,
-          left: 0,
-          right: 0,
-          backgroundColor: "transparent",
-          gap: 8,
-        },
-        translateStyle,
-      ]}
-    >
-      {messages.length === 0 && <FirstSuggestions />}
-
-      <AnimatedBlurView
-        tint="systemChromeMaterialDark"
-        style={[
-          {
-            paddingTop: 8,
-            paddingBottom: 8,
-            paddingHorizontal: 16,
-            flexDirection: "row",
-            gap: 8,
-          },
-          blurStyle,
-        ]}
-      >
-        <TextInput
-          ref={textInput}
-          onChangeText={setInputValue}
-          keyboardAppearance="dark"
-          cursorColor={"white"}
-          returnKeyType="send"
-          blurOnSubmit={false}
-          selectionHandleColor={"white"}
-          selectionColor={"white"}
-          style={{
-            color: "white",
-            // #1E1E1E
-            borderColor: "rgba(255, 255, 255, 0.3)",
-            padding: 16,
-            borderWidth: 0.5,
-            borderRadius: 999,
-            paddingVertical: 8,
-            fontSize: 16,
-            fontWeight: "bold",
-            outline: "none",
-            flex: 1,
-          }}
-          placeholder="Message"
-          autoCapitalize="sentences"
-          autoCorrect
-          placeholderTextColor={"rgba(255, 255, 255, 0.3)"}
-          onSubmitEditing={onSubmitEditing}
-        />
-      </AnimatedBlurView>
-    </Animated.View>
+    <ChatToolbarInner
+      messages={messages}
+      setMessages={setMessages}
+      onSubmit={onSubmit}
+    />
   );
 }
