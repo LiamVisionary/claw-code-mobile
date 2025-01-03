@@ -13,6 +13,15 @@ import * as AC from "@bacons/apple-colors";
 
 export { ErrorBoundary } from "expo-router";
 
+function getBestDashboardUrl(): any {
+  // TODO: There might be a better way to do this, using the project ID.
+  // const projectId = Constants.expoConfig?.extra?.eas?.projectId
+  const owner = Constants.expoConfig?.owner ?? "[account]";
+  const slug = Constants.expoConfig?.slug ?? "[project]";
+
+  return `https://expo.dev/accounts/${owner}/projects/${slug}`;
+}
+
 export default function DebugRoute() {
   const [error, setError] = useState<Error | null>(null);
   const [headers, setHeaders] = useState<Record<
@@ -47,6 +56,8 @@ export default function DebugRoute() {
           title="Server"
           footer="Call a React server action from your app to test the connection."
         >
+          <Form.Link href={getBestDashboardUrl()}>Dashboard</Form.Link>
+
           <Form.Text
             systemImage={"bolt.fill"}
             onPress={async () => {
