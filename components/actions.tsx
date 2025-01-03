@@ -14,6 +14,7 @@ if (!process.env.OPENAI_API_KEY) {
   throw new Error("OPENAI_API_KEY is required");
 }
 import { openai } from "@ai-sdk/openai";
+import { getMoviesData, MoviesCard, MoviesSkeleton } from "./movies/movie-card";
 
 // const xai = createOpenAI({
 //   name: "xai",
@@ -102,6 +103,38 @@ You are a chatbot assistant that can help with a variety of tasks.`,
       return textNode;
     },
     tools: {
+      get_movies: {
+        description: "List trending movies",
+        parameters: z.object({}).required(),
+        async *generate() {
+          // Show a spinner on the client while we wait for the response.
+          yield (
+            <>
+              <MoviesSkeleton />
+            </>
+          );
+
+          const movies = await getMoviesData();
+
+          // Update the final AI state.
+          // aiState.done([
+          //   ...aiState.get(),
+          //   {
+          //     role: 'function',
+          //     name: 'get_movies',
+          //     content: JSON.stringify(movies.map((movie) => movie.title)),
+          //   },
+          // ]);
+
+          // Return the movies card to the client.
+          return (
+            <>
+              <MoviesCard data={movies} />
+            </>
+          );
+        },
+      },
+
       get_weather: {
         description: "Get the current weather for a city",
         parameters: z
