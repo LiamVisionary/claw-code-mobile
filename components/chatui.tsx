@@ -1,7 +1,7 @@
 "use client";
 
 import { useActions, useUIState } from "ai/rsc";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import {
   Text,
   TextInput,
@@ -10,8 +10,6 @@ import {
   TextInputSubmitEditingEventData,
   ScrollViewProps,
   useWindowDimensions,
-  TouchableOpacityProps,
-  TouchableOpacity,
 } from "react-native";
 
 import Animated, {
@@ -32,8 +30,8 @@ import { BlurView } from "expo-blur";
 import { AI } from "./ai-context";
 import { UserMessage } from "./user-message";
 import { PromptOnTap } from "./prompt-on-tap";
-// import { onSubmit } from "./actions";
-// import { useActions} from 'ai/rsc'
+
+const nanoid = () => String(Math.random().toString(36).slice(2));
 
 const HEADER_HEIGHT = 0;
 
@@ -190,7 +188,6 @@ function ScrollToBottomScrollView({ children, ...props }: ScrollViewProps) {
 }
 
 function MessagesScrollView() {
-  // { messages }
   const [messages] = useUIState<typeof AI>();
 
   const { top } = useSafeAreaInsets();
@@ -239,16 +236,14 @@ function MessagesScrollView() {
 
 export function ChatUI() {
   // const [messages, setMessages] = useState([]);
-  const [messages, setMessages] = useUIState<typeof AI>();
-
   const { width } = useWindowDimensions();
 
   return (
     <Animated.View
       style={[
         { backgroundColor: "#000", flex: 1, alignItems: "stretch" },
+        // @ts-expect-error
         process.env.EXPO_OS === "web" && { maxHeight: "100vh" },
-        // translateStyle,
       ]}
     >
       <View
@@ -260,13 +255,9 @@ export function ChatUI() {
           },
         ]}
       >
-        <MessagesScrollView messages={messages} setMessages={setMessages} />
+        <MessagesScrollView />
 
-        <ChatToolbar
-          messages={messages}
-          setMessages={setMessages}
-          // onSubmit={onSubmit}
-        />
+        <ChatToolbar />
       </View>
     </Animated.View>
   );
@@ -322,7 +313,7 @@ function FirstSuggestions() {
 
 function ChatToolbar() {
   // { messages, setMessages }
-  const [inputValue, setInputValue] = useState("");
+  const [, setInputValue] = useState("");
   const [messages, setMessages] = useUIState<typeof AI>();
   const { onSubmit } = useActions<typeof AI>();
   const textInput = useRef<TextInput>(null);
@@ -418,13 +409,9 @@ function ChatToolbar() {
       setMessages((currentMessages) => [
         ...currentMessages,
         {
-          id: Date.now(),
+          id: nanoid(),
           display: <UserMessage>{value}</UserMessage>,
         },
-        // {
-        //   id: Date.now() + 3,
-        //   display: <MapCard city="Austin" data={require('../components/map/map-krakow-fixture.json')} />,
-        // },
       ]);
 
       // Submit and get response message
@@ -502,30 +489,6 @@ function ChatToolbar() {
           placeholderTextColor={"rgba(255, 255, 255, 0.3)"}
           onSubmitEditing={onSubmitEditing}
         />
-        {/* <SubtleScaleAndFadeIn>
-          <TouchableHighlight
-            underlayColor={"rgba(255, 255, 255, 0.8)"}
-            onPress={() => onSubmitMessage(inputValue)}
-            style={{
-              width: 36,
-              alignItems: "center",
-              justifyContent: "center",
-              aspectRatio: 1,
-              backgroundColor: "white",
-              borderRadius: 666,
-            }}
-          >
-            <AnimatedSwap
-              on={!!inputValue}
-              childA={<UpSvg />}
-              childB={<SparkleSvg fill={"black"} />}
-              style={{
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            />
-          </TouchableHighlight>
-        </SubtleScaleAndFadeIn> */}
       </AnimatedBlurView>
     </Animated.View>
   );

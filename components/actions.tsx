@@ -143,7 +143,7 @@ You are a chatbot assistant that can help with a variety of tasks.`,
     },
   });
   return {
-    id: Date.now(),
+    id: nanoid(),
     display: result.value,
   };
 }
