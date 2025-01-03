@@ -32,7 +32,9 @@ import Animated, {
 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BlurView } from "expo-blur";
-import { onSubmit } from "./actions";
+import { AI } from "./ai-context";
+// import { onSubmit } from "./actions";
+// import { useActions} from 'ai/rsc'
 
 const HEADER_HEIGHT = 0;
 
@@ -188,8 +190,9 @@ function ScrollToBottomScrollView({ children, ...props }: ScrollViewProps) {
   );
 }
 
-function MessagesScrollView({ messages }) {
-  //   const [messages] = useUIState<typeof AI>();
+function MessagesScrollView() {
+// { messages }
+  const [messages] = useUIState<typeof AI>();
 
   const { top } = useSafeAreaInsets();
 
@@ -236,7 +239,8 @@ function MessagesScrollView({ messages }) {
 }
 
 export function ChatUI() {
-  const [messages, setMessages] = useState([]);
+  // const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useUIState<typeof AI>();
 
   const { width } = useWindowDimensions();
 
@@ -262,7 +266,7 @@ export function ChatUI() {
         <ChatToolbar
           messages={messages}
           setMessages={setMessages}
-          onSubmit={onSubmit}
+          // onSubmit={onSubmit}
         />
       </View>
     </Animated.View>
@@ -333,10 +337,11 @@ function FirstSuggestions() {
   );
 }
 
-function ChatToolbar({ messages, setMessages }) {
+function ChatToolbar() {
+// { messages, setMessages }
   const [inputValue, setInputValue] = useState("");
-  //   const [, setMessages] = useUIState<typeof AI>();
-  //   const { submitUserMessage } = useActions<typeof AI>();
+  const [messages, setMessages] = useUIState<typeof AI>();
+  const { onSubmit } = useActions<typeof AI>();
   const textInput = useRef<TextInput>(null);
   const { bottom } = useSafeAreaInsets();
   const keyboard = useAnimatedKeyboard();

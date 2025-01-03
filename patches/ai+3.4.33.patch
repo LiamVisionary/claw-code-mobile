@@ -1,0 +1,39 @@
+diff --git a/node_modules/ai/rsc/dist/rsc-server.mjs b/node_modules/ai/rsc/dist/rsc-server.mjs
+index 5e55d3e..c93d6a6 100644
+--- a/node_modules/ai/rsc/dist/rsc-server.mjs
++++ b/node_modules/ai/rsc/dist/rsc-server.mjs
+@@ -21,7 +21,8 @@ function createResolvablePromise() {
+ var isFunction = (value) => typeof value === "function";
+ 
+ // rsc/ai-state.tsx
+-var asyncAIStateStorage = new AsyncLocalStorage();
++// var asyncAIStateStorage = new AsyncLocalStorage();
++globalThis.asyncAIStateStorage ??= new AsyncLocalStorage();
+ function getAIStateStoreOrThrow(message) {
+   const store = asyncAIStateStorage.getStore();
+   if (!store) {
+@@ -161,9 +162,7 @@ async function innerAction({
+     }
+   );
+ }
+-function wrapAction(action, options) {
+-  return innerAction.bind(null, { action, options });
+-}
++
+ function createAI({
+   actions,
+   initialAIState,
+@@ -2551,6 +2550,13 @@ function createStreamableValueImpl(initialValue) {
+   };
+   return streamable2;
+ }
++
++function wrapAction(action, options) {
++  const ii = eval('_$$INLINE_ACTION');
++  console.log("wrapAction", ii, innerAction, action, options);
++  return ii.bind(null, { action, options });
++}
++
+ export {
+   createAI,
+   createStreamableUI,

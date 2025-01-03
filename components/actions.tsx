@@ -1,31 +1,71 @@
-"use server";
-
 import "server-only";
 import { createOpenAI } from "@ai-sdk/openai";
-import { createStreamableValue, streamUI } from "ai/rsc";
+import { createStreamableValue, getMutableAIState, streamUI } from "ai/rsc";
 import { BotMessage } from "./stream-text";
 import { z } from "zod";
 import { getWeatherAsync, WeatherCard } from "./weather";
 
+const nanoid = () => Math.random().toString(36).slice(2);
+
 if (!process.env.XAI_API_KEY) {
   throw new Error("XAI_API_KEY is required");
 }
+if (!process.env.OPENAI_API_KEY) {
+  throw new Error("OPENAI_API_KEY is required");
+}
+import { openai } from "@ai-sdk/openai";
 
-const xai = createOpenAI({
-  name: "xai",
-  baseURL: "https://api.x.ai/v1",
-  apiKey: process.env.XAI_API_KEY ?? "",
-});
+// const xai = createOpenAI({
+//   name: "xai",
+//   baseURL: "https://api.x.ai/v1",
+//   apiKey: process.env.XAI_API_KEY ?? "",
+// });
 
 // import { unstable_headers } from "expo-router/rsc/headers";
 
 export async function onSubmit(message: string) {
+  "use server";
+
+  const aiState = getMutableAIState();
+  // const aiState = getMutableAIState<typeof AI>();
+
+  aiState.update({
+    ...aiState.get(),
+    messages: [
+      ...aiState.get().messages,
+      {
+        id: nanoid(),
+        role: "user",
+        content: message,
+      },
+    ],
+  });
+
+  // console.log("onSubmit", message);
+  // return {
+  //   id: Date.now(),
+  //   display: <></>,
+  // };
+
   let textStream: undefined | ReturnType<typeof createStreamableValue<string>>;
   let textNode: undefined | React.ReactNode;
   // const headers = await unstable_headers();
   // https://sdk.vercel.ai/docs/reference/ai-sdk-rsc/stream-ui
   const result = await streamUI({
-    model: xai("grok-beta"),
+    model: openai("gpt-3.5-turbo"),
+    messages: [
+      {
+        role: "system",
+        content: `\
+You are a chatbot assistant that can help with a variety of tasks.`,
+      },
+      ...aiState.get().messages.map((message: any) => ({
+        role: message.role,
+        content: message.content,
+        name: message.name,
+      })),
+    ],
+    // model: xai("grok-beta"),
     // system: `
     // You are a chatbot assistant that can help with a variety of tasks.
 
@@ -35,7 +75,7 @@ export async function onSubmit(message: string) {
     // - region: ${headers.get("eas-ip-region") ?? (__DEV__ ? "TX" : "unknown")}
     // - device platform: ${headers.get("expo-platform") ?? "unknown"}
     // `,
-    prompt: message, //"What is the weather in Austin Texas?",
+    // prompt: message, //"What is the weather in Austin Texas?",
     text: ({ content, done, delta }) => {
       if (!textStream) {
         textStream = createStreamableValue("");
@@ -85,16 +125,16 @@ export async function onSubmit(message: string) {
           const weatherInfo = await getWeatherAsync(city);
 
           // Update the final AI state.
-          // aiState.done([
-          //   ...aiState.get(),
-          //   {
-          //     role: 'function',
-          //     name: 'get_weather',
-          //     // Content can be any string to provide context to the LLM in the rest of the conversation.
-          //     // content: '',
-          //     content: JSON.stringify(weatherInfo.current.feelslike_f),
-          //   },
-          // ]);
+          aiState.done([
+            ...aiState.get(),
+            {
+              role: "function",
+              name: "get_weather",
+              // Content can be any string to provide context to the LLM in the rest of the conversation.
+              // content: '',
+              content: JSON.stringify(weatherInfo.current.feelslike_f),
+            },
+          ]);
 
           // Return the weather card to the client.
           return <WeatherCard city={city} data={weatherInfo} />;
