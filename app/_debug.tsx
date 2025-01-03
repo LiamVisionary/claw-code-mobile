@@ -15,16 +15,19 @@ export { ErrorBoundary } from "expo-router";
 
 function getBestDashboardUrl(): any {
   // TODO: There might be a better way to do this, using the project ID.
-  // const projectId = Constants.expoConfig?.extra?.eas?.projectId
+  const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+  if (projectId) {
+    // https://expo.dev/projects/[uuid]
+    return `https://expo.dev/projects/${projectId}`;
+  }
   const owner = Constants.expoConfig?.owner ?? "[account]";
   const slug = Constants.expoConfig?.slug ?? "[project]";
 
-  //
   return `https://expo.dev/accounts/${owner}/projects/${slug}`;
 }
+
 function guessDeploymentIdFromOrigin(): string | null {
   // https://expo.dev/accounts/bacon/projects/expo-ai/hosting/deployments/o70t5q6t0r/requests
-  // TODO: There might be a better way to do this, using the project ID.
   const origin = Constants.expoConfig?.extra?.router?.origin;
   if (!origin) {
     return null;
@@ -38,6 +41,7 @@ function guessDeploymentIdFromOrigin(): string | null {
     return null;
   }
 }
+
 function getDeploymentUrl(): any {
   const id = guessDeploymentIdFromOrigin();
   if (!id) {
