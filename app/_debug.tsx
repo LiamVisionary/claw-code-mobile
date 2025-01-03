@@ -19,7 +19,36 @@ function getBestDashboardUrl(): any {
   const owner = Constants.expoConfig?.owner ?? "[account]";
   const slug = Constants.expoConfig?.slug ?? "[project]";
 
+  //
   return `https://expo.dev/accounts/${owner}/projects/${slug}`;
+}
+function guessDeploymentIdFromOrigin(): string | null {
+  // https://expo.dev/accounts/bacon/projects/expo-ai/hosting/deployments/o70t5q6t0r/requests
+  // TODO: There might be a better way to do this, using the project ID.
+  const origin = Constants.expoConfig?.extra?.router?.origin;
+  if (!origin) {
+    return null;
+  }
+  try {
+    const url = new URL(origin);
+    // Should be like: https://exai--xxxxxx.expo.app
+    // We need to extract the `xxxxxx` part if the URL matches `[\w\d]--([])`.
+    return url.hostname.match(/(?:[^-]+)--([^.]+)\.expo\.app/)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+function getDeploymentUrl(): any {
+  const id = guessDeploymentIdFromOrigin();
+  if (!id) {
+    return getBestDashboardUrl() + "/hosting/deployments";
+  }
+  return (
+    getBestDashboardUrl() +
+    "/hosting/deployments/" +
+    guessDeploymentIdFromOrigin() +
+    "/requests"
+  );
 }
 
 export default function DebugRoute() {
@@ -56,7 +85,9 @@ export default function DebugRoute() {
           title="Server"
           footer="Call a React server action from your app to test the connection."
         >
-          <Form.Link href={getBestDashboardUrl()}>Dashboard</Form.Link>
+          <Form.Link target="_blank" href={getDeploymentUrl()}>
+            Dashboard
+          </Form.Link>
 
           <Form.Text
             systemImage={"bolt.fill"}
