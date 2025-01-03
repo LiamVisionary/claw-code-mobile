@@ -23,6 +23,7 @@ export async function onSubmit(message: string) {
   let textStream: undefined | ReturnType<typeof createStreamableValue<string>>;
   let textNode: undefined | React.ReactNode;
   // const headers = await unstable_headers();
+  // https://sdk.vercel.ai/docs/reference/ai-sdk-rsc/stream-ui
   const result = await streamUI({
     model: xai("grok-beta"),
     // system: `
