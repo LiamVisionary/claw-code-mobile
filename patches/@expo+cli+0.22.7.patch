@@ -1,3 +1,17 @@
+diff --git a/node_modules/@expo/cli/build/metro-require/require.js b/node_modules/@expo/cli/build/metro-require/require.js
+index e74d4f3..61ae178 100644
+--- a/node_modules/@expo/cli/build/metro-require/require.js
++++ b/node_modules/@expo/cli/build/metro-require/require.js
+@@ -2,7 +2,8 @@ global.__r = metroRequire;
+ global[`${__METRO_GLOBAL_PREFIX__}__d`] = define;
+ global.__c = clear;
+ global.__registerSegment = registerSegment;
+-var modules = clear();
++global.EXPO_SSR_MODULES = global.EXPO_SSR_MODULES || clear();
++var modules = global.EXPO_SSR_MODULES;
+ const EMPTY = {};
+ const CYCLE_DETECTED = {};
+ const { hasOwnProperty  } = {};
 diff --git a/node_modules/@expo/cli/build/src/export/embed/exportServer.js b/node_modules/@expo/cli/build/src/export/embed/exportServer.js
 index c57876f..759fc18 100644
 --- a/node_modules/@expo/cli/build/src/export/embed/exportServer.js

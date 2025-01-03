@@ -84,17 +84,17 @@ You are a chatbot assistant that can help with a variety of tasks.`,
 
       if (done) {
         textStream.done();
-        // aiState.done({
-        //   ...aiState.get(),
-        //   messages: [
-        //     ...aiState.get().messages,
-        //     {
-        //       id: nanoid(),
-        //       role: "assistant",
-        //       content,
-        //     },
-        //   ],
-        // });
+        aiState.done({
+          ...aiState.get(),
+          messages: [
+            ...aiState.get().messages,
+            {
+              id: nanoid(),
+              role: "assistant",
+              content,
+            },
+          ],
+        });
       } else {
         textStream.update(delta);
       }
@@ -125,16 +125,16 @@ You are a chatbot assistant that can help with a variety of tasks.`,
           const weatherInfo = await getWeatherAsync(city);
 
           // Update the final AI state.
-          aiState.done([
-            ...aiState.get(),
-            {
-              role: "function",
-              name: "get_weather",
-              // Content can be any string to provide context to the LLM in the rest of the conversation.
-              // content: '',
-              content: JSON.stringify(weatherInfo.current.feelslike_f),
-            },
-          ]);
+          // aiState.done([
+          //   ...aiState.get(),
+          //   {
+          //     role: "function",
+          //     name: "get_weather",
+          //     // Content can be any string to provide context to the LLM in the rest of the conversation.
+          //     // content: '',
+          //     content: JSON.stringify(weatherInfo.current.feelslike_f),
+          //   },
+          // ]);
 
           // Return the weather card to the client.
           return <WeatherCard city={city} data={weatherInfo} />;
