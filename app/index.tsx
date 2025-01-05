@@ -2,13 +2,21 @@
 
 import { renderRoot } from "@/actions/render-root";
 import { ChatToolbarInner } from "@/components/chat-toolbar";
+import { router } from "expo-router";
 // import { ChatUI } from "@/components/chatui";
-import React from "react";
+import React, { useEffect } from "react";
 import { ActivityIndicator, View } from "react-native";
 
 export { ErrorBoundary } from "expo-router";
 
 export default function Index() {
+  // useEffect(() => {
+
+  //   setTimeout(() => {
+  //     router.push("/movie/123")
+  //   }, 1)
+  // }, []);
+
   return <React.Suspense fallback={<Loading />}>{renderRoot()}</React.Suspense>;
 }
 

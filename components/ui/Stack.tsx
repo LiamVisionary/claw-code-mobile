@@ -1,9 +1,9 @@
-// import { Stack as NativeStack } from "expo-router";
+import { Stack as NativeStack } from "expo-router";
 import React from "react";
 import { NativeStackNavigationOptions } from "@react-navigation/native-stack";
 
 // Better transitions on web, no changes on native.
-import NativeStack from "@/components/layout/modalNavigator";
+// import NativeStack from "@/components/layout/modalNavigator";
 
 // These are the default stack options for iOS, they disable on other platforms.
 const DEFAULT_STACK_HEADER: NativeStackNavigationOptions =

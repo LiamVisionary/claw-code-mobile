@@ -1,5 +1,6 @@
 import { DarkTheme, ThemeProvider } from "@react-navigation/native";
-import { Stack, Link } from "expo-router";
+import { Link } from "expo-router";
+import Stack from "@/components/ui/Stack";
 
 export const unstable_settings = {
   initialRouteName: "index",
@@ -13,11 +14,17 @@ export default function Layout() {
       <Stack
         screenOptions={{
           title: "Expo xAI",
+          headerTransparent: false,
         }}
       >
         <Stack.Screen
           name="index"
           options={{
+            headerLeft: () => (
+              <Link href="/movie/402431" style={{ color: "black" }}>
+                Debug
+              </Link>
+            ),
             headerRight: () => (
               <Link href="/_debug" style={{ color: "black" }}>
                 Debug
@@ -29,6 +36,14 @@ export default function Layout() {
           name="_debug"
           options={{
             presentation: "modal",
+          }}
+        />
+        <Stack.Screen
+          name="movie"
+          sheet
+          options={{
+            presentation: "modal",
+            headerShown: false,
           }}
         />
       </Stack>

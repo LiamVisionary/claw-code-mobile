@@ -9,13 +9,14 @@ import { useAIState, useUIState } from "ai/rsc";
 import { useId } from "react";
 import { Suggestions } from "@/components/suggestions";
 import { AssistantMessage } from "../assistant-message";
+import { router } from "expo-router";
 
 export function MovieTouchable({
   movie,
   children,
   style,
 }: {
-  movie: { title: string; poster_path: string };
+  movie: { id: string | number; title: string; poster_path: string };
   children: React.ReactNode;
   style?: ViewStyle;
 }) {
@@ -30,6 +31,9 @@ export function MovieTouchable({
       delayLongPress={1000}
       style={style}
       onPress={() => {
+        router.push("/movie/" + movie.id);
+      }}
+      onLongPress={() => {
         // console.log('>>>', aiState);
         // Insert a new message into the AI state.
         const info = {
