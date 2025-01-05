@@ -1,54 +1,50 @@
 import { IconSymbol, IconSymbolName } from "@/components/ui/IconSymbol";
 import * as AppleColors from "@bacons/apple-colors";
-import { Href, Link as RouterLink, LinkProps } from "expo-router";
+import { Href, Link as RouterLink, LinkProps, Stack } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import React from "react";
 import { forwardRef } from "react";
 import {
   OpaqueColorValue,
   Text as RNText,
+  ScrollViewProps,
+  StyleProp,
   TextProps,
   TextStyle,
   TouchableHighlight,
   View,
   ViewProps,
+  StyleSheet,
   ViewStyle,
 } from "react-native";
+import { BodyScrollView } from "./BodyScrollView";
+import { HeaderButton } from "./Header";
 
-const ListItemPaddingContext = React.createContext<
-  | [
-      // top, left, bottom, right
-      number,
-      number,
-      number,
-      number
-    ]
-  | undefined
->(undefined);
-
-export function EnsurePadding({ children }: { children: React.ReactNode }) {
-  const c = React.useContext(ListItemPaddingContext);
-  if (!c) {
-    const v = 11;
-    const h = 20;
-    const padding = [v, h, v, h] as const;
-    return (
-      <ListItemPaddingContext.Provider value={padding}>
-        <View
-          style={{
-            paddingTop: padding[0],
-            paddingLeft: padding[1],
-            paddingBottom: padding[2],
-            paddingRight: padding[3],
-          }}
-        >
-          {children}
-        </View>
-      </ListItemPaddingContext.Provider>
-    );
+export const List = forwardRef<
+  any,
+  ScrollViewProps & {
+    /** Set the Expo Router `<Stack />` title when mounted. */
+    navigationTitle?: string;
   }
-  return <>{children}</>;
-}
+>(({ contentContainerStyle, ...props }, ref) => {
+  return (
+    <>
+      {props.navigationTitle && (
+        <Stack.Screen options={{ title: props.navigationTitle }} />
+      )}
+      <BodyScrollView
+        contentContainerStyle={mergedStyleProp(
+          {
+            padding: 16,
+            gap: 24,
+          },
+          contentContainerStyle
+        )}
+        {...props}
+      />
+    </>
+  );
+});
 
 export function HStack(props: ViewProps) {
   return (
@@ -68,6 +64,13 @@ export function HStack(props: ViewProps) {
 
 const minItemHeight = 20;
 
+const styles = StyleSheet.create({
+  itemPadding: {
+    paddingVertical: 11,
+    paddingHorizontal: 20,
+  },
+});
+
 export const FormItem = forwardRef<
   typeof TouchableHighlight,
   Pick<ViewProps, "children"> & { href?: Href<any>; onPress?: () => void }
@@ -75,9 +78,9 @@ export const FormItem = forwardRef<
   if (href == null) {
     if (onPress == null) {
       return (
-        <EnsurePadding>
+        <View style={styles.itemPadding}>
           <HStack style={{ minHeight: minItemHeight }}>{children}</HStack>
-        </EnsurePadding>
+        </View>
       );
     }
     return (
@@ -86,9 +89,9 @@ export const FormItem = forwardRef<
         underlayColor={AppleColors.systemGray4}
         onPress={onPress}
       >
-        <EnsurePadding>
+        <View style={styles.itemPadding}>
           <HStack style={{ minHeight: minItemHeight }}>{children}</HStack>
-        </EnsurePadding>
+        </View>
       </TouchableHighlight>
     );
   }
@@ -96,9 +99,9 @@ export const FormItem = forwardRef<
   return (
     <Link asChild href={href} onPress={onPress}>
       <TouchableHighlight ref={ref} underlayColor={AppleColors.systemGray4}>
-        <EnsurePadding>
+        <View style={styles.itemPadding}>
           <HStack style={{ minHeight: minItemHeight }}>{children}</HStack>
-        </EnsurePadding>
+        </View>
       </TouchableHighlight>
     </Link>
   );
@@ -127,14 +130,21 @@ export const Text = React.forwardRef<
     hint?: React.ReactNode;
     /** Adds a prefix SF Symbol image to the left of the text */
     systemImage?: SystemImageProps;
+
+    bold?: boolean;
   }
->((props, ref) => {
+>(({ bold, ...props }, ref) => {
+  const font: TextStyle = {
+    ...FormFont.default,
+    fontWeight: bold ? "600" : "normal",
+  };
+
   return (
     <RNText
       dynamicTypeRamp="body"
       {...props}
       ref={ref}
-      style={mergedStyles(FormFont.default, props)}
+      style={mergedStyleProp(font, props.style)}
     />
   );
 });
@@ -146,14 +156,69 @@ export const Link = React.forwardRef<
     hint?: React.ReactNode;
     /** Adds a prefix SF Symbol image to the left of the text */
     systemImage?: SystemImageProps;
+
+    // TODO: Automatically detect this somehow.
+    /** Is the link inside a header. */
+    headerRight?: boolean;
+
+    bold?: boolean;
   }
->((props, ref) => {
+>(({ bold, children, headerRight, ...props }, ref) => {
+  const font: TextStyle = {
+    ...FormFont.default,
+    fontWeight: bold ? "600" : "normal",
+  };
+
+  const resolvedChildren = (() => {
+    if (headerRight) {
+      if (process.env.EXPO_OS === "web") {
+        return <div style={{ paddingRight: 16 }}>{children}</div>;
+      }
+      const wrappedTextChildren = React.Children.map(children, (child) => {
+        // Filter out empty children
+        if (!child) {
+          return null;
+        }
+        if (typeof child === "string") {
+          return (
+            <RNText
+              style={mergedStyleProp<TextStyle>(
+                { ...font, color: AppleColors.link },
+                props.style
+              )}
+            >
+              {child}
+            </RNText>
+          );
+        }
+        return child;
+      });
+
+      return (
+        <HeaderButton
+          pressOpacity={0.7}
+          style={{
+            // Offset on the side so the margins line up. Unclear how to handle when this is used in headerLeft.
+            // We should automatically detect it somehow.
+            marginRight: -8,
+          }}
+        >
+          {wrappedTextChildren}
+        </HeaderButton>
+      );
+    }
+    return children;
+  })();
+
   return (
     <RouterLink
       dynamicTypeRamp="body"
       {...props}
+      asChild={
+        props.asChild ?? (process.env.EXPO_OS === "web" ? false : headerRight)
+      }
       ref={ref}
-      style={mergedStyles(FormFont.default, props)}
+      style={mergedStyleProp<TextStyle>(font, props.style)}
       onPress={
         process.env.EXPO_OS === "web"
           ? props.onPress
@@ -175,6 +240,7 @@ export const Link = React.forwardRef<
               }
             }
       }
+      children={resolvedChildren}
     />
   );
 });
@@ -207,178 +273,181 @@ export function Section({
   title,
   footer,
   ...props
-}: ViewProps & { title?: string; footer?: string | React.ReactNode }) {
+}: ViewProps & {
+  title?: string | React.ReactNode;
+  footer?: string | React.ReactNode;
+}) {
   const childrenWithSeparator = React.Children.map(children, (child, index) => {
-    if (React.isValidElement(child)) {
-      const isLastChild = index === React.Children.count(children) - 1;
+    if (!React.isValidElement(child)) {
+      return child;
+    }
+    const isLastChild = index === React.Children.count(children) - 1;
 
-      // Extract onPress from child
-      const originalOnPress = child.props.onPress;
-      let wrapsFormItem = false;
-      // If child is type of Text, add default props
-      if (child.type === RNText || child.type === Text) {
-        child = React.cloneElement(child, {
-          dynamicTypeRamp: "body",
-          numberOfLines: 1,
-          adjustsFontSizeToFit: true,
-          ...child.props,
-          onPress: undefined,
-          style: [FormFont.default, child.props.style],
+    // Extract onPress from child
+    const originalOnPress = child.props.onPress;
+    let wrapsFormItem = false;
+    // If child is type of Text, add default props
+    if (child.type === RNText || child.type === Text) {
+      child = React.cloneElement(child, {
+        dynamicTypeRamp: "body",
+        numberOfLines: 1,
+        adjustsFontSizeToFit: true,
+        ...child.props,
+        onPress: undefined,
+        style: [FormFont.default, child.props.style],
+      });
+
+      const hintView = (() => {
+        if (!child.props.hint) {
+          return null;
+        }
+
+        return React.Children.map(child.props.hint, (child) => {
+          // Filter out empty children
+          if (!child) {
+            return null;
+          }
+          if (typeof child === "string") {
+            return (
+              <RNText dynamicTypeRamp="body" style={FormFont.secondary}>
+                {child}
+              </RNText>
+            );
+          }
+          return child;
         });
+      })();
 
-        const hintView = (() => {
-          if (!child.props.hint) {
+      const symbolView = (() => {
+        if (!child.props.systemImage) {
+          return null;
+        }
+
+        const symbolProps =
+          typeof child.props.systemImage === "string"
+            ? { name: child.props.systemImage }
+            : child.props.systemImage;
+
+        return (
+          <IconSymbol
+            name={symbolProps.name}
+            size={symbolProps.size ?? 28}
+            style={{ marginRight: 16 }}
+            color={
+              symbolProps.color ??
+              extractStyle(child.props.style, "color") ??
+              AppleColors.label
+            }
+          />
+        );
+      })();
+
+      if (hintView || symbolView) {
+        child = (
+          <HStack>
+            {symbolView}
+            {child}
+            {hintView && <View style={{ flex: 1 }} />}
+            {hintView}
+          </HStack>
+        );
+      }
+    } else if (child.type === RouterLink || child.type === Link) {
+      wrapsFormItem = true;
+
+      const wrappedTextChildren = React.Children.map(
+        child.props.children,
+        (linkChild) => {
+          // Filter out empty children
+          if (!linkChild) {
             return null;
           }
+          if (typeof linkChild === "string") {
+            return (
+              <RNText
+                dynamicTypeRamp="body"
+                style={mergedStyles(FormFont.default, child.props)}
+              >
+                {linkChild}
+              </RNText>
+            );
+          }
+          return linkChild;
+        }
+      );
 
-          return React.Children.map(child.props.hint, (child) => {
-            // Filter out empty children
-            if (!child) {
-              return null;
-            }
-            if (typeof child === "string") {
-              return (
-                <RNText dynamicTypeRamp="body" style={FormFont.secondary}>
-                  {child}
-                </RNText>
-              );
-            }
-            return child;
-          });
-        })();
+      const hintView = (() => {
+        if (!child.props.hint) {
+          return null;
+        }
 
-        const symbolView = (() => {
-          if (!child.props.systemImage) {
+        return React.Children.map(child.props.hint, (child) => {
+          // Filter out empty children
+          if (!child) {
             return null;
           }
+          if (typeof child === "string") {
+            return <Text style={FormFont.secondary}>{child}</Text>;
+          }
+          return child;
+        });
+      })();
 
-          const symbolProps =
-            typeof child.props.systemImage === "string"
-              ? { name: child.props.systemImage }
-              : child.props.systemImage;
+      const symbolView = (() => {
+        if (!child.props.systemImage) {
+          return null;
+        }
+        const symbolProps =
+          typeof child.props.systemImage === "string"
+            ? { name: child.props.systemImage }
+            : child.props.systemImage;
 
-          return (
-            <IconSymbol
-              name={symbolProps.name}
-              size={symbolProps.size ?? 28}
-              style={{ marginRight: 16 }}
-              color={
-                symbolProps.color ??
-                extractStyle(child.props.style, "color") ??
-                AppleColors.label
-              }
-            />
-          );
-        })();
+        return (
+          <IconSymbol
+            name={symbolProps.name}
+            size={symbolProps.size ?? 28}
+            style={{ marginRight: 16 }}
+            color={
+              symbolProps.color ??
+              extractStyle(child.props.style, "color") ??
+              AppleColors.label
+            }
+          />
+        );
+      })();
 
-        if (hintView || symbolView) {
-          child = (
+      child = React.cloneElement(child, {
+        style: [FormFont.default, child.props.style],
+        dynamicTypeRamp: "body",
+        numberOfLines: 1,
+        adjustsFontSizeToFit: true,
+        asChild: true,
+        children: (
+          <FormItem>
             <HStack>
               {symbolView}
-              {child}
-              {hintView && <View style={{ flex: 1 }} />}
+              {wrappedTextChildren}
+              <View style={{ flex: 1 }} />
               {hintView}
+              <View style={{ paddingLeft: 12 }}>
+                <LinkChevronIcon href={child.props.href} />
+              </View>
             </HStack>
-          );
-        }
-      } else if (child.type === RouterLink || child.type === Link) {
-        wrapsFormItem = true;
-
-        const wrappedTextChildren = React.Children.map(
-          child.props.children,
-          (linkChild) => {
-            // Filter out empty children
-            if (!linkChild) {
-              return null;
-            }
-            if (typeof linkChild === "string") {
-              return (
-                <RNText
-                  dynamicTypeRamp="body"
-                  style={mergedStyles(FormFont.default, child.props)}
-                >
-                  {linkChild}
-                </RNText>
-              );
-            }
-            return linkChild;
-          }
-        );
-
-        const hintView = (() => {
-          if (!child.props.hint) {
-            return null;
-          }
-
-          return React.Children.map(child.props.hint, (child) => {
-            // Filter out empty children
-            if (!child) {
-              return null;
-            }
-            if (typeof child === "string") {
-              return <Text style={FormFont.secondary}>{child}</Text>;
-            }
-            return child;
-          });
-        })();
-
-        const symbolView = (() => {
-          if (!child.props.systemImage) {
-            return null;
-          }
-          const symbolProps =
-            typeof child.props.systemImage === "string"
-              ? { name: child.props.systemImage }
-              : child.props.systemImage;
-
-          return (
-            <IconSymbol
-              name={symbolProps.name}
-              size={symbolProps.size ?? 28}
-              style={{ marginRight: 16 }}
-              color={
-                symbolProps.color ??
-                extractStyle(child.props.style, "color") ??
-                AppleColors.label
-              }
-            />
-          );
-        })();
-
-        child = React.cloneElement(child, {
-          style: [FormFont.default, child.props.style],
-          dynamicTypeRamp: "body",
-          numberOfLines: 1,
-          adjustsFontSizeToFit: true,
-          asChild: true,
-          children: (
-            <FormItem>
-              <HStack>
-                {symbolView}
-                {wrappedTextChildren}
-                <View style={{ flex: 1 }} />
-                {hintView}
-                <View style={{ paddingLeft: 12 }}>
-                  <LinkChevronIcon href={child.props.href} />
-                </View>
-              </HStack>
-            </FormItem>
-          ),
-        });
-      }
-      // Ensure child is a FormItem otherwise wrap it in a FormItem
-      if (!wrapsFormItem && child.type !== FormItem) {
-        child = <FormItem onPress={originalOnPress}>{child}</FormItem>;
-      }
-
-      return (
-        <>
-          {child}
-          {!isLastChild && <Separator />}
-        </>
-      );
+          </FormItem>
+        ),
+      });
     }
-    return child;
+    // Ensure child is a FormItem otherwise wrap it in a FormItem
+    if (!wrapsFormItem && child.type !== FormItem) {
+      child = <FormItem onPress={originalOnPress}>{child}</FormItem>;
+    }
+
+    return (
+      <>
+        {child}
+        {!isLastChild && <Separator />}
+      </>
+    );
   });
 
   const contents = (
@@ -489,6 +558,17 @@ function mergedStyles(style: ViewStyle | TextStyle, props: any) {
   } else {
     return [style, props.style];
   }
+}
+export function mergedStyleProp<TStyle extends ViewStyle | TextStyle>(
+  style: TStyle,
+  styleProps?: StyleProp<TStyle> | null
+): StyleProp<TStyle> {
+  if (styleProps == null) {
+    return style;
+  } else if (Array.isArray(styleProps)) {
+    return [style, ...styleProps];
+  }
+  return [style, styleProps];
 }
 
 function extractStyle(styleProp: any, key: string) {

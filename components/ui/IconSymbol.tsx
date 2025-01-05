@@ -46,6 +46,9 @@ export function IconSymbol({
   color: string | OpaqueColorValue;
   style?: StyleProp<ViewStyle>;
   weight?: SymbolWeight;
+
+  /** iOS-only */
+  animationSpec?: import("expo-symbols").SymbolViewProps["animationSpec"];
 }) {
   return (
     <MaterialIcons
