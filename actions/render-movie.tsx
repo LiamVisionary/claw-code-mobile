@@ -22,21 +22,21 @@ export async function renderMedia(id: string, type: MediaType = "movie") {
 
       <MediaDetails id={id} type={type} />
 
-      {/* <React.Suspense fallback={<ListSkeleton />}>
+      <React.Suspense fallback={<ListSkeleton />}>
         <MediaVideos id={id} type={type} />
-      </React.Suspense> */}
+      </React.Suspense>
 
       <React.Suspense fallback={<ListSkeleton />}>
         <MediaCast id={id} type={type} />
       </React.Suspense>
 
-      {/* <React.Suspense fallback={<ListSkeleton />}>
+      <React.Suspense fallback={<ListSkeleton />}>
         <MediaCompanies id={id} type={type} />
-      </React.Suspense> */}
+      </React.Suspense>
 
-      {/* <React.Suspense fallback={<ListSkeleton />}>
+      <React.Suspense fallback={<ListSkeleton />}>
         <SimilarMedia id={id} type={type} />
-      </React.Suspense> */}
+      </React.Suspense>
     </>
   );
 }
