@@ -10,7 +10,8 @@ export type MovieEntry = {
   adult: boolean;
   backdrop_path: string;
   id: number;
-  title: string;
+  title?: string;
+  name?: string;
   original_language: string;
   original_title: string;
   overview: string;
@@ -89,14 +90,18 @@ export function MoviesCard({
   person,
   query,
   data,
+  title,
 }: {
   person?: string;
   query?: string;
+  title?: string;
   data: Pick<
     MovieEntry,
     | "id"
     | "poster_path"
+    | "media_type"
     | "title"
+    | "name"
     | "overview"
     | "vote_average"
     | "expo_placeholder"
@@ -104,7 +109,7 @@ export function MoviesCard({
 }) {
   const displayMovies = data
     .filter((item) => {
-      return item.poster_path && item.title;
+      return item.poster_path && (item.title || item.name);
     })
     .slice(
       0,
@@ -115,7 +120,9 @@ export function MoviesCard({
     <>
       <Card
         title={
-          person
+          title
+            ? title
+            : person
             ? `Movies with ${person}`
             : query
             ? `Searched '${query}'`
@@ -146,6 +153,7 @@ function MovieCard({
     MovieEntry,
     | "poster_path"
     | "title"
+    | "name"
     | "overview"
     | "vote_average"
     | "expo_placeholder"
@@ -203,7 +211,7 @@ function MovieCard({
         numberOfLines={2}
         lineBreakMode="tail"
       >
-        {movie.title}
+        {movie.title ?? movie.name}
       </Text>
       <Text
         style={{ color: Colors.gray, fontSize: 12 }}

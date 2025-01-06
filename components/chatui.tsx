@@ -11,6 +11,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AI } from "./ai-context";
 import { ChatToolbarInner } from "./chat-toolbar";
 import { KeyboardFriendlyScrollView } from "./keyboard-friendly-scrollview";
+import { MoviesCard } from "./movies/movie-card";
+import { MOCK_TRENDING_SHOWS_THIS_WEEK } from "./movies/mock-movie-data";
 
 const HEADER_HEIGHT = 0;
 
@@ -63,6 +65,8 @@ function MessagesScrollView() {
 
 export function ChatUI() {
   const { width } = useWindowDimensions();
+
+  // return <MoviesCard data={MOCK_TRENDING_SHOWS_THIS_WEEK} />;
 
   return (
     <Animated.View
