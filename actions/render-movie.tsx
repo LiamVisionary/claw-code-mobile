@@ -26,17 +26,17 @@ export async function renderMedia(id: string, type: MediaType = "movie") {
         <MediaVideos id={id} type={type} />
       </React.Suspense>
 
-      <React.Suspense fallback={<ListSkeleton />}>
+      {/* <React.Suspense fallback={<ListSkeleton />}>
         <MediaCast id={id} type={type} />
-      </React.Suspense>
+      </React.Suspense> */}
 
-      <React.Suspense fallback={<ListSkeleton />}>
+      {/* <React.Suspense fallback={<ListSkeleton />}>
         <MediaCompanies id={id} type={type} />
       </React.Suspense>
 
       <React.Suspense fallback={<ListSkeleton />}>
         <SimilarMedia id={id} type={type} />
-      </React.Suspense>
+      </React.Suspense> */}
     </>
   );
 }
@@ -138,6 +138,7 @@ function VideoCard({ video }: { video: any }) {
 }
 
 function CastCard({ person }: { person: any }) {
+  // Something is broken here when deployed to expo
   return (
     <Link href={`/movie/actor/${person.id}`} asChild>
       <TouchableBounce style={{ width: 100, marginHorizontal: 4 }}>
@@ -176,7 +177,6 @@ function CompanyCard({ company }: { company: any }) {
             uri: `https://image.tmdb.org/t/p/w200${company.logo_path}`,
           }}
           style={{ width: 80, height: 80, resizeMode: "contain" }}
-          transition={300}
         />
       )}
       <Text
