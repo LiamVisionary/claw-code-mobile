@@ -66,8 +66,7 @@ export async function onSubmit(message: string) {
         content: `\
 You are a helpful chatbot assistant. You can provide weather info and movie recommendations. 
 You have the following tools available:
-- get_trending_movies: Lists trending movies from TMDB.
-- search_movies: Search for any movie by a query string on TMDB.
+- get_media: Lists or search movies and TV shows from TMDB.
 - get_weather: Gets the weather for a city.
 `,
       },
@@ -103,9 +102,8 @@ You have the following tools available:
     },
     // Define the tools here:
     tools: {
-      get_trending_movies: {
-        description:
-          "List trending movies or TV shows today or this week from TMDB",
+      get_media: {
+        description: "List movies or TV shows today or this week from TMDB",
         parameters: z
           .object({
             time_window: z
@@ -119,60 +117,50 @@ You have the following tools available:
             generated_description: z
               .string()
               .describe("AI-generated description of the tool call"),
+            query: z
+              .string()
+              .describe(
+                "The query to use for searching movies or TV shows. Undefined if looking for trending or popular media."
+              )
+              .optional(),
           })
           .required(),
-        async *generate({ generated_description, time_window, media_type }) {
-          console.log("get_trending_movies:", {
+        async *generate({
+          generated_description,
+          time_window,
+          media_type,
+          query,
+        }) {
+          console.log("get_media:", {
             time_window,
             media_type,
             generated_description,
+            query,
           });
           yield <MoviesSkeleton />;
 
-          const url = `https://api.themoviedb.org/3/trending/${media_type}/${time_window}?api_key=${process.env.TMDB_API_KEY}`;
+          let url: string;
+          if (query) {
+            url = `https://api.themoviedb.org/3/search/${media_type}?api_key=${
+              process.env.TMDB_API_KEY
+            }&query=${encodeURIComponent(query)}`;
+          } else {
+            url = `https://api.themoviedb.org/3/trending/${media_type}/${time_window}?api_key=${process.env.TMDB_API_KEY}`;
+          }
+
           const response = await fetch(url);
           if (!response.ok) {
             throw new Error("Failed to fetch trending movies");
           }
           const data = await response.json();
-          const movies = data.results;
+          const movies = data.results.map((media: any) => {
+            if (!media.media_type) {
+              media.media_type = media_type;
+            }
+            return media;
+          });
 
           console.log("results:", movies);
-          return <MoviesCard data={movies} title={generated_description} />;
-        },
-      },
-      search_movies: {
-        description: "Search for movies by a query string",
-        parameters: z
-          .object({
-            query: z.string().describe("The query to use for searching movies"),
-            media_type: z
-              .enum(["tv", "movie"])
-              .describe("type of media to search for")
-              .default("movie"),
-            generated_description: z
-              .string()
-              .describe("AI-generated description of the tool call"),
-          })
-          .required(),
-        async *generate({ query, media_type, generated_description }) {
-          console.log("search_movies:", {
-            query,
-            media_type,
-            generated_description,
-          });
-          yield <MoviesSkeleton />;
-
-          const url = `https://api.themoviedb.org/3/search/${media_type}?api_key=${
-            process.env.TMDB_API_KEY
-          }&query=${encodeURIComponent(query)}`;
-          const response = await fetch(url);
-          if (!response.ok) {
-            throw new Error("Failed to fetch searched movies");
-          }
-          const data = await response.json();
-          const movies = data.results;
-
           return <MoviesCard data={movies} title={generated_description} />;
         },
       },

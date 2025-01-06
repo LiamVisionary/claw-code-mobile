@@ -21,7 +21,7 @@ export default function Layout() {
           name="index"
           options={{
             headerLeft: () => (
-              <Link href="/movie/402431" style={{ color: "black" }}>
+              <Link href="/movie/513?media_type=tv" style={{ color: "black" }}>
                 Debug
               </Link>
             ),
@@ -35,6 +35,10 @@ export default function Layout() {
         <Stack.Screen
           name="_debug"
           options={{
+            headerTransparent: false,
+            headerLargeStyle: {
+              backgroundColor: undefined,
+            },
             presentation: "modal",
           }}
         />

@@ -10,13 +10,17 @@ import { useId } from "react";
 import { Suggestions } from "@/components/suggestions";
 import { AssistantMessage } from "../assistant-message";
 import { router } from "expo-router";
+import type { MovieEntry } from "./movie-card";
 
 export function MovieTouchable({
   movie,
   children,
   style,
 }: {
-  movie: { id: string | number; title: string; poster_path: string };
+  movie: Pick<
+    MovieEntry,
+    "poster_path" | "title" | "name" | "media_type" | "id"
+  >;
   children: React.ReactNode;
   style?: ViewStyle;
 }) {
@@ -24,6 +28,7 @@ export function MovieTouchable({
   const [, setMessages] = useUIState<typeof AI>();
 
   const id = useId();
+  const name = movie.title ?? movie.name;
 
   return (
     <TouchableOpacity
@@ -31,14 +36,18 @@ export function MovieTouchable({
       delayLongPress={1000}
       style={style}
       onPress={() => {
-        router.push("/movie/" + movie.id);
+        console.log("Push:", movie.id, movie.media_type);
+        router.push({
+          pathname: "/movie/[id]",
+          params: { id: movie.id, media_type: movie.media_type },
+        });
       }}
       onLongPress={() => {
         // console.log('>>>', aiState);
         // Insert a new message into the AI state.
         const info = {
           role: "assistant" as const,
-          content: `[User has selected movie "${movie.title}" with attachment image "${movie.poster_path}"]`,
+          content: `[User has selected ${movie.media_type} "${name}" with attachment image "${movie.poster_path}"]`,
 
           // Identifier of this UI component, so we don't insert it many times.
           // id,
@@ -60,13 +69,13 @@ export function MovieTouchable({
           {
             display: (
               <View key={String(id)} style={{ gap: 8 }}>
-                <AssistantMessage>{`[Selected movie "${movie.title}"]`}</AssistantMessage>
+                <AssistantMessage>{`[Selected ${movie.media_type} "${name}"]`}</AssistantMessage>
                 <View style={{ paddingHorizontal: 16 }}>
                   <Suggestions
                     suggestions={[
                       [
                         `Create an event`,
-                        `Remind me to watch the movie ${movie.title} this weekend`,
+                        `Remind me to watch the ${movie.media_type} ${name} this weekend`,
                       ],
                       `See showtimes`,
                     ]}

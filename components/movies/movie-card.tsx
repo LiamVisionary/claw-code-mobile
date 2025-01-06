@@ -154,6 +154,7 @@ function MovieCard({
     | "poster_path"
     | "title"
     | "name"
+    | "media_type"
     | "overview"
     | "vote_average"
     | "expo_placeholder"

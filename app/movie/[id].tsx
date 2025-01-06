@@ -7,9 +7,12 @@ import * as Form from "@/components/ui/Form";
 export { ErrorBoundary } from "expo-router";
 
 export default function Movie() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, media_type = "movie" } = useLocalSearchParams<{
+    id: string;
+    media_type?: "movie" | "tv";
+  }>();
 
-  const screen = useMemo(() => renderMedia(id, "movie"), [id]);
+  const screen = useMemo(() => renderMedia(id, media_type), [id]);
 
   // return (
   //   <Form.List>
