@@ -7,7 +7,7 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "expoai",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/images/icon.png",
@@ -36,7 +36,7 @@
       [
         "expo-router",
         {
-          "origin": "https://exai--7jkdg8fq3r.expo.app"
+          "origin": "https://exai--9z6bpl3xi6.expo.app"
         }
       ],
       "expo-font"
