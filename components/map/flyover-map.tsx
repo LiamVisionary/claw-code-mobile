@@ -2,8 +2,7 @@
 
 import React, { useCallback, useEffect, useRef } from "react";
 import { AppState, Image, StyleSheet } from "react-native";
-import { Marker, UrlTile } from "react-native-maps";
-import { MapView } from "./map-view";
+import { MapView, Marker, UrlTile } from "./map-view";
 
 export const FlyoverMap = ({
   center,
@@ -29,6 +28,7 @@ export const FlyoverMap = ({
   const speed = 0.2;
 
   const animateCamera = useCallback(() => {
+    if (process.env.EXPO_OS === "web") return;
     if (!mapRef.current) return;
 
     mapRef.current.setCamera({
@@ -57,6 +57,7 @@ export const FlyoverMap = ({
 
   useEffect(() => {
     if (mapRef.current && previousCenter.current !== center) {
+      console.log("animateCamera.1", center);
       clearInterval(interval.current);
       clearTimeout(animatingRef.current);
       previousCenter.current = center;
@@ -95,11 +96,11 @@ export const FlyoverMap = ({
       userInterfaceStyle="dark"
       pitchEnabled={false}
       rotateEnabled={false}
-      showsBuildings={false}
-      showsIndoors={false}
+      // showsBuildings={false}
+      // showsIndoors={false}
       showsIndoorLevelPicker={false}
       showsMyLocationButton={false}
-      showsPointsOfInterest={false}
+      // showsPointsOfInterest={false}
       zoomEnabled={false}
       scrollEnabled={false}
       initialRegion={{

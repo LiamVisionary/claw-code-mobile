@@ -70,7 +70,7 @@ function MessagesScrollView() {
 export function ChatUI() {
   const { width } = useWindowDimensions();
 
-  return <MapCard city="Vegas" data={MOCK_LOCATION_DATA_VEGAS.results} />;
+  // return <MapCard city="Vegas" data={MOCK_LOCATION_DATA_VEGAS.results} />;
   // return <MoviesCard data={MOCK_TRENDING_SHOWS_THIS_WEEK} />;
 
   return (

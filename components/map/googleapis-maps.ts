@@ -50,7 +50,7 @@ export type GooglePlacesResponse = {
 export async function getPlacesInfo(
   city: string
 ): Promise<GooglePlacesResponse["results"]> {
-  return MOCK_LOCATION_DATA_VEGAS.results;
+  //   return MOCK_LOCATION_DATA_VEGAS.results;
   if (process.env.EXPO_PUBLIC_USE_DEBUG_FIXTURES) {
     return MOCK_LOCATION_DATA_VEGAS.results;
   }

@@ -20,40 +20,22 @@ export function MapCard({
   data: PointOfInterestData[];
 }) {
   return (
-    <>
-      <Card title={`Results for ${city}`} style={{ padding: 0, flex: 1 }}>
-        <FlyoverCard
-          locations={data
-            .sort((a, b) => {
-              return b.user_ratings_total - a.user_ratings_total;
-            })
-
-            .map((point) => ({
-              icon: point.icon,
-              rating: point.rating,
-              // photo: point.photos?.[0]?.photo_reference,
-              title: point.name,
-              latitude: point.geometry.location.lat,
-              longitude: point.geometry.location.lng,
-            }))}
-        />
-        {/* <ChatMap
-        style={{ flex: 1, height: 360, maxHeight: 360 }}
-        pins={data
+    <Card title={`Results for ${city}`} style={{ padding: 0, flex: 1 }}>
+      <FlyoverCard
+        locations={data
           .sort((a, b) => {
             return b.user_ratings_total - a.user_ratings_total;
           })
-          .slice(0, 2)
-          .map((point) => ({
-            lat: point.geometry.location.lat,
-            lon: point.geometry.location.lng,
-            title: point.name,
-          }))}
-      /> */}
-      </Card>
-    </>
-    // <SubtleScaleAndFadeIn>
 
-    // </SubtleScaleAndFadeIn>
+          .map((point) => ({
+            icon: point.icon,
+            rating: point.rating,
+            // photo: point.photos?.[0]?.photo_reference,
+            title: point.name,
+            latitude: point.geometry.location.lat,
+            longitude: point.geometry.location.lng,
+          }))}
+      />
+    </Card>
   );
 }

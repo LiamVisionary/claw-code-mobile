@@ -105,8 +105,6 @@ You have the following tools available:
           })
           .required(),
         async *generate({ poi }) {
-          // const codeJsx = getColoredFunctionJsx('queryGoogleMaps', poi);
-
           console.log("city", poi);
           // Show a spinner on the client while we wait for the response.
           yield <MapSkeleton />;
