@@ -1,3 +1,5 @@
+"use client";
+
 import Markdown from "react-native-markdown-display";
 
 export default function MarkdownText(props) {

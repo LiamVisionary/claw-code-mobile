@@ -2,7 +2,7 @@
 
 import { useActions, useUIState } from "ai/rsc";
 import React from "react";
-import { Image, View, useWindowDimensions } from "react-native";
+import { Image, Text, View, useWindowDimensions } from "react-native";
 
 import Animated from "react-native-reanimated";
 
@@ -25,7 +25,7 @@ function MessagesScrollView() {
   const { top } = useSafeAreaInsets();
 
   const textInputHeight = 8 + 36;
-
+  
   return (
     <>
       <KeyboardFriendlyScrollView
@@ -41,6 +41,7 @@ function MessagesScrollView() {
           flex: messages.length ? undefined : 1,
         }}
       >
+
         {
           // View messages in UI state
           messages.map((message) => (
@@ -72,7 +73,7 @@ export function ChatUI() {
 
   // return <MapCard city="Vegas" data={MOCK_LOCATION_DATA_VEGAS.results} />;
   // return <MoviesCard data={MOCK_TRENDING_SHOWS_THIS_WEEK} />;
-
+ 
   return (
     <Animated.View
       style={[

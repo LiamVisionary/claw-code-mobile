@@ -55,6 +55,10 @@ function getDeploymentUrl(): any {
   );
 }
 
+const HERMES_RUNTIME = global.HermesInternal?.getRuntimeProperties?.() ?? {};
+const HERMES_VERSION = HERMES_RUNTIME['OSS Release Version'];
+const isStaticHermes = HERMES_RUNTIME['Static Hermes'];
+
 export default function DebugRoute() {
   const [error, setError] = useState<Error | null>(null);
   const [headers, setHeaders] = useState<Record<
@@ -143,6 +147,13 @@ export default function DebugRoute() {
             <Form.Text>{JSON.stringify(headers, null, 2)}</Form.Text>
           </View>
         </Form.Section>
+
+        {HERMES_VERSION && (
+            <Form.Section title="Hermes">
+              <Form.Text hint={HERMES_VERSION}>Version</Form.Text>
+              <Form.Text hint={String(isStaticHermes)}>Static Hermes</Form.Text>
+          </Form.Section>
+        )}
 
         <Form.Section title="Manifest">
           <View>

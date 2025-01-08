@@ -27,6 +27,8 @@ if (!process.env.OPENAI_API_KEY) {
 import { MoviesCard, MoviesSkeleton } from "./movies/movie-card";
 import { MapCard, MapSkeleton } from "./map/map-card";
 import { getPlacesInfo } from "./map/googleapis-maps";
+import { unstable_headers } from "expo-router/rsc/headers";
+import MarkdownText from "./markdown-text";
 
 export async function onSubmit(message: string) {
   "use server";
@@ -45,8 +47,7 @@ export async function onSubmit(message: string) {
     ],
   });
 
-  let textStream: undefined | ReturnType<typeof createStreamableValue<string>>;
-  let textNode: undefined | React.ReactNode;
+  const headers = await unstable_headers();
 
   // Chat streaming with GPT-3.5-turbo
   const result = await streamUI({
@@ -59,6 +60,12 @@ You are a helpful chatbot assistant. You can provide weather info and movie reco
 You have the following tools available:
 - get_media: Lists or search movies and TV shows from TMDB.
 - get_weather: Gets the weather for a city.
+
+User info:
+- city: ${headers.get("eas-ip-city") ?? (__DEV__ ? "Austin" : "unknown")}
+- country: ${headers.get("eas-ip-country") ?? (__DEV__ ? "US" : "unknown")}
+- region: ${headers.get("eas-ip-region") ?? (__DEV__ ? "TX" : "unknown")}
+- device platform: ${headers.get("expo-platform") ?? "unknown"}
 `,
       },
       ...aiState.get().messages.map((message: any) => ({
@@ -67,14 +74,8 @@ You have the following tools available:
         name: message.name,
       })),
     ],
-    text: ({ content, done, delta }) => {
-      if (!textStream) {
-        textStream = createStreamableValue("");
-        textNode = <BotMessage content={textStream.value} />;
-      }
-
+    text: ({ content, done }) => {
       if (done) {
-        textStream.done();
         aiState.done({
           ...aiState.get(),
           messages: [
@@ -86,10 +87,8 @@ You have the following tools available:
             },
           ],
         });
-      } else {
-        textStream.update(delta);
       }
-      return textNode;
+      return <MarkdownText>{content}</MarkdownText>;
     },
     // Define the tools here:
     tools: {
