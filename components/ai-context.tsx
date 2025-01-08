@@ -1,16 +1,3 @@
-if (!process.env.XAI_API_KEY) {
-  throw new Error("XAI_API_KEY is required");
-}
-if (!process.env.OPENAI_API_KEY) {
-  throw new Error("OPENAI_API_KEY is required");
-}
-
-// const xai = createOpenAI({
-//   name: "xai",
-//   baseURL: "https://api.x.ai/v1",
-//   apiKey: process.env.XAI_API_KEY ?? "",
-// });
-
 // import { unstable_headers } from "expo-router/rsc/headers";
 
 import type { CoreMessage } from "ai";
@@ -23,12 +10,11 @@ import { z } from "zod";
 import { getWeatherAsync, WeatherCard } from "./weather";
 import { openai } from "@ai-sdk/openai";
 
-// -- MOVIES UTILS ----------------------------------------------------------
-
-// Skeleton and display components
-import { MoviesCard, MoviesSkeleton } from "./movies/movie-card";
-
-// --------------------------------------------------------------------------
+// const xai = createOpenAI({
+//   name: "xai",
+//   baseURL: "https://api.x.ai/v1",
+//   apiKey: process.env.XAI_API_KEY ?? "",
+// });
 
 if (!process.env.XAI_API_KEY) {
   throw new Error("XAI_API_KEY is required");
@@ -36,6 +22,11 @@ if (!process.env.XAI_API_KEY) {
 if (!process.env.OPENAI_API_KEY) {
   throw new Error("OPENAI_API_KEY is required");
 }
+
+// Skeleton and display components
+import { MoviesCard, MoviesSkeleton } from "./movies/movie-card";
+import { MapCard, MapSkeleton } from "./map/map-card";
+import { getPlacesInfo } from "./map/googleapis-maps";
 
 export async function onSubmit(message: string) {
   "use server";
@@ -102,6 +93,57 @@ You have the following tools available:
     },
     // Define the tools here:
     tools: {
+      get_points_of_interest: {
+        description: "Get things to do for a point of interest or city",
+        parameters: z
+          .object({
+            poi: z
+              .string()
+              .describe(
+                'query to send to the Google Places API. e.g. "things to do in Amsterdam" or "casinos and hotels in Las Vegas"'
+              ),
+          })
+          .required(),
+        async *generate({ poi }) {
+          // const codeJsx = getColoredFunctionJsx('queryGoogleMaps', poi);
+
+          console.log("city", poi);
+          // Show a spinner on the client while we wait for the response.
+          yield <MapSkeleton />;
+
+          let pointsOfInterest = await getPlacesInfo(poi);
+
+          function distance(lat1, lon1, lat2, lon2) {
+            var p = 0.017453292519943295; // Math.PI / 180
+            var c = Math.cos;
+            var a =
+              0.5 -
+              c((lat2 - lat1) * p) / 2 +
+              (c(lat1 * p) * c(lat2 * p) * (1 - c((lon2 - lon1) * p))) / 2;
+
+            return 12742 * Math.asin(Math.sqrt(a)); // 2 * R; R = 6371 km
+          }
+
+          pointsOfInterest.map((poi) => {
+            poi.distance = distance(
+              pointsOfInterest[0].geometry.location.lat,
+              pointsOfInterest[0].geometry.location.lng,
+              poi.geometry.location.lat,
+              poi.geometry.location.lng
+            );
+            return poi;
+          });
+
+          // Sort by distance to first point of interest.
+          pointsOfInterest = pointsOfInterest.sort(
+            (a, b) => a.distance - b.distance
+          );
+
+          // Return the points of interest card to the client.
+          return <MapCard city={poi} data={pointsOfInterest} />;
+        },
+      },
+
       get_media: {
         description: "List movies or TV shows today or this week from TMDB",
         parameters: z

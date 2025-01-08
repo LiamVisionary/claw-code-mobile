@@ -1,6 +1,5 @@
 // Use CSS to prevent blocking the suspense loading state with a skeleton loader.
 import React from "react";
-import { useColorScheme } from "react-native";
 
 export const SkeletonBox = ({
   width,
@@ -28,6 +27,9 @@ export const SkeletonBox = ({
     />
   );
 };
+
+import * as AC from "@bacons/apple-colors";
+
 const Skeleton = ({
   style,
   delay,
@@ -37,12 +39,21 @@ const Skeleton = ({
   delay?: number;
   dark?: boolean;
 } = {}) => {
-  const dark = inputDark ?? useColorScheme() !== "light";
+  const dark =
+    inputDark != null
+      ? {
+          bg: inputDark ? "#111111" : "#e0e0e0",
+          low: inputDark ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.4)",
+        }
+      : {
+          bg: AC.secondarySystemBackground,
+          low: AC.tertiaryLabel,
+        };
 
   return (
     <div
       style={{
-        background: dark ? "#111111" : "#e0e0e0",
+        background: dark.bg,
         position: "relative",
         overflow: "hidden",
         ...(style ?? {}),
@@ -55,9 +66,7 @@ const Skeleton = ({
           left: 0,
           right: 0,
           bottom: 0,
-          background: `linear-gradient(90deg, transparent, ${
-            dark ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.4)"
-          }, transparent)`,
+          background: `linear-gradient(90deg, transparent, ${dark.low}, transparent)`,
           animation: `shimmer 1.5s infinite linear ${delay || 0}ms`,
         }}
       />

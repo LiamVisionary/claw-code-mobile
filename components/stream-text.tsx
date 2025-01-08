@@ -1,8 +1,9 @@
 "use client";
 
-import { Text } from "react-native";
+// import { Text } from "react-native";
 import { StreamableValue, readStreamableValue } from "ai/rsc";
 import { useEffect, useState } from "react";
+import MarkdownText from "./markdown-text";
 
 export const useStreamableText = (
   content: string | StreamableValue<string>
@@ -36,15 +37,15 @@ export function BotMessage({
   const text = useStreamableText(content);
 
   return (
-    <Text
-      style={{
-        color: "white",
-        paddingHorizontal: 16,
+    <MarkdownText
+    // style={{
+    //   color: "white",
+    //   paddingHorizontal: 16,
 
-        fontSize: 16,
-      }}
+    //   fontSize: 16,
+    // }}
     >
       {text}
-    </Text>
+    </MarkdownText>
   );
 }

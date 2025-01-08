@@ -11,8 +11,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AI } from "./ai-context";
 import { ChatToolbarInner } from "./chat-toolbar";
 import { KeyboardFriendlyScrollView } from "./keyboard-friendly-scrollview";
+import { MapCard } from "./map/map-card";
 import { MoviesCard } from "./movies/movie-card";
 import { MOCK_TRENDING_SHOWS_THIS_WEEK } from "./movies/mock-movie-data";
+import { ToolCallsFyi } from "./tool-calls-fyi";
+import { MOCK_LOCATION_DATA_VEGAS } from "./map/googleapis-maps";
 
 const HEADER_HEIGHT = 0;
 
@@ -44,7 +47,8 @@ function MessagesScrollView() {
             <View key={message.id}>{message.display}</View>
           ))
         }
-        {messages.length === 0 && (
+        {messages.length === 0 && <ToolCallsFyi />}
+        {/* {messages.length === 0 && (
           <View
             style={{
               justifyContent: "center",
@@ -57,7 +61,7 @@ function MessagesScrollView() {
               style={{ width: 128, height: 128 }}
             />
           </View>
-        )}
+        )} */}
       </KeyboardFriendlyScrollView>
     </>
   );
@@ -66,6 +70,7 @@ function MessagesScrollView() {
 export function ChatUI() {
   const { width } = useWindowDimensions();
 
+  return <MapCard city="Vegas" data={MOCK_LOCATION_DATA_VEGAS.results} />;
   // return <MoviesCard data={MOCK_TRENDING_SHOWS_THIS_WEEK} />;
 
   return (
