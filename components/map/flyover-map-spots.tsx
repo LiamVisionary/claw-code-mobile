@@ -135,6 +135,7 @@ export function FlyoverCard({
       >
         {locations.map((value, index) => (
           <View
+            key={index}
             style={{
               backgroundColor: "transparent",
               flex: 1,
@@ -143,9 +144,7 @@ export function FlyoverCard({
             }}
           >
             <TouchableBounce
-              key={index}
               style={{
-                //   backgroundColor: '#191A20',
                 flex: 1,
               }}
               onPress={() => {
@@ -192,7 +191,6 @@ export function FlyoverCard({
                 experimentalBlurMethod="dimezisBlurView"
                 tint="systemMaterialDark"
                 style={{
-                  flex: 1,
                   //   backgroundColor: '#191A20',
                   borderRadius: 10,
                   borderCurve: "continuous",
@@ -204,8 +202,6 @@ export function FlyoverCard({
               >
                 <View
                   style={{
-                    flex: 1,
-
                     gap: 8,
                     flexDirection: "row",
                     alignItems: "center",
