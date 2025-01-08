@@ -16,7 +16,7 @@
     },
     "ios": {
       "appleTeamId": "QQ57RJ5UTD",
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "app.bacon.expoai",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
@@ -36,7 +36,7 @@
       [
         "expo-router",
         {
-          "origin": "https://exai--9z6bpl3xi6.expo.app"
+          "origin": "https://exai--5mjfbmmc64.expo.app"
         }
       ],
       "expo-font"
