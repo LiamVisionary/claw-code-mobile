@@ -1,50 +1,82 @@
 # Welcome to your Expo app 👋
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+# Publishing
 
-## Get started
+Ensure the environment variables are all configured, check the `.env` file for a template. Set the environment variables in your EAS project dashboard.
 
-1. Install dependencies
+## Web
 
-   ```bash
-   npm install
-   ```
+> `npx expo export -p web` and `eas deploy`
 
-2. Start the app
+The `ai` package needs to be patched manually in the package.json to support the SSR-pass. Add `"require"` field and set it to the client file (`import` field) in the `./rsc` specifier:
 
-   ```bash
-    npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+```json
+    "./rsc": {
+      "types": "./rsc/dist/index.d.ts",
+      "react-server": "./rsc/dist/rsc-server.mjs",
+      "import": "./rsc/dist/rsc-client.mjs",
+      "require": "./rsc/dist/rsc-client.mjs"
+    },
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+You'll then hit `Error: Could not find file in server action manifest:` which means you need to bundle with latest Expo CLI.
 
-## Learn more
+You can test locally with `npx expo serve`.
 
-To learn more about developing your project with Expo, look at the following resources:
+## iOS
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+### Testing release iOS build locally
 
-## Join the community
+Since the hosted environment is a bit different to the local one, it's useful to have a sanity test on the local build first.
 
-Join our community of developers creating universal apps.
+1. `npx expo export -p ios` and `npx expo serve`
+2. Set the generated origin in the `app.json`'s `origin` field. Ensure no generated value is in `expo.extra.router.origin`. This should be `https://localhost:8081` (assuming `npx expo serve` is running on the default port).
+3. Build the app in release mode on to a simulator: `EXPO_NO_DEPLOY=1 npx expo run:ios --configuration Release`
+4. Open Proxyman to inspect network traffic.
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+Using the latest Expo CLI, you can also test the release production build with the host:
+
+1. `eas deploy` -> put URL in the origin field.
+2. `npx expo run:ios --unstable-rebundle --configuration Release`
+3. App should relaunch with URL set to the new field.
+
+You will want to make a clean build before sending to the store.
+
+### Full deployment
+
+I'm currently publishing from Xcode directly instead of using EAS.
+
+1. `npx expo export -p ios` and `eas deploy`
+2. Set the generated origin in the `app.json`'s `origin` field. Ensure no generated value is in `expo.extra.router.origin`.
+3. Bump the build number in Xcode.
+4. Set the configuration to `Release` and run `Archive`.
+5. Distribute the archive to the App Store Connect.
+6. Run experimental EAS TestFlight script to make the latest version the default (non-expo team can do this manually from dashboard). `exapple beta:submit --bundle-id app.bacon.expoai`
+
+### Building from EAS
+
+> This is currently not working correctly.
+
+This will require the following:
+
+- Ensure hosting is setup for the project by deploying once locally first. `npx expo export -p web && eas deploy`
+- Create an `EXPO_TOKEN` for the project.
+- Set the `owner` field in the `app.json` to the owner of the project.
+- Install `eas-cli` locally in the project.
+- Set the `EXPO_UNSTABLE_DEPLOY_SERVER=1` environment variable (this must be available at build time).
+- Ensure all the environment variables are set in the EAS project dashboard.
+- Ensure the `origin` field is **NOT** set in the `app.json` or in the `expo.extra.router.origin` field.
+
+Then run `eas build --platform ios` to build the app.
+
+**Known Issues**
+
+- The deterministic module IDs are not the same across machines, meaning a publish from your local computer will not match a client build from EAS Build.
+- The `origin` field is a bit pesky to keep track of.
+- Environment variables are hard to keep aligned.
+- Avoid using anything besides generated module IDs.
+- HMR in the server doesn't work. Restart Expo CLI to see changes. This is due to the multiple recursions back to the server environment from nested server actions.
+- The `ai` package needs to be patched manually in the package.json to support the SSR-pass. Add `"require"` field and set it to the client file (`import` field) in the `./rsc` specifier.
+- `react-server-dom-webpack` must be patched for native to work because Hermes doesn't support promises correctly.
+- A number of fixes may be landed on main and not in the latest release. You may need to build Expo CLI from source.
+- First response from the server on iOS is sometimes broken. Perhaps an issue with `expo/fetch` streaming?
