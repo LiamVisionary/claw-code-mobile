@@ -10,10 +10,7 @@ import {
 import { FlyoverMap } from "./flyover-map";
 import { useState, useId, useRef, useEffect } from "react";
 import { BlurView } from "expo-blur";
-import type { AI } from "../ai-context";
-import { useUIState, useAIState } from "ai/rsc";
 import TouchableBounce from "@/components/ui/TouchableBounce";
-import { Suggestions } from "../suggestions";
 
 const useWebOnScroll = ({
   onScroll,

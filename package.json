@@ -12,7 +12,7 @@
     "test": "jest --watchAll",
     "lint": "expo lint",
     "rebundle": "npx expo run:ios --configuration Release --unstable-rebundle --no-bundler",
-    "prepare": "npx patch-package"
+    "prepare": "npx patch-package && node ./patch-ai.js"
   },
   "jest": {
     "preset": "jest-expo"
