@@ -11,6 +11,7 @@
     "web": "expo start --web",
     "test": "jest --watchAll",
     "lint": "expo lint",
+    "rebundle": "npx expo run:ios --configuration Release --unstable-rebundle --no-bundler",
     "prepare": "npx patch-package"
   },
   "jest": {

@@ -89,6 +89,18 @@ export default function DebugRoute() {
           </Form.Text>
         </Form.Section>
 
+        <Form.Section title="Views">
+          <Form.Link href="/movie/513?media_type=tv">
+            /movie/513?media_type=tv
+          </Form.Link>
+          <Form.Link href="/movie/actor/34947">
+            /movie/actor/34947
+          </Form.Link>
+          <Form.Link href="/_sitemap">
+            /_sitemap
+          </Form.Link>
+        </Form.Section>
+
         <Form.Section
           title="Server"
           footer="Call a React server action from your app to test the connection."
@@ -126,6 +138,7 @@ export default function DebugRoute() {
             Ping Server with Error
           </Form.Text>
         </Form.Section>
+       
 
         {error && <NetworkErrorView error={error} />}
 

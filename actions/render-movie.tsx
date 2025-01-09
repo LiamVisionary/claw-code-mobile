@@ -1,11 +1,12 @@
 "use server";
 
-import { label } from "@bacons/apple-colors";
-import { Link, Stack } from "expo-router";
+import { label, secondarySystemGroupedBackground } from "@bacons/apple-colors";
+import { ErrorBoundary, Link, Stack } from "expo-router";
 import { Image, ScrollView, Text, View } from "react-native";
 import TouchableBounce from "@/components/ui/TouchableBounce";
 import React from "react";
 import { FadeIn } from "@/components/ui/FadeIn";
+import { Try } from "expo-router/build/views/Try";
 // import { Image } from "expo-image";
 
 type MediaType = "movie" | "tv";
@@ -26,17 +27,24 @@ export async function renderMedia(id: string, type: MediaType = "movie") {
         <MediaVideos id={id} type={type} />
       </React.Suspense>
 
-      {/* <React.Suspense fallback={<ListSkeleton />}>
-        <MediaCast id={id} type={type} />
-      </React.Suspense> */}
+      <Try catch={ErrorBoundary}>   
+        <React.Suspense fallback={<ListSkeleton />}>
+          <MediaCast id={id} type={type} />
+        </React.Suspense>
+      </Try>
 
-      {/* <React.Suspense fallback={<ListSkeleton />}>
+
+      <Try catch={ErrorBoundary}>   
+      <React.Suspense fallback={<ListSkeleton />}>
         <MediaCompanies id={id} type={type} />
       </React.Suspense>
+      </Try>
 
+    <Try catch={ErrorBoundary}>   
       <React.Suspense fallback={<ListSkeleton />}>
         <SimilarMedia id={id} type={type} />
-      </React.Suspense> */}
+      </React.Suspense>
+      </Try>
     </>
   );
 }
@@ -64,7 +72,7 @@ function HorizontalList({
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 12 }}
+        contentContainerStyle={{ paddingHorizontal: 12, gap: 8, }}
       >
         {children}
       </ScrollView>
@@ -141,14 +149,14 @@ function CastCard({ person }: { person: any }) {
   // Something is broken here when deployed to expo
   return (
     <Link href={`/movie/actor/${person.id}`} asChild>
-      <TouchableBounce style={{ width: 100, marginHorizontal: 4 }}>
+      <TouchableBounce style={{ width: 100, maxWidth: 100, marginHorizontal: 4 }}>
         <Image
           source={{
             uri: person.profile_path
               ? `https://image.tmdb.org/t/p/w200${person.profile_path}`
               : "https://via.placeholder.com/100x150",
           }}
-          style={{ width: 100, height: 150, borderRadius: 8 }}
+          style={{ width: 100, height: 150, borderRadius: 8, backgroundColor: secondarySystemGroupedBackground }}
           transition={300}
         />
         <Text
@@ -158,8 +166,8 @@ function CastCard({ person }: { person: any }) {
           {person.name}
         </Text>
         <Text
-          style={{ fontSize: 12, color: label, opacity: 0.7 }}
-          numberOfLines={1}
+          style={{ fontSize: 12, color: label, opacity: 0.7, maxWidth: 100 }}
+          numberOfLines={2}
         >
           {person.character}
         </Text>
@@ -176,7 +184,7 @@ function CompanyCard({ company }: { company: any }) {
           source={{
             uri: `https://image.tmdb.org/t/p/w200${company.logo_path}`,
           }}
-          style={{ width: 80, height: 80, resizeMode: "contain" }}
+          style={{ width: 80, height: 80, resizeMode: "contain", backgroundColor: secondarySystemGroupedBackground }}
         />
       )}
       <Text
@@ -197,8 +205,7 @@ function CompanyCard({ company }: { company: any }) {
 function MediaCard({ media, type }: { media: any; type: MediaType }) {
   return (
     <Link
-      // @ts-expect-error
-      href={`/${type === "movie" ? type : "movie/" + type}/${media.id}`}
+      href={{ pathname: `/movie/[id]`, params: { id: media.id, media_type: type }}}
       asChild
     >
       <TouchableBounce style={{ marginHorizontal: 4 }}>
@@ -207,7 +214,7 @@ function MediaCard({ media, type }: { media: any; type: MediaType }) {
             source={{
               uri: `https://image.tmdb.org/t/p/w300${media.poster_path}`,
             }}
-            style={{ width: 140, height: 210, borderRadius: 8 }}
+            style={{ width: 140, height: 210, borderRadius: 8, backgroundColor: secondarySystemGroupedBackground }}
             transition={300}
           />
           <Text

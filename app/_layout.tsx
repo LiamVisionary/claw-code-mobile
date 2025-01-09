@@ -22,7 +22,7 @@ export default function Layout() {
           options={{
             headerLeft: () => (
               <Link href="/movie/513?media_type=tv" style={{ color: "black" }}>
-                Debug
+                Movie
               </Link>
             ),
             headerRight: () => (
