@@ -13,7 +13,7 @@ export default function Layout() {
     <ThemeProvider value={DarkTheme}>
       <Stack
         screenOptions={{
-          title: "Expo xAI",
+          title: "Expo AI",
           headerTransparent: false,
         }}
       >
