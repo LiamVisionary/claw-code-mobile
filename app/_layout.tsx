@@ -21,11 +21,6 @@ export default function Layout() {
           name="index"
           options={{
             headerLeft: () => (
-              <Link href="/movie/513?media_type=tv" style={{ color: "black" }}>
-                Movie
-              </Link>
-            ),
-            headerRight: () => (
               <Link href="/_debug" style={{ color: "black" }}>
                 Debug
               </Link>

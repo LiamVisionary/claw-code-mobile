@@ -79,13 +79,14 @@ export default function DebugRoute() {
       >
         <Form.Section
           title="window.location"
-          footer="Embedded origin URL that Expo Router uses to invoke server actions. This should be hosted and available to the client."
+          footer="Embedded origin URL that Expo Router uses to invoke React Server Functions. This should be hosted and available to the client."
         >
           <Form.Text
+          systemImage={"link"}
             onPress={() => Clipboard.setStringAsync(window.location?.href)}
             hint={window.location?.href}
           >
-            href
+            Origin
           </Form.Text>
         </Form.Section>
 
@@ -167,7 +168,7 @@ export default function DebugRoute() {
         {HERMES_VERSION && (
             <Form.Section title="Hermes">
               <Form.Text hint={HERMES_VERSION}>Version</Form.Text>
-              <Form.Text hint={String(isStaticHermes)}>Static Hermes</Form.Text>
+              <Form.Text hint={!!isStaticHermes ? <IconSymbol name="checkmark.circle.fill" color={AC.systemGreen} /> : <IconSymbol name="slash.circle" color={AC.systemGray} /> }>Static Hermes</Form.Text>
           </Form.Section>
         )}
 
@@ -186,6 +187,7 @@ export default function DebugRoute() {
 }
 
 import * as Clipboard from "expo-clipboard";
+import { IconSymbol } from "@/components/ui/IconSymbol";
 
 function NetworkErrorView({ error }: { error: Error }) {
   if (error instanceof Error) {
