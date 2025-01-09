@@ -189,7 +189,7 @@ export function WeatherCard({
           <Text
             style={{ fontSize: 36, color: Colors.navy, fontWeight: "bold" }}
           >
-            {data.current.temp_f}
+            {data.current.temp_f} F
           </Text>
           <View
             style={{

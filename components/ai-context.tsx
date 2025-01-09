@@ -3,8 +3,7 @@
 import type { CoreMessage } from "ai";
 import { createAI } from "ai/rsc";
 import "server-only";
-import { createStreamableValue, getMutableAIState, streamUI } from "ai/rsc";
-import { BotMessage } from "./stream-text";
+import { getMutableAIState, streamUI } from "ai/rsc";
 import { z } from "zod";
 
 import { getWeatherAsync, WeatherCard } from "./weather";
