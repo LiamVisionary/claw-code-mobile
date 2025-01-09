@@ -160,7 +160,7 @@ function CastCard({ person }: { person: any }) {
           transition={300}
         />
         <Text
-          style={{ fontSize: 14, color: label, marginTop: 4 }}
+          style={{ fontSize: 14, color: label, marginTop: 4, maxWidth: 100 }}
           numberOfLines={1}
         >
           {person.name}
@@ -184,7 +184,7 @@ function CompanyCard({ company }: { company: any }) {
           source={{
             uri: `https://image.tmdb.org/t/p/w200${company.logo_path}`,
           }}
-          style={{ width: 80, height: 80, resizeMode: "contain", backgroundColor: secondarySystemGroupedBackground }}
+          style={{ width: 80, height: 80, resizeMode: "contain" }}
         />
       )}
       <Text
