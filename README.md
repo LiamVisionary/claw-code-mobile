@@ -44,7 +44,7 @@ You will want to make a clean build before sending to the store.
 
 ### Full deployment
 
-I'm currently publishing from Xcode directly instead of using EAS.
+~~I'm currently publishing from Xcode directly instead of using EAS.~~ I'm using EAS now.
 
 1. `npx expo export -p ios` and `eas deploy`
 2. Set the generated origin in the `app.json`'s `origin` field. Ensure no generated value is in `expo.extra.router.origin`.
@@ -55,17 +55,15 @@ I'm currently publishing from Xcode directly instead of using EAS.
 
 ### Building from EAS
 
-> This is currently not working correctly.
-
 This will require the following:
 
 - Ensure hosting is setup for the project by deploying once locally first. `npx expo export -p web && eas deploy`
-- Create an `EXPO_TOKEN` for the project.
-- Set the `owner` field in the `app.json` to the owner of the project.
-- Install `eas-cli` locally in the project.
-- Set the `EXPO_UNSTABLE_DEPLOY_SERVER=1` environment variable (this must be available at build time).
+- Set the `EXPO_UNSTABLE_DEPLOY_SERVER=1` environment variable in your `.env`. This will be used to deploy and link the server during EAS Build.
+- Create an `EXPO_TOKEN` for the project. https://expo.dev/accounts/[account]/settings/access-tokens
+- Set the `owner` field in the `app.json` to the owner of the project (this is your EAS username).
+- Install `eas-cli` locally in the project (Pending [PR](https://github.com/expo/expo/pull/34070)).
 - Ensure all the environment variables are set in the EAS project dashboard.
-- Ensure the `origin` field is **NOT** set in the `app.json` or in the `expo.extra.router.origin` field.
+- Ensure the `origin` field is **NOT** set in the `app.json` or in the `expo.extra.router.origin` field. You can set this to an alias if you want the app to pull whatever is the latest version from the server.
 
 Then run `eas build --platform ios` to build the app.
 

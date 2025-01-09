@@ -11,6 +11,9 @@ import { BodyScrollView } from "@/components/ui/BodyScrollView";
 import * as Form from "@/components/ui/Form";
 import * as AC from "@bacons/apple-colors";
 
+import * as Clipboard from "expo-clipboard";
+import { IconSymbol } from "@/components/ui/IconSymbol";
+
 export { ErrorBoundary } from "expo-router";
 
 function getBestDashboardUrl(): any {
@@ -186,8 +189,6 @@ export default function DebugRoute() {
   );
 }
 
-import * as Clipboard from "expo-clipboard";
-import { IconSymbol } from "@/components/ui/IconSymbol";
 
 function NetworkErrorView({ error }: { error: Error }) {
   if (error instanceof Error) {
