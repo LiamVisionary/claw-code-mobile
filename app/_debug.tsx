@@ -90,6 +90,9 @@ export default function DebugRoute() {
         </Form.Section>
 
         <Form.Section title="Views">
+          <Form.Link href="/movie/693134?media_type=movie">
+            /movie/693134?media_type=movie
+          </Form.Link>
           <Form.Link href="/movie/513?media_type=tv">
             /movie/513?media_type=tv
           </Form.Link>
