@@ -6,8 +6,8 @@ import { PointOfInterestData } from "./googleapis-maps";
 export function MapSkeleton() {
   return (
     <Card title="Searching area...">
-      <Skeleton style={{ height: 240 }} />
-      <Skeleton style={{ height: 96 }} delay={200} />
+      <Skeleton dark={false} style={{ height: 240 }} />
+      <Skeleton dark={false} style={{ height: 96 }} delay={200} />
     </Card>
   );
 }

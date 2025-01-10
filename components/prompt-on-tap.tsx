@@ -5,6 +5,7 @@ import { useActions, useUIState } from "ai/rsc";
 import type { AI } from "@/components/ai-context";
 import { UserMessage } from "./user-message";
 import { useCallback } from "react";
+import TouchableBounce from "./ui/TouchableBounce";
 
 export function PromptOnTap({
   prompt,
@@ -13,8 +14,9 @@ export function PromptOnTap({
 }: { prompt: string | [string, string] } & TouchableOpacityProps) {
   const onPressPrompt = usePromptOnPress(prompt);
   return (
-    <TouchableOpacity
+    <TouchableBounce
       {...props}
+      sensory
       onPress={async (e) => {
         onPress?.(e);
         onPressPrompt();

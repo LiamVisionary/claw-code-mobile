@@ -17,6 +17,7 @@ import { UserMessage } from "./user-message";
 import type { AI } from "./ai-context";
 import { FirstSuggestions } from "./first-suggestions";
 import { BlurView } from "expo-blur";
+import * as AC from "@bacons/apple-colors";
 
 const AnimatedBlurView = Animated.createAnimatedComponent(BlurView);
 
@@ -139,20 +140,20 @@ export function ChatToolbarInner({
             pointerEvents: disabled ? "none" : "auto",
             color: "white",
             // #1E1E1E
-            borderColor: "rgba(255, 255, 255, 0.3)",
             padding: 16,
-            borderWidth: 0.5,
+            borderColor: AC.systemGray5,
+            backgroundColor: AC.secondarySystemGroupedBackground,
+            borderWidth: 1,
             borderRadius: 999,
             paddingVertical: 8,
             fontSize: 16,
-            fontWeight: "bold",
             outline: "none",
             flex: 1,
           }}
-          placeholder="Message"
+          placeholder="Ask anything"
           autoCapitalize="sentences"
           autoCorrect
-          placeholderTextColor={"rgba(255, 255, 255, 0.3)"}
+          placeholderTextColor={AC.systemGray2}
           onSubmitEditing={onSubmitEditing}
         />
       </AnimatedBlurView>
