@@ -12,7 +12,6 @@ import * as Form from "@/components/ui/Form";
 import * as AC from "@bacons/apple-colors";
 
 import * as Clipboard from "expo-clipboard";
-import { IconSymbol } from "@/components/ui/IconSymbol";
 
 export { ErrorBoundary } from "expo-router";
 
@@ -58,10 +57,6 @@ function getDeploymentUrl(): any {
   );
 }
 
-const HERMES_RUNTIME = global.HermesInternal?.getRuntimeProperties?.() ?? {};
-const HERMES_VERSION = HERMES_RUNTIME['OSS Release Version'];
-const isStaticHermes = HERMES_RUNTIME['Static Hermes'];
-
 export default function DebugRoute() {
   const [error, setError] = useState<Error | null>(null);
   const [headers, setHeaders] = useState<Record<
@@ -85,7 +80,7 @@ export default function DebugRoute() {
           footer="Embedded origin URL that Expo Router uses to invoke React Server Functions. This should be hosted and available to the client."
         >
           <Form.Text
-          systemImage={"link"}
+            systemImage={"link"}
             onPress={() => Clipboard.setStringAsync(window.location?.href)}
             hint={window.location?.href}
           >
@@ -100,12 +95,8 @@ export default function DebugRoute() {
           <Form.Link href="/movie/513?media_type=tv">
             /movie/513?media_type=tv
           </Form.Link>
-          <Form.Link href="/movie/actor/34947">
-            /movie/actor/34947
-          </Form.Link>
-          <Form.Link href="/_sitemap">
-            /_sitemap
-          </Form.Link>
+          <Form.Link href="/movie/actor/34947">/movie/actor/34947</Form.Link>
+          <Form.Link href="/_sitemap">/_sitemap</Form.Link>
         </Form.Section>
 
         <Form.Section
@@ -145,7 +136,6 @@ export default function DebugRoute() {
             Ping Server with Error
           </Form.Text>
         </Form.Section>
-       
 
         {error && <NetworkErrorView error={error} />}
 
@@ -168,13 +158,6 @@ export default function DebugRoute() {
           </View>
         </Form.Section>
 
-        {HERMES_VERSION && (
-            <Form.Section title="Hermes">
-              <Form.Text hint={HERMES_VERSION}>Version</Form.Text>
-              <Form.Text hint={!!isStaticHermes ? <IconSymbol name="checkmark.circle.fill" color={AC.systemGreen} /> : <IconSymbol name="slash.circle" color={AC.systemGray} /> }>Static Hermes</Form.Text>
-          </Form.Section>
-        )}
-
         <Form.Section title="Manifest">
           <View>
             <Form.Text>
@@ -188,7 +171,6 @@ export default function DebugRoute() {
     </>
   );
 }
-
 
 function NetworkErrorView({ error }: { error: Error }) {
   if (error instanceof Error) {

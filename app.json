@@ -5,16 +5,20 @@
     "owner": "bacon",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/icons/bouquet.png",
     "scheme": "expoai",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/images/icon.png",
+      "image": "./assets/icons/bouquet.png",
       "resizeMode": "cover",
       "backgroundColor": "#000"
     },
     "ios": {
+      "icon": {
+        "light": "./assets/icons/bouquet.png",
+        "dark": "./assets/icons/floral.png"
+      },
       "appleTeamId": "QQ57RJ5UTD",
       "supportsTablet": false,
       "bundleIdentifier": "app.bacon.expoai",
@@ -33,13 +37,28 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      ["expo-router", {}],
+      "expo-font",
       [
-        "expo-router",
-        {
-         
-        }
+        "expo-quick-actions/icon/plugin",
+        [
+          {
+            "light": "./assets/icons/scifi.png",
+            "dark": "./assets/icons/space.png"
+          },
+          {
+            "light": "./assets/icons/reef.png",
+            "dark": "./assets/icons/water.png"
+          },
+          {
+            "light": "./assets/icons/landscape.png",
+            "dark": "./assets/icons/awe.png"
+          },
+          "./assets/icons/coffee.png",
+          "./assets/icons/sunrise.png"
+        ]
       ],
-      "expo-font"
+      "expo-quick-actions"
     ],
     "experiments": {
       "typedRoutes": true,
