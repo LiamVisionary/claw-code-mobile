@@ -149,21 +149,24 @@ export const Text = React.forwardRef<
   );
 });
 
-export const Link = React.forwardRef<
-  typeof RouterLink,
-  LinkProps & {
-    /** Value displayed on the right side of the form item. */
-    hint?: React.ReactNode;
-    /** Adds a prefix SF Symbol image to the left of the text */
-    systemImage?: SystemImageProps;
+export function Link({
+  bold,
+  children,
+  headerRight,
+  onPress,
+  ...props
+}: LinkProps & {
+  /** Value displayed on the right side of the form item. */
+  hint?: React.ReactNode;
+  /** Adds a prefix SF Symbol image to the left of the text */
+  systemImage?: SystemImageProps;
 
-    // TODO: Automatically detect this somehow.
-    /** Is the link inside a header. */
-    headerRight?: boolean;
+  // TODO: Automatically detect this somehow.
+  /** Is the link inside a header. */
+  headerRight?: boolean;
 
-    bold?: boolean;
-  }
->(({ bold, children, headerRight, ...props }, ref) => {
+  bold?: boolean;
+}) {
   const font: TextStyle = {
     ...FormFont.default,
     fontWeight: bold ? "600" : "normal",
@@ -210,6 +213,7 @@ export const Link = React.forwardRef<
     return children;
   })();
 
+  console.log("onPress", onPress, process.env.EXPO_OS, props);
   return (
     <RouterLink
       dynamicTypeRamp="body"
@@ -217,11 +221,10 @@ export const Link = React.forwardRef<
       asChild={
         props.asChild ?? (process.env.EXPO_OS === "web" ? false : headerRight)
       }
-      ref={ref}
       style={mergedStyleProp<TextStyle>(font, props.style)}
       onPress={
         process.env.EXPO_OS === "web"
-          ? props.onPress
+          ? onPress
           : (e) => {
               if (
                 props.target === "_blank" &&
@@ -236,14 +239,14 @@ export const Link = React.forwardRef<
                     WebBrowser.WebBrowserPresentationStyle.AUTOMATIC,
                 });
               } else {
-                props.onPress?.(e);
+                onPress?.(e);
               }
             }
       }
       children={resolvedChildren}
     />
   );
-});
+}
 
 export const FormFont = {
   // From inspecting SwiftUI `List { Text("Foo") }` in Xcode.
@@ -417,11 +420,19 @@ export function Section({
       })();
 
       child = React.cloneElement(child, {
-        style: [FormFont.default, child.props.style],
+        style: [
+          FormFont.default,
+          process.env.EXPO_OS === "web" && {
+            alignItems: "stretch",
+            flexDirection: "column",
+            display: "flex",
+          },
+          child.props.style,
+        ],
         dynamicTypeRamp: "body",
         numberOfLines: 1,
         adjustsFontSizeToFit: true,
-        asChild: true,
+        asChild: process.env.EXPO_OS !== "web",
         children: (
           <FormItem>
             <HStack>

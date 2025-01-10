@@ -92,11 +92,19 @@ export function ChatUI() {
           headerRight: () => (
             <HeaderButton
               pressOpacity={0.7}
-              style={{
-                // Offset on the side so the margins line up. Unclear how to handle when this is used in headerLeft.
-                // We should automatically detect it somehow.
-                marginRight: -8,
-              }}
+              style={[
+                process.env.EXPO_OS === "web"
+                  ? {
+                      paddingHorizontal: 16,
+                      alignItems: "center",
+                      display: "flex",
+                    }
+                  : {
+                      // Offset on the side so the margins line up. Unclear how to handle when this is used in headerLeft.
+                      // We should automatically detect it somehow.
+                      marginRight: -8,
+                    },
+              ]}
               onPress={() => {
                 setAIState({ chatId: nanoid(), messages: [] });
                 setMessages([]);

@@ -23,7 +23,16 @@ export default function Layout() {
           name="index"
           options={{
             headerLeft: () => (
-              <Form.Link href="/settings">
+              <Form.Link
+                href="/settings"
+                style={[
+                  process.env.EXPO_OS === "web" && {
+                    paddingHorizontal: 16,
+                    alignItems: "center",
+                    display: "flex",
+                  },
+                ]}
+              >
                 <IconSymbol name="gear" color={AC.label} />
               </Form.Link>
               // <Link href="/_debug" style={{ color: "black" }}>
