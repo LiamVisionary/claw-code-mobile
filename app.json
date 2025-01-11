@@ -24,7 +24,15 @@
       "bundleIdentifier": "app.bacon.expoai",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
-      }
+      },
+      "entitlements": {
+        "com.apple.security.application-groups": ["group.app.bacon.expoai"]
+      },
+      "associatedDomains": [
+        "applinks:exai.expo.app",
+        "webcredentials:exai.expo.app",
+        "activitycontinuation:exai.expo.app"
+      ]
     },
     "android": {
       "adaptiveIcon": {
@@ -46,10 +54,16 @@
           "./assets/icons/awe.png",
           "./assets/icons/water.png",
           "./assets/icons/coffee.png",
+          "./assets/icons/sunrise.png",
+          "./assets/icons/scifi.png",
+          "./assets/icons/awe.png",
+          "./assets/icons/water.png",
+          "./assets/icons/coffee.png",
           "./assets/icons/sunrise.png"
         ]
       ],
-      "expo-quick-actions"
+      "expo-quick-actions",
+      "@bacons/apple-targets"
     ],
     "experiments": {
       "typedRoutes": true,

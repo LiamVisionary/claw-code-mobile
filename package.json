@@ -20,6 +20,7 @@
   "dependencies": {
     "@ai-sdk/openai": "^0.0.72",
     "@bacons/apple-colors": "^0.0.8",
+    "@bacons/apple-targets": "^0.1.16",
     "@expo/vector-icons": "^14.0.2",
     "@react-native-masked-view/masked-view": "0.3.2",
     "@react-navigation/bottom-tabs": "^7.0.0",
@@ -32,7 +33,7 @@
     "expo-font": "~13.0.2",
     "expo-haptics": "~14.0.0",
     "expo-linking": "~7.0.3",
-    "expo-quick-actions": "^4.0.1",
+    "expo-quick-actions": "^4.0.2",
     "expo-router": "~4.0.15",
     "expo-splash-screen": "~0.29.18",
     "expo-status-bar": "~2.0.0",
