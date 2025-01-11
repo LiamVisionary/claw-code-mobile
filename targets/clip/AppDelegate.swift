@@ -16,7 +16,9 @@ class AppDelegate: EXAppDelegateWrapper {
   }
   
   override func sourceURL(for bridge: RCTBridge) -> URL? {
-    self.bundleURL()
+    let u = self.bundleURL()
+    
+    return u
   }
   
   override func bundleURL() -> URL? {

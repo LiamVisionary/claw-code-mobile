@@ -13,6 +13,7 @@ import * as AC from "@bacons/apple-colors";
 
 import { IconSymbol } from "@/components/ui/IconSymbol";
 
+import * as AppIcon from "expo-quick-actions/icon";
 export { ErrorBoundary } from "expo-router";
 
 const HERMES_RUNTIME = global.HermesInternal?.getRuntimeProperties?.() ?? {};
@@ -32,7 +33,7 @@ export default function DebugRoute() {
           bottom: 24,
         }}
       >
-        {process.env.EXPO_OS !== "web" && (
+        {process.env.EXPO_OS !== "web" && AppIcon?.isSupported && (
           <Form.Section title="Style">
             <Form.Link href="/settings/icon">App Icon</Form.Link>
           </Form.Section>
