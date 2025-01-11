@@ -16,16 +16,10 @@ export default function Page() {
       require("@/assets/icons/bouquet.png"),
       require("@/assets/icons/floral.png"),
     ],
-    [require("@/assets/icons/scifi.png"), require("@/assets/icons/space.png")],
-    [require("@/assets/icons/reef.png"), require("@/assets/icons/water.png")],
-
-    [
-      require("@/assets/icons/landscape.png"),
-      require("@/assets/icons/awe.png"),
-    ],
-
+    require("@/assets/icons/scifi.png"),
+    require("@/assets/icons/awe.png"),
+    require("@/assets/icons/water.png"),
     require("@/assets/icons/coffee.png"),
-
     require("@/assets/icons/sunrise.png"),
   ];
 

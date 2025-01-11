@@ -42,18 +42,9 @@
       [
         "expo-quick-actions/icon/plugin",
         [
-          {
-            "light": "./assets/icons/scifi.png",
-            "dark": "./assets/icons/space.png"
-          },
-          {
-            "light": "./assets/icons/reef.png",
-            "dark": "./assets/icons/water.png"
-          },
-          {
-            "light": "./assets/icons/landscape.png",
-            "dark": "./assets/icons/awe.png"
-          },
+          "./assets/icons/scifi.png",
+          "./assets/icons/awe.png",
+          "./assets/icons/water.png",
           "./assets/icons/coffee.png",
           "./assets/icons/sunrise.png"
         ]
