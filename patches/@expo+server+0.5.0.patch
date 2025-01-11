@@ -1,3 +1,7 @@
+diff --git a/node_modules/@expo/server/.DS_Store b/node_modules/@expo/server/.DS_Store
+new file mode 100644
+index 0000000..f50e004
+Binary files /dev/null and b/node_modules/@expo/server/.DS_Store differ
 diff --git a/node_modules/@expo/server/build/middleware/rsc.js b/node_modules/@expo/server/build/middleware/rsc.js
 index 85a6480..e53539a 100644
 --- a/node_modules/@expo/server/build/middleware/rsc.js
