@@ -882,16 +882,15 @@
   resolved "https://registry.yarnpkg.com/@bacons/apple-colors/-/apple-colors-0.0.8.tgz#1d393d5e1774dbedc48f1b461d9cdcafe50e2e2e"
   integrity sha512-Fd23H9b8ge3hjMn2VQzhSyN5SHKeOP+NyDXRit45q0I7aVkD2OcheiLoGGmpPm2RiH+PW+8vikgDcrL0SCsIow==
 
-"@bacons/apple-targets@^0.1.16":
-  version "0.1.16"
-  resolved "https://registry.yarnpkg.com/@bacons/apple-targets/-/apple-targets-0.1.16.tgz#518391bd58935c2a5e483f6cc55ec09c2a9b5858"
-  integrity sha512-yweOsc42fTpgWxXAwU31N5/a9WtOquHweVXRu0G5zmFkrvBa4DC8OkBXfQg9J9EhXm6MX4G/cbVyvRW3exm0NQ==
+"@bacons/apple-targets@^0.1.17":
+  version "0.1.17"
+  resolved "https://registry.yarnpkg.com/@bacons/apple-targets/-/apple-targets-0.1.17.tgz#8883a703c76b2c110b1c722e23f1c54a5511be74"
+  integrity sha512-YtR/MyTwYkQgN4U2IbNpc+3ouUuPxladLBEFVVBRQbkatW8Mwoo3xPP5Yb6070u9XdM4Q/Lv8brsNYIf/T9TGg==
   dependencies:
     "@bacons/xcode" "1.0.0-alpha.24"
     "@react-native/normalize-colors" "^0.76.1"
     debug "^4.3.4"
-    fs-extra "^11.2.0"
-    glob "^10.2.6"
+    glob "^10.4.2"
 
 "@bacons/xcode@1.0.0-alpha.24":
   version "1.0.0-alpha.24"
@@ -4256,15 +4255,6 @@ fs-extra@9.0.0:
     jsonfile "^6.0.1"
     universalify "^1.0.0"
 
-fs-extra@^11.2.0:
-  version "11.2.0"
-  resolved "https://registry.yarnpkg.com/fs-extra/-/fs-extra-11.2.0.tgz#e70e17dfad64232287d01929399e0ea7c86b0e5b"
-  integrity sha512-PmDi3uwK5nFuXh7XDTlVnS17xJS7vW36is2+w3xcv8SVxiB4NyATf4ctkVY5bkSjX0Y4nbvZCq1/EjtEyr9ktw==
-  dependencies:
-    graceful-fs "^4.2.0"
-    jsonfile "^6.0.1"
-    universalify "^2.0.0"
-
 fs-extra@^9.0.0, fs-extra@^9.1.0:
   version "9.1.0"
   resolved "https://registry.yarnpkg.com/fs-extra/-/fs-extra-9.1.0.tgz#5954460c764a8da2094ba3554bf839e6b9a7c86d"
@@ -4386,7 +4376,7 @@ glob-parent@^5.1.2:
   dependencies:
     is-glob "^4.0.1"
 
-glob@^10.2.2, glob@^10.2.6, glob@^10.3.10, glob@^10.4.2:
+glob@^10.2.2, glob@^10.3.10, glob@^10.4.2:
   version "10.4.5"
   resolved "https://registry.yarnpkg.com/glob/-/glob-10.4.5.tgz#f4d9f0b90ffdbab09c9d77f5f29b4262517b0956"
   integrity sha512-7Bv8RF0k6xjo7d4A/PxYLbUCfb6c+Vpd2/mB2yRDlew7Jb5hEXiCD9ibfO7wpk8i4sevK6DFny9h7EYbM3/sHg==
