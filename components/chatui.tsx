@@ -50,8 +50,8 @@ function MessagesScrollView() {
             <View key={message.id}>{message.display}</View>
           ))
         }
-        {messages.length === 0 && <ToolCallsFyi />}
-        {/* {messages.length === 0 && (
+        {/* {messages.length === 0 && <ToolCallsFyi />} */}
+        {messages.length === 0 && (
           <View
             style={{
               justifyContent: "center",
@@ -61,10 +61,10 @@ function MessagesScrollView() {
           >
             <Image
               source={require("@/assets/images/logo.dark.png")}
-              style={{ width: 128, height: 128 }}
+              style={{ width: 128, height: 128, opacity: 0.3 }}
             />
           </View>
-        )} */}
+        )}
       </KeyboardFriendlyScrollView>
     </>
   );

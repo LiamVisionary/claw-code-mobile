@@ -25,6 +25,8 @@ const MAPPING = {
   "square.and.pencil": "edit",
   ladybug: "bug-report",
   "xmark.circle.fill": "close",
+  "arrow.down.circle.fill": "arrow-downward",
+  "aqi.medium": "dashboard",
 } as Partial<
   Record<
     import("expo-symbols").SymbolViewProps["name"],

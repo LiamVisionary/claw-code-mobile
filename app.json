@@ -57,8 +57,7 @@
           "./assets/icons/sunrise.png"
         ]
       ],
-      "expo-quick-actions",
-      "@bacons/apple-targets"
+      "expo-quick-actions"
     ],
     "experiments": {
       "typedRoutes": true,

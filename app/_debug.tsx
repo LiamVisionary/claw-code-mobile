@@ -80,7 +80,6 @@ export default function DebugRoute() {
           footer="Embedded origin URL that Expo Router uses to invoke React Server Functions. This should be hosted and available to the client."
         >
           <Form.Text
-            systemImage={"link"}
             onPress={() => Clipboard.setStringAsync(window.location?.href)}
             hint={window.location?.href}
           >
@@ -103,7 +102,11 @@ export default function DebugRoute() {
           title="Server"
           footer="Call a React server action from your app to test the connection."
         >
-          <Form.Link target="_blank" href={getDeploymentUrl()}>
+          <Form.Link
+            systemImage={"aqi.medium"}
+            target="_blank"
+            href={getDeploymentUrl()}
+          >
             Dashboard
           </Form.Link>
 
@@ -153,18 +156,20 @@ export default function DebugRoute() {
           >
             Fetch headers
           </Form.Text>
-          <View>
-            <Form.Text>{JSON.stringify(headers, null, 2)}</Form.Text>
-          </View>
+          {headers && (
+            <View>
+              <Form.Text>{JSON.stringify(headers, null, 2)}</Form.Text>
+            </View>
+          )}
         </Form.Section>
 
-        <Form.Section title="Manifest">
+        {/* <Form.Section title="Manifest">
           <View>
             <Form.Text>
               {JSON.stringify(Constants.expoConfig, null, 2)}
             </Form.Text>
           </View>
-        </Form.Section>
+        </Form.Section> */}
       </BodyScrollView>
 
       <Stack.Screen options={{ title: "Debug" }} />

@@ -10,6 +10,8 @@ export { ErrorBoundary } from "expo-router";
 import * as Form from "@/components/ui/Form";
 import { IconSymbol } from "@/components/ui/IconSymbol";
 import * as AC from "@bacons/apple-colors";
+import TouchableBounce from "@/components/ui/TouchableBounce";
+import { View } from "react-native";
 export default function Layout() {
   return (
     <ThemeProvider value={DarkTheme}>
@@ -23,17 +25,23 @@ export default function Layout() {
           name="index"
           options={{
             headerLeft: () => (
-              <Form.Link
-                href="/settings"
-                style={[
-                  process.env.EXPO_OS === "web" && {
-                    paddingHorizontal: 16,
-                    alignItems: "center",
-                    display: "flex",
-                  },
-                ]}
-              >
-                <IconSymbol name="gear" color={AC.label} />
+              <Form.Link href="/settings" asChild>
+                <TouchableBounce sensory>
+                  <View
+                    style={[
+                      {
+                        flex: 1,
+                        paddingHorizontal: 16,
+                        paddingVertical: 8,
+                        alignItems: "center",
+                        display: "flex",
+                        marginLeft: process.env.EXPO_OS !== "web" ? -16 : 0,
+                      },
+                    ]}
+                  >
+                    <IconSymbol name="gear" color={AC.label} />
+                  </View>
+                </TouchableBounce>
               </Form.Link>
               // <Link href="/_debug" style={{ color: "black" }}>
               //   Debug
@@ -63,7 +71,7 @@ export default function Layout() {
             headerRight: () => (
               <Form.Link headerRight href="/" dismissTo>
                 <IconSymbol
-                  name="xmark.circle.fill"
+                  name="arrow.down.circle.fill"
                   color={AC.systemGray}
                   size={28}
                 />
