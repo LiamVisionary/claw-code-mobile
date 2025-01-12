@@ -12,11 +12,11 @@ export default function MarkdownText(props) {
           paddingHorizontal: 16,
         },
         paragraph: {
-          fontFamily: "AnonymousPro-Regular",
+          // fontFamily: "AnonymousPro-Regular",
           fontSize: 16,
         },
         em: {
-          fontFamily: "AnonymousPro-Italic",
+          // fontFamily: "AnonymousPro-Italic",
           fontStyle: "italic",
         },
         code_inline: {
@@ -25,7 +25,7 @@ export default function MarkdownText(props) {
           borderRadius: 2,
         },
         strong: {
-          fontFamily: "AnonymousPro-Bold",
+          // fontFamily: "AnonymousPro-Bold",
         },
         blockquote: {
           backgroundColor: "#191A20",

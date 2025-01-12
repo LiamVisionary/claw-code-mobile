@@ -67,7 +67,7 @@ export default function Layout() {
             //   backgroundColor: undefined,
             // },
             headerTransparent: true,
-            presentation: "modal",
+            presentation: "formSheet",
             headerRight: () => (
               <Form.Link headerRight href="/" dismissTo>
                 <IconSymbol

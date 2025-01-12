@@ -211,6 +211,7 @@ User info:
           .required(),
         async *generate({ city }) {
           const weatherInfo = await getWeatherAsync(city);
+          // console.log("weatherInfo", JSON.stringify(weatherInfo));
           return <WeatherCard city={city} data={weatherInfo} />;
         },
       },

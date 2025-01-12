@@ -27,6 +27,7 @@ const MAPPING = {
   "xmark.circle.fill": "close",
   "arrow.down.circle.fill": "arrow-downward",
   "aqi.medium": "dashboard",
+  "ellipsis.circle.fill": "more-vert",
 } as Partial<
   Record<
     import("expo-symbols").SymbolViewProps["name"],

@@ -101,7 +101,7 @@ export const FlyoverMap = ({
       showsIndoorLevelPicker={false}
       showsMyLocationButton={false}
       // showsPointsOfInterest={false}
-      zoomEnabled={false}
+      zoomEnabled
       scrollEnabled={false}
       initialRegion={{
         latitude: center.latitude,

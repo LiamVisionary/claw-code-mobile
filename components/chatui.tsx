@@ -1,7 +1,7 @@
 "use client";
 
 import { useActions, useAIState, useUIState } from "ai/rsc";
-import React from "react";
+import React, { useEffect } from "react";
 import { Image, Text, View, useWindowDimensions } from "react-native";
 
 import Animated from "react-native-reanimated";
@@ -71,6 +71,7 @@ function MessagesScrollView() {
 }
 
 import * as AC from "@bacons/apple-colors";
+import { MOCK_AUSTIN_WEATHER_DATA, WeatherCard } from "./weather";
 
 const nanoid = () => Math.random().toString(36).slice(2);
 
@@ -78,6 +79,15 @@ export function ChatUI() {
   const { width } = useWindowDimensions();
   const [, setAIState] = useAIState<typeof AI>();
   const [, setMessages] = useUIState<typeof AI>();
+
+  // useEffect(() => {
+  //   setMessages([
+  //     {
+  //       id: nanoid(),
+  //       display: <WeatherCard city="Austin" data={MOCK_AUSTIN_WEATHER_DATA} />,
+  //     },
+  //   ]);
+  // }, []);
 
   return (
     <Animated.View

@@ -1,3 +1,5 @@
+"use client";
+
 import { IconSymbol, IconSymbolName } from "@/components/ui/IconSymbol";
 import * as AppleColors from "@bacons/apple-colors";
 import { Href, Link as RouterLink, LinkProps, Stack } from "expo-router";
@@ -213,7 +215,6 @@ export function Link({
     return children;
   })();
 
-  console.log("onPress", onPress, process.env.EXPO_OS, props);
   return (
     <RouterLink
       dynamicTypeRamp="body"
