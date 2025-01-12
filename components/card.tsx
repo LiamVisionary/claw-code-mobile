@@ -43,18 +43,24 @@ export function Card({
   style,
   title,
   children,
+  fillSpace,
   ...props
-}: ViewProps & { title?: string }) {
+}: ViewProps & { fillSpace?: boolean; title?: string }) {
   return (
-    <View style={{ paddingHorizontal: 16, gap: 8, flex: 1 }}>
+    <View
+      style={[!fillSpace && { paddingHorizontal: 16 }, { gap: 8, flex: 1 }]}
+    >
       {title && (
         <Text
-          style={{
-            fontSize: 24,
-            // fontFamily: 'AnonymousPro-Bold',
-            color: "white",
-            fontWeight: "500",
-          }}
+          style={[
+            fillSpace && { paddingHorizontal: 16 },
+            {
+              fontSize: 24,
+              // fontFamily: 'AnonymousPro-Bold',
+              color: "white",
+              fontWeight: "500",
+            },
+          ]}
         >
           {title}
         </Text>
@@ -65,7 +71,7 @@ export function Card({
             padding: 16,
             maxWidth: 608,
             borderCurve: "continuous",
-            borderRadius: 12,
+            borderRadius: fillSpace ? 0 : 12,
             gap: 8,
             flexShrink: 0,
             overflow: "hidden",

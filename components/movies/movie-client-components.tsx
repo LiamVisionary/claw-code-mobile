@@ -11,6 +11,8 @@ import { Suggestions } from "@/components/suggestions";
 import { AssistantMessage } from "../assistant-message";
 import { router } from "expo-router";
 import type { MovieEntry } from "./movie-card";
+import TouchableBounce from "../ui/TouchableBounce";
+import * as Haptics from "expo-haptics";
 
 export function MovieTouchable({
   movie,
@@ -32,10 +34,14 @@ export function MovieTouchable({
 
   return (
     <TouchableOpacity
-      activeOpacity={0.8}
       delayLongPress={1000}
       style={style}
+      activeOpacity={0.8}
       onPress={() => {
+        if (process.env.EXPO_OS !== "web") {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        }
+
         console.log("Push:", movie.id, movie.media_type);
         router.push({
           pathname: "/movie/[id]",

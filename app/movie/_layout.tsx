@@ -8,6 +8,10 @@ export default function Layout() {
       screenOptions={{
         title: "Movies",
         headerTransparent: false,
+        headerTintColor: "white",
+        headerLargeStyle: {
+          backgroundColor: undefined,
+        },
       }}
     />
   );

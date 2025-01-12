@@ -1,21 +1,16 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef } from "react";
-import { AppState, Image, StyleSheet } from "react-native";
+import { AppState, StyleSheet } from "react-native";
 import { MapView, Marker, UrlTile } from "./map-view";
 
 export const FlyoverMap = ({
   center,
   altitude,
-
-  showCenter,
-}: //   heading,
-{
+}: {
   center: { latitude: number; longitude: number };
   altitude?: number;
   speed?: number;
-  showCenter?: boolean;
-  //   heading?: number;p
 }) => {
   const mapRef = useRef<import("react-native-maps").default>(null);
 
@@ -94,15 +89,18 @@ export const FlyoverMap = ({
       //   mapType="hybridFlyover"
       showsCompass={false}
       userInterfaceStyle="dark"
-      pitchEnabled={false}
-      rotateEnabled={false}
+      onTouchStart={() => {
+        clearInterval(interval.current);
+      }}
+      // pitchEnabled={false}
+      // rotateEnabled={false}
       // showsBuildings={false}
       // showsIndoors={false}
       showsIndoorLevelPicker={false}
       showsMyLocationButton={false}
       // showsPointsOfInterest={false}
-      zoomEnabled
-      scrollEnabled={false}
+      // zoomEnabled={false}
+      // scrollEnabled={false}
       initialRegion={{
         latitude: center.latitude,
         longitude: center.longitude,
@@ -138,24 +136,13 @@ export const FlyoverMap = ({
         />
       )}
 
-      {isApple && (
+      {process.env.EXPO_OS === "web" && (
         <Marker
           coordinate={center}
           focusable={false}
           isTVSelectable={false}
           tappable={false}
-        >
-          <Image
-            source={{
-              uri: "https://cloud.headwayapp.co/changelogs_images/images/big/000/016/393-90c8090df0a63e76991bc6aae7b46c87d8cdb51e.gif",
-            }}
-            style={{
-              opacity: 0.05,
-              width: 100,
-              aspectRatio: 1,
-            }}
-          />
-        </Marker>
+        />
       )}
     </MapView>
   );

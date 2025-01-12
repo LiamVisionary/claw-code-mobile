@@ -100,7 +100,7 @@ export default function Layout() {
             sheetGrabberVisible: false,
             sheetAllowedDetents: [0.25],
             headerRight: () => (
-              <Form.Link headerRight href="/" dismissTo>
+              <Form.Link headerRight href="/settings" dismissTo>
                 <IconSymbol
                   name="xmark.circle.fill"
                   color={AC.systemGray}

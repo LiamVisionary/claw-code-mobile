@@ -1,6 +1,7 @@
 "use client";
 import {
   Image,
+  Linking,
   Platform,
   ScrollView,
   Text,
@@ -53,6 +54,9 @@ const useWebOnScroll = ({
   return handleWebScroll;
 };
 
+import * as AC from "@bacons/apple-colors";
+import { IconSymbol } from "../ui/IconSymbol";
+
 export function FlyoverCard({
   locations,
 }: {
@@ -63,6 +67,10 @@ export function FlyoverCard({
     longitude: number;
     altitude?: number;
     rating: number;
+    address: string;
+    isOpen: boolean;
+    userRatingsTotal: number;
+    userRating: number;
   }[];
 }) {
   const [location, setLocation] = useState(locations[0]);
@@ -91,8 +99,8 @@ export function FlyoverCard({
       }}
       style={{
         flex: 1,
-        minHeight: 360,
-        maxHeight: 360,
+        minHeight: 400,
+        maxHeight: 400,
       }}
     >
       {/* {location && <View style={{ flex: 1, backgroundColor: "blue" }} />} */}
@@ -108,7 +116,7 @@ export function FlyoverCard({
           bottom: 0,
           left: 0,
           right: 0,
-          height: 96,
+          height: 128,
         }}
         scrollEventThrottle={16}
         onScroll={Platform.select({
@@ -141,47 +149,24 @@ export function FlyoverCard({
             }}
           >
             <TouchableBounce
+              sensory
               style={{
                 flex: 1,
               }}
               onPress={() => {
-                // const coord = JSON.stringify({
-                //   latitude: value.latitude,
-                //   longitude: value.longitude,
-                // });
-                // const info = {
-                //   role: "assistant" as const,
-                //   content: `[User has selected location "${value.title}" at coordinate "${coord}"]`,
-                //   // Identifier of this UI component, so we don't insert it many times.
-                //   // id,
-                // };
-                // console.log(info);
-                // // If the last message is already inserted by us, update it. This is to avoid
-                // // adding every slider change to the AI state.
-                // if (aiState[aiState.length - 1]?.id === id) {
-                //   setAIState([...aiState.slice(0, -1), info]);
-                // } else {
-                //   // If it doesn't exist, append it to the AI state.
-                //   setAIState([...aiState, info]);
-                //   setMessages((messages) => [
-                //     ...messages,
-                //     {
-                //       display: (
-                //         <View key={String(id)} style={{ paddingHorizontal: 16 }}>
-                //           {/* <AssistantMessage key={String(id)}>{info.content}</AssistantMessage> */}
-                //           <Suggestions
-                //             suggestions={[
-                //               "Get the weather",
-                //               // 'Show me pictures',
-                //               "Book an Uber",
-                //             ]}
-                //           />
-                //         </View>
-                //       ),
-                //       id,
-                //     },
-                //   ]);
-                // }
+                // Open Maps URL
+                if (process.env.EXPO_OS === "ios") {
+                  const { title, latitude, longitude } = value;
+                  Linking.openURL(
+                    `http://maps.apple.com/?q=${title}&ll=${latitude},${longitude}`
+                  );
+                } else {
+                  const { title, latitude, longitude } = value;
+                  // Open Google Maps
+                  Linking.openURL(
+                    `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}&query_place_id=${title}`
+                  );
+                }
               }}
             >
               <BlurView
@@ -206,39 +191,57 @@ export function FlyoverCard({
                 >
                   <View
                     style={{
-                      width: 48,
-                      justifyContent: "center",
-                      alignItems: "center",
-                      aspectRatio: 1,
-                      borderRadius: 999,
-                      backgroundColor: "#353745",
-                      padding: 12,
+                      maxWidth: "80%",
+                      gap: 4,
                     }}
                   >
-                    <Image
-                      source={{ uri: value.icon }}
-                      resizeMode="contain"
+                    <Text
+                      numberOfLines={1}
                       style={{
-                        tintColor: "#EDEEE9",
-                        flex: 1,
-                        aspectRatio: 1,
+                        color: AC.label,
+                        flexWrap: "wrap",
+                        paddingRight: 16,
+                        fontSize: 16,
+                        fontWeight: "600",
                       }}
-                    />
-                  </View>
+                    >
+                      {value.title}
+                    </Text>
+                    <Text
+                      numberOfLines={2}
+                      style={{
+                        color: AC.secondaryLabel,
+                        fontSize: 14,
+                      }}
+                    >
+                      {value.address}
+                    </Text>
 
-                  <Text
-                    numberOfLines={1}
-                    style={{
-                      maxWidth: "90%",
-                      color: "#EDEEE9",
-                      flexWrap: "wrap",
-                      paddingRight: 16,
-                      fontSize: 16,
-                      fontWeight: "bold",
-                    }}
-                  >
-                    {value.title}
-                  </Text>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 6,
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: value.isOpen ? AC.systemGreen : AC.systemRed,
+                        }}
+                      >
+                        {value.isOpen ? "Open" : "Closed"}
+                      </Text>
+
+                      <IconSymbol
+                        name="star.fill"
+                        color={AC.systemYellow}
+                        size={14}
+                      />
+                      <Text style={{ color: AC.label }}>
+                        {value.userRating} ({value.userRatingsTotal})
+                      </Text>
+                    </View>
+                  </View>
 
                   {/* <Text style={{ color: '#EDEEE9', fontSize: 12, fontWeight: 'bold' }}>
                 {value.rating}★

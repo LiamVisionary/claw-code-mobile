@@ -27,23 +27,22 @@ export async function renderMedia(id: string, type: MediaType = "movie") {
         <MediaVideos id={id} type={type} />
       </React.Suspense>
 
-      <Try catch={ErrorBoundary}>   
+      <Try catch={ErrorBoundary}>
         <React.Suspense fallback={<ListSkeleton />}>
           <MediaCast id={id} type={type} />
         </React.Suspense>
       </Try>
 
-
-      <Try catch={ErrorBoundary}>   
-      <React.Suspense fallback={<ListSkeleton />}>
-        <MediaCompanies id={id} type={type} />
-      </React.Suspense>
+      <Try catch={ErrorBoundary}>
+        <React.Suspense fallback={<ListSkeleton />}>
+          <MediaCompanies id={id} type={type} />
+        </React.Suspense>
       </Try>
 
-    <Try catch={ErrorBoundary}>   
-      <React.Suspense fallback={<ListSkeleton />}>
-        <SimilarMedia id={id} type={type} />
-      </React.Suspense>
+      <Try catch={ErrorBoundary}>
+        <React.Suspense fallback={<ListSkeleton />}>
+          <SimilarMedia id={id} type={type} />
+        </React.Suspense>
       </Try>
     </>
   );
@@ -72,7 +71,7 @@ function HorizontalList({
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 12, gap: 8, }}
+        contentContainerStyle={{ paddingHorizontal: 12, gap: 8 }}
       >
         {children}
       </ScrollView>
@@ -149,14 +148,22 @@ function CastCard({ person }: { person: any }) {
   // Something is broken here when deployed to expo
   return (
     <Link href={`/movie/actor/${person.id}`} asChild>
-      <TouchableBounce style={{ width: 100, maxWidth: 100, marginHorizontal: 4 }}>
+      <TouchableBounce
+        sensory
+        style={{ width: 100, maxWidth: 100, marginHorizontal: 4 }}
+      >
         <Image
           source={{
             uri: person.profile_path
               ? `https://image.tmdb.org/t/p/w200${person.profile_path}`
               : "https://via.placeholder.com/100x150",
           }}
-          style={{ width: 100, height: 150, borderRadius: 8, backgroundColor: secondarySystemGroupedBackground }}
+          style={{
+            width: 100,
+            height: 150,
+            borderRadius: 8,
+            backgroundColor: secondarySystemGroupedBackground,
+          }}
           transition={300}
         />
         <Text
@@ -205,7 +212,10 @@ function CompanyCard({ company }: { company: any }) {
 function MediaCard({ media, type }: { media: any; type: MediaType }) {
   return (
     <Link
-      href={{ pathname: `/movie/[id]`, params: { id: media.id, media_type: type }}}
+      href={{
+        pathname: `/movie/[id]`,
+        params: { id: media.id, media_type: type },
+      }}
       asChild
     >
       <TouchableBounce style={{ marginHorizontal: 4 }}>
@@ -214,7 +224,12 @@ function MediaCard({ media, type }: { media: any; type: MediaType }) {
             source={{
               uri: `https://image.tmdb.org/t/p/w300${media.poster_path}`,
             }}
-            style={{ width: 140, height: 210, borderRadius: 8, backgroundColor: secondarySystemGroupedBackground }}
+            style={{
+              width: 140,
+              height: 210,
+              borderRadius: 8,
+              backgroundColor: secondarySystemGroupedBackground,
+            }}
             transition={300}
           />
           <Text

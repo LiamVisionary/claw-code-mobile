@@ -187,7 +187,6 @@ export function WeatherCard({
   return (
     <Card
       style={{
-        backgroundColor: "white",
         gap: 12,
         [process.env.EXPO_OS === "web"
           ? `backgroundImage`
@@ -201,7 +200,7 @@ export function WeatherCard({
         asChild
         href={`https://www.google.com/search?q=${"weather in " + city}`}
       >
-        <TouchableBounce>
+        <TouchableBounce sensory>
           <View
             style={{
               flexDirection: "row",

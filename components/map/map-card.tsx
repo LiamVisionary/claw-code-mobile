@@ -20,7 +20,11 @@ export function MapCard({
   data: PointOfInterestData[];
 }) {
   return (
-    <Card title={`Results for ${city}`} style={{ padding: 0, flex: 1 }}>
+    <Card
+      fillSpace={process.env.EXPO_OS !== "web"}
+      title={`Results for ${city}`}
+      style={{ padding: 0, flex: 1 }}
+    >
       <FlyoverCard
         locations={data
           .sort((a, b) => {
@@ -34,6 +38,11 @@ export function MapCard({
             title: point.name,
             latitude: point.geometry.location.lat,
             longitude: point.geometry.location.lng,
+            // Address
+            address: point.formatted_address,
+            isOpen: point.opening_hours?.open_now,
+            userRatingsTotal: point.user_ratings_total,
+            userRating: point.rating,
           }))}
       />
     </Card>
