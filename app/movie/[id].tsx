@@ -3,7 +3,7 @@ import { BodyScrollView } from "@/components/ui/BodyScrollView";
 import { Stack, useLocalSearchParams } from "expo-router";
 import React, { useMemo } from "react";
 import { View } from "react-native";
-import * as Form from "@/components/ui/Form";
+
 export { ErrorBoundary } from "expo-router";
 
 export default function Movie() {
@@ -13,14 +13,6 @@ export default function Movie() {
   }>();
 
   const screen = useMemo(() => renderMedia(id, media_type), [id]);
-
-  // return (
-  //   <Form.List>
-  //     <Form.Section>
-  //       <Form.Text>Hey</Form.Text>
-  //     </Form.Section>
-  //   </Form.List>
-  // );
 
   return (
     <BodyScrollView>

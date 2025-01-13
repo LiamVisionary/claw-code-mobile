@@ -5,7 +5,7 @@ import { PointOfInterestData } from "./googleapis-maps";
 
 export function MapSkeleton() {
   return (
-    <Card title="Searching area...">
+    <Card title="Searching area..." fillSpace={process.env.EXPO_OS !== "web"}>
       <Skeleton dark={false} style={{ height: 240 }} />
       <Skeleton dark={false} style={{ height: 96 }} delay={200} />
     </Card>

@@ -7,10 +7,6 @@ import { IconSymbol } from "./ui/IconSymbol";
 import Skeleton from "./ui/Skeleton";
 import TouchableBounce from "./ui/TouchableBounce";
 
-// import { SubtleScaleAndFadeIn } from "@/components/external-link";
-// import Skeleton from "@/components/skeleton";
-// import { LocationData } from "./weather.types";
-
 type LocationData = any;
 
 export async function getWeatherAsync(city: string): Promise<LocationData> {
@@ -333,11 +329,6 @@ export function WeatherCard({
     </Card>
   );
 }
-
-const Colors = {
-  navy: "#102151",
-  gray: "#686F81",
-};
 
 export const MOCK_AUSTIN_WEATHER_DATA = {
   location: {
