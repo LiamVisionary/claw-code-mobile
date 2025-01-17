@@ -48,9 +48,8 @@ export async function onSubmit(message: string) {
 
   const headers = await unstable_headers();
 
-  // Chat streaming with GPT-3.5-turbo
   const result = await streamUI({
-    model: openai("gpt-3.5-turbo"),
+    model: openai("gpt-4o-mini-2024-07-18"),
     messages: [
       {
         role: "system",
