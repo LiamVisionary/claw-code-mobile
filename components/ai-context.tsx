@@ -46,6 +46,7 @@ export async function onSubmit(message: string) {
     ],
   });
 
+  //
   const headers = await unstable_headers();
 
   const result = await streamUI({

@@ -9,9 +9,9 @@ export default function Layout() {
         title: "Movies",
         headerTransparent: false,
         headerTintColor: "white",
-        headerLargeStyle: {
-          backgroundColor: undefined,
-        },
+        // headerLargeStyle: {
+        //   backgroundColor: undefined,
+        // },
       }}
     />
   );
