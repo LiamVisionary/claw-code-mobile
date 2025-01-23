@@ -90,7 +90,6 @@ function MediaHero({ media, type }: { media: any; type: MediaType }) {
           height: 300,
           resizeMode: "cover",
         }}
-        transition={300}
       />
       <View style={{ padding: 16, marginTop: -60, flexDirection: "row" }}>
         <Image
@@ -103,7 +102,6 @@ function MediaHero({ media, type }: { media: any; type: MediaType }) {
             borderRadius: 8,
             marginRight: 16,
           }}
-          transition={300}
         />
         <View style={{ flex: 1, justifyContent: "flex-end" }}>
           <Text
@@ -131,7 +129,6 @@ function VideoCard({ video }: { video: any }) {
       <Image
         source={{ uri: `https://img.youtube.com/vi/${video.key}/0.jpg` }}
         style={{ width: "100%", height: 157, borderRadius: 8 }}
-        transition={300}
       />
       <Text
         style={{ fontSize: 14, color: label, marginTop: 4 }}
@@ -163,7 +160,6 @@ function CastCard({ person }: { person: any }) {
             borderRadius: 8,
             backgroundColor: secondarySystemGroupedBackground,
           }}
-          transition={300}
         />
         <Text
           style={{ fontSize: 14, color: label, marginTop: 4, maxWidth: 100 }}
@@ -229,7 +225,6 @@ function MediaCard({ media, type }: { media: any; type: MediaType }) {
               borderRadius: 8,
               backgroundColor: secondarySystemGroupedBackground,
             }}
-            transition={300}
           />
           <Text
             style={{ fontSize: 14, color: label, marginTop: 4 }}
