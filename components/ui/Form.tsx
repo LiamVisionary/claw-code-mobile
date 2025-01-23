@@ -4,7 +4,7 @@ import { IconSymbol, IconSymbolName } from "@/components/ui/IconSymbol";
 import * as AppleColors from "@bacons/apple-colors";
 import { Href, LinkProps, Link as RouterLink, Stack } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
-import React, { forwardRef } from "react";
+import React from "react";
 import {
   OpaqueColorValue,
   Text as RNText,
@@ -21,13 +21,13 @@ import {
 import { BodyScrollView } from "./BodyScrollView";
 import { HeaderButton } from "./Header";
 
-export const List = forwardRef<
-  any,
-  ScrollViewProps & {
-    /** Set the Expo Router `<Stack />` title when mounted. */
-    navigationTitle?: string;
-  }
->(({ contentContainerStyle, ...props }, ref) => {
+export const List = ({
+  contentContainerStyle,
+  ...props
+}: ScrollViewProps & {
+  /** Set the Expo Router `<Stack />` title when mounted. */
+  navigationTitle?: string;
+}) => {
   return (
     <>
       {props.navigationTitle && (
@@ -45,7 +45,7 @@ export const List = forwardRef<
       />
     </>
   );
-});
+};
 
 List.displayName = "FormList";
 
@@ -74,10 +74,12 @@ const styles = StyleSheet.create({
   },
 });
 
-export const FormItem = forwardRef<
-  typeof TouchableHighlight,
-  Pick<ViewProps, "children"> & { href?: Href<any>; onPress?: () => void }
->(function FormItem({ children, href, onPress }, ref) {
+export function FormItem({
+  children,
+  href,
+  onPress,
+  ref,
+}: Pick<ViewProps, "children"> & { href?: Href<any>; onPress?: () => void }) {
   if (href == null) {
     if (onPress == null) {
       return (
@@ -108,7 +110,7 @@ export const FormItem = forwardRef<
       </TouchableHighlight>
     </Link>
   );
-});
+}
 
 FormItem.displayName = "FormItem";
 
@@ -128,17 +130,17 @@ type SystemImageProps =
     };
 
 /** Text but with iOS default color and sizes. */
-export const Text = React.forwardRef<
-  RNText,
-  TextProps & {
-    /** Value displayed on the right side of the form item. */
-    hint?: React.ReactNode;
-    /** Adds a prefix SF Symbol image to the left of the text */
-    systemImage?: SystemImageProps;
+export const Text = ({
+  bold,
+  ...props
+}: TextProps & {
+  /** Value displayed on the right side of the form item. */
+  hint?: React.ReactNode;
+  /** Adds a prefix SF Symbol image to the left of the text */
+  systemImage?: SystemImageProps;
 
-    bold?: boolean;
-  }
->(({ bold, ...props }, ref) => {
+  bold?: boolean;
+}) => {
   const font: TextStyle = {
     ...FormFont.default,
     fontWeight: bold ? "600" : "normal",
@@ -148,11 +150,10 @@ export const Text = React.forwardRef<
     <RNText
       dynamicTypeRamp="body"
       {...props}
-      ref={ref}
       style={mergedStyleProp(font, props.style)}
     />
   );
-});
+};
 
 Text.displayName = "FormText";
 

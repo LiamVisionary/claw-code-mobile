@@ -4,45 +4,40 @@ import {
   PlatformPressable,
   type HeaderButtonProps,
 } from "@react-navigation/elements";
-import React, { forwardRef } from "react";
+import React from "react";
 import { Platform, StyleSheet } from "react-native";
 
-export const HeaderButton = forwardRef<any, HeaderButtonProps>(
-  function HeaderButton(
-    {
-      disabled,
-      onPress,
-      pressColor,
-      pressOpacity,
-      accessibilityLabel,
-      testID,
-      style,
-      href,
-      children,
-    },
-    ref
-  ) {
-    return (
-      <PlatformPressable
-        disabled={disabled}
-        href={href}
-        accessibilityLabel={accessibilityLabel}
-        testID={testID}
-        onPress={onPress}
-        pressColor={pressColor}
-        pressOpacity={pressOpacity}
-        android_ripple={androidRipple}
-        style={[styles.container, disabled && styles.disabled, style]}
-        hitSlop={Platform.select({
-          ios: undefined,
-          default: { top: 16, right: 16, bottom: 16, left: 16 },
-        })}
-      >
-        {children}
-      </PlatformPressable>
-    );
-  }
-);
+export function HeaderButton({
+  disabled,
+  onPress,
+  pressColor,
+  pressOpacity,
+  accessibilityLabel,
+  testID,
+  style,
+  href,
+  children,
+}: HeaderButtonProps) {
+  return (
+    <PlatformPressable
+      disabled={disabled}
+      href={href}
+      accessibilityLabel={accessibilityLabel}
+      testID={testID}
+      onPress={onPress}
+      pressColor={pressColor}
+      pressOpacity={pressOpacity}
+      android_ripple={androidRipple}
+      style={[styles.container, disabled && styles.disabled, style]}
+      hitSlop={Platform.select({
+        ios: undefined,
+        default: { top: 16, right: 16, bottom: 16, left: 16 },
+      })}
+    >
+      {children}
+    </PlatformPressable>
+  );
+}
 
 const androidRipple = {
   borderless: true,
