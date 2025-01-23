@@ -151,6 +151,8 @@ export const MapView = React.forwardRef<
   }
 );
 
+MapView.displayName = "MapView";
+
 export function Marker({
   coordinate,
   focusable,

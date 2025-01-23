@@ -18,3 +18,5 @@ export const BodyScrollView = forwardRef<any, ScrollViewProps>((props, ref) => {
     />
   );
 });
+
+BodyScrollView.displayName = "BodyScrollView";

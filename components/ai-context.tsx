@@ -8,16 +8,16 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { getWeatherAsync, WeatherCard } from "./weather";
 
-if (!process.env.OPENAI_API_KEY) {
-  throw new Error("OPENAI_API_KEY is required");
-}
-
 // Skeleton and display components
 import { unstable_headers } from "expo-router/rsc/headers";
 import { getPlacesInfo } from "./map/googleapis-maps";
 import { MapCard, MapSkeleton } from "./map/map-card";
 import MarkdownText from "./markdown-text";
 import { MoviesCard, MoviesSkeleton } from "./movies/movie-card";
+
+if (!process.env.OPENAI_API_KEY) {
+  throw new Error("OPENAI_API_KEY is required");
+}
 
 export async function onSubmit(message: string) {
   "use server";

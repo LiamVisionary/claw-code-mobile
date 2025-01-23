@@ -1,16 +1,16 @@
-import { DarkTheme, ThemeProvider } from "@react-navigation/native";
+import * as Form from "@/components/ui/Form";
+import { IconSymbol } from "@/components/ui/IconSymbol";
 import Stack from "@/components/ui/Stack";
+import TouchableBounce from "@/components/ui/TouchableBounce";
+import * as AC from "@bacons/apple-colors";
+import { DarkTheme, ThemeProvider } from "@react-navigation/native";
+import { View } from "react-native";
 
 export const unstable_settings = {
   initialRouteName: "index",
 };
 
 export { ErrorBoundary } from "expo-router";
-import * as Form from "@/components/ui/Form";
-import { IconSymbol } from "@/components/ui/IconSymbol";
-import * as AC from "@bacons/apple-colors";
-import TouchableBounce from "@/components/ui/TouchableBounce";
-import { View } from "react-native";
 
 export default function Layout() {
   return (

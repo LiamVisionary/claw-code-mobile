@@ -433,23 +433,6 @@ async function SimilarMedia({ id, type }: { id: string; type: MediaType }) {
   );
 }
 
-function MovieSkeleton() {
-  return (
-    <View style={{ gap: 16 }}>
-      <View
-        style={{ height: 300, backgroundColor: "rgba(120,120,128,0.12)" }}
-      />
-      <View
-        style={{
-          height: 100,
-          backgroundColor: "rgba(120,120,128,0.12)",
-          margin: 16,
-        }}
-      />
-    </View>
-  );
-}
-
 function ListSkeleton() {
   return (
     <View style={{ marginBottom: 24 }}>

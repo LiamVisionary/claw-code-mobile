@@ -15,6 +15,8 @@ import { KeyboardFriendlyScrollView } from "./keyboard-friendly-scrollview";
 import { HeaderButton } from "./ui/Header";
 import { IconSymbol } from "./ui/IconSymbol";
 
+import * as AC from "@bacons/apple-colors";
+
 const HEADER_HEIGHT = 0;
 
 function MessagesScrollView() {
@@ -63,8 +65,6 @@ function MessagesScrollView() {
     </>
   );
 }
-
-import * as AC from "@bacons/apple-colors";
 
 const nanoid = () => Math.random().toString(36).slice(2);
 

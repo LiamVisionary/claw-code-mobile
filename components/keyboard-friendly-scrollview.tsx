@@ -45,7 +45,7 @@ export function KeyboardFriendlyScrollView({
     timeout.current = setTimeout(() => {
       ref.current?.scrollToEnd({ animated: true });
     }, 15);
-  }, [keyboard, ref.current]);
+  }, [ref]);
 
   const scrollToBottomIfNotPanning = useCallback(() => {
     if (
@@ -56,7 +56,7 @@ export function KeyboardFriendlyScrollView({
       return;
     }
     scrollToBottom();
-  }, [keyboard, scrollToBottom]);
+  }, [keyboard, scrollToBottom, isScrollViewControlled]);
 
   useDerivedValue(() => {
     if (

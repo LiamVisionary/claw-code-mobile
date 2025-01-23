@@ -7,6 +7,9 @@ import { Linking, Platform, ScrollView, Text, View } from "react-native";
 import { FlyoverMap } from "@/components/map/flyover-map";
 import TouchableBounce from "@/components/ui/TouchableBounce";
 
+import * as AC from "@bacons/apple-colors";
+import { IconSymbol } from "../ui/IconSymbol";
+
 const useWebOnScroll = ({
   onScroll,
   onScrollEnd,
@@ -47,9 +50,6 @@ const useWebOnScroll = ({
 
   return handleWebScroll;
 };
-
-import * as AC from "@bacons/apple-colors";
-import { IconSymbol } from "../ui/IconSymbol";
 
 export function FlyoverCard({
   locations,

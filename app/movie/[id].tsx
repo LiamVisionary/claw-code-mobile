@@ -12,7 +12,7 @@ export default function Movie() {
     media_type?: "movie" | "tv";
   }>();
 
-  const screen = useMemo(() => renderMedia(id, media_type), [id]);
+  const screen = useMemo(() => renderMedia(id, media_type), [id, media_type]);
 
   return (
     <BodyScrollView>

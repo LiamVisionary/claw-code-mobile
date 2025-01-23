@@ -1,21 +1,23 @@
-import React from "react";
-import { Platform } from "react-native";
 import {
-  useNavigationBuilder,
   createNavigatorFactory,
   DefaultRouterOptions,
-  StackRouter,
-  StackNavigationState,
   ParamListBase,
+  StackNavigationState,
+  StackRouter,
+  useNavigationBuilder,
 } from "@react-navigation/native";
 import {
-  NativeStackView,
   NativeStackNavigationOptions,
+  NativeStackView,
 } from "@react-navigation/native-stack";
-import { Drawer } from "vaul";
 import { withLayoutContext } from "expo-router";
+import React from "react";
+import { Platform } from "react-native";
+import { Drawer } from "vaul";
 
 import modalStyles from "./modal.module.css";
+
+import * as AC from "@bacons/apple-colors";
 
 /** Extend NativeStackNavigationOptions with extra sheet/detent props */
 type MyModalStackNavigationOptions = NativeStackNavigationOptions & {
@@ -35,7 +37,7 @@ type MyModalStackNavigationOptions = NativeStackNavigationOptions & {
    *
    * But here we specifically pass them for the web side via vaul:
    */
-  sheetAllowedDetents?: Array<number | string>; // e.g. [0.5, 1.0] or ['148px', '355px', 1]
+  sheetAllowedDetents?: (number | string)[]; // e.g. [0.5, 1.0] or ['148px', '355px', 1]
   sheetInitialDetentIndex?: number; // which index in `sheetAllowedDetents` is the default
   sheetGrabberVisible?: boolean;
 };
@@ -76,8 +78,6 @@ function MyModalStackNavigator({
     </NavigationContent>
   );
 }
-
-import * as AC from "@bacons/apple-colors";
 /**
  * Filters out "modal"/"formSheet" routes from the normal <NativeStackView> on web,
  * rendering them in a vaul <Drawer> with snap points. On native, we just let
