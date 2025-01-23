@@ -73,6 +73,7 @@ const Skeleton = ({
   delay?: number;
   dark?: boolean;
 } = {}) => {
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   const dark = inputDark ?? useColorScheme() !== "light";
   const translateX = React.useRef(new Animated.Value(-1)).current;
   const [width, setWidth] = React.useState(150);
@@ -103,7 +104,7 @@ const Skeleton = ({
     return () => {
       anim.stop();
     };
-  }, [translateX]);
+  }, [translateX, delay]);
 
   const translateXStyle = React.useMemo(
     () => ({

@@ -47,6 +47,8 @@ export const List = forwardRef<
   );
 });
 
+List.displayName = "FormList";
+
 export function HStack(props: ViewProps) {
   return (
     <View
@@ -108,6 +110,8 @@ export const FormItem = forwardRef<
   );
 });
 
+FormItem.displayName = "FormItem";
+
 const Colors = {
   systemGray4: AppleColors.systemGray4, // "rgba(209, 209, 214, 1)",
   secondarySystemGroupedBackground:
@@ -149,6 +153,8 @@ export const Text = React.forwardRef<
     />
   );
 });
+
+Text.displayName = "FormText";
 
 export function Link({
   bold,

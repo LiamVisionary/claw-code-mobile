@@ -1,6 +1,8 @@
 // Use CSS to prevent blocking the suspense loading state with a skeleton loader.
 import React from "react";
 
+import * as AC from "@bacons/apple-colors";
+
 export const SkeletonBox = ({
   width,
   height,
@@ -27,8 +29,6 @@ export const SkeletonBox = ({
     />
   );
 };
-
-import * as AC from "@bacons/apple-colors";
 
 const Skeleton = ({
   style,

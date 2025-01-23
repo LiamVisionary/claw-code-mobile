@@ -1,17 +1,11 @@
 "use client";
 
-import { useMemo, useRef } from "react";
-import { Animated } from "react-native";
+import Animated, { FadeIn as EnterFadeIn } from "react-native-reanimated";
 
 export function FadeIn({ children }: { children: React.ReactNode }) {
-  const opacity = useRef(new Animated.Value(0)).current;
-  useMemo(() => {
-    return Animated.timing(opacity, {
-      toValue: 1,
-      duration: 500,
-      useNativeDriver: true,
-    }).start();
-  }, []);
-
-  return <Animated.View style={{ opacity }}>{children}</Animated.View>;
+  return (
+    <Animated.View entering={EnterFadeIn.duration(500)}>
+      {children}
+    </Animated.View>
+  );
 }

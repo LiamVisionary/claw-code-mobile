@@ -18,6 +18,7 @@ export default function BlurTabBarBackground() {
 export function useBottomTabOverflow() {
   let tabHeight = 0;
   try {
+    // eslint-disable-next-line react-hooks/rules-of-hooks
     tabHeight = useBottomTabBarHeight();
   } catch {}
   const { bottom } = useSafeAreaInsets();
