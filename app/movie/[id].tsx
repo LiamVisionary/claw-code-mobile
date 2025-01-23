@@ -19,6 +19,10 @@ export default function Movie() {
       <Stack.Screen
         options={{
           title: "Movie",
+          headerTransparent: false,
+          headerLargeStyle: {
+            backgroundColor: undefined,
+          },
         }}
       />
       <React.Suspense fallback={<MovieSkeleton />}>{screen}</React.Suspense>

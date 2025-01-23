@@ -15,9 +15,6 @@ export default function Layout() {
             headerTransparent: false,
           },
         }),
-        // headerLargeStyle: {
-        //   backgroundColor: undefined,
-        // },
       }}
     />
   );

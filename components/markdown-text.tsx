@@ -1,10 +1,17 @@
 "use client";
 
+import * as Haptics from "expo-haptics";
+import { useEffect } from "react";
 import Markdown from "react-native-markdown-display";
 
 export default function MarkdownText(
   props: React.ComponentProps<typeof Markdown>
 ) {
+  useEffect(() => {
+    if (process.env.EXPO_OS === "ios") {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+  }, []);
   return (
     <Markdown
       debugPrintTree={false}

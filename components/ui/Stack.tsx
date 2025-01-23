@@ -10,7 +10,7 @@ const DEFAULT_STACK_HEADER: NativeStackNavigationOptions =
   process.env.EXPO_OS !== "ios"
     ? {}
     : {
-        // headerTransparent: true,
+        headerTransparent: true,
         headerBlurEffect: "systemChromeMaterial",
         headerShadowVisible: true,
         headerLargeTitleShadowVisible: false,

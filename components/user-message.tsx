@@ -21,6 +21,7 @@ export function UserMessage({ children }: { children?: React.ReactNode }) {
             borderCurve: "continuous",
             backgroundColor: "white",
             borderRadius: 20,
+            borderBottomRightRadius: 8,
             flexWrap: "wrap",
             wordWrap: "break-word",
             textAlign: "right",
@@ -33,16 +34,6 @@ export function UserMessage({ children }: { children?: React.ReactNode }) {
           {children}
         </Text>
       </View>
-
-      <View
-        style={{
-          overflow: "hidden",
-          backgroundColor: "#83189F",
-          borderRadius: 777,
-          width: 48,
-          height: 48,
-        }}
-      />
     </View>
   );
 }
