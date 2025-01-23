@@ -6,7 +6,7 @@ import { useBottomTabOverflow } from "./TabBarBackground";
 import * as AC from "@bacons/apple-colors";
 
 export const BodyScrollView = forwardRef<any, ScrollViewProps>((props, ref) => {
-  const paddingBottom = useBottomTabOverflow();
+  const paddingBottom = 72; // useBottomTabOverflow();
   return (
     <ScrollView
       automaticallyAdjustsScrollIndicatorInsets

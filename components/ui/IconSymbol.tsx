@@ -21,6 +21,13 @@ const MAPPING = {
   "car.fill": "directions-car",
   "airpodspro.chargingcase.wireless.fill": "headset",
   "person.fill.badge.plus": "person-add",
+  gear: "settings",
+  "square.and.pencil": "edit",
+  ladybug: "bug-report",
+  "xmark.circle.fill": "close",
+  "arrow.down.circle.fill": "arrow-downward",
+  "aqi.medium": "dashboard",
+  "ellipsis.circle.fill": "more-vert",
 } as Partial<
   Record<
     import("expo-symbols").SymbolViewProps["name"],
@@ -46,6 +53,9 @@ export function IconSymbol({
   color: string | OpaqueColorValue;
   style?: StyleProp<ViewStyle>;
   weight?: SymbolWeight;
+
+  /** iOS-only */
+  animationSpec?: import("expo-symbols").SymbolViewProps["animationSpec"];
 }) {
   return (
     <MaterialIcons

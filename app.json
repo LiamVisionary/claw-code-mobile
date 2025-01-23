@@ -1,26 +1,38 @@
 {
   "expo": {
-    "name": "Expo xAI",
+    "name": "Expo AI",
     "slug": "expo-ai",
     "owner": "bacon",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/icons/bouquet.png",
     "scheme": "expoai",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/images/icon.png",
+      "image": "./assets/icons/bouquet.png",
       "resizeMode": "cover",
       "backgroundColor": "#000"
     },
     "ios": {
+      "icon": {
+        "light": "./assets/icons/bouquet.png",
+        "dark": "./assets/icons/floral.png"
+      },
       "appleTeamId": "QQ57RJ5UTD",
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "app.bacon.expoai",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
-      }
+      },
+      "entitlements": {
+        "com.apple.security.application-groups": ["group.app.bacon.expoai"]
+      },
+      "associatedDomains": [
+        "applinks:exai.expo.app",
+        "webcredentials:exai.expo.app",
+        "activitycontinuation:exai.expo.app"
+      ]
     },
     "android": {
       "adaptiveIcon": {
@@ -33,13 +45,19 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      ["expo-router", {}],
+      "expo-font",
       [
-        "expo-router",
-        {
-          "origin": "https://exai--ios.expo.app"
-        }
+        "expo-quick-actions/icon/plugin",
+        [
+          "./assets/icons/scifi.png",
+          "./assets/icons/awe.png",
+          "./assets/icons/water.png",
+          "./assets/icons/coffee.png",
+          "./assets/icons/sunrise.png"
+        ]
       ],
-      "expo-font"
+      "expo-quick-actions"
     ],
     "experiments": {
       "typedRoutes": true,

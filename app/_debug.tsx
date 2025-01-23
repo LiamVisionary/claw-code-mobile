@@ -11,20 +11,25 @@ import { BodyScrollView } from "@/components/ui/BodyScrollView";
 import * as Form from "@/components/ui/Form";
 import * as AC from "@bacons/apple-colors";
 
+import * as Clipboard from "expo-clipboard";
+
 export { ErrorBoundary } from "expo-router";
 
 function getBestDashboardUrl(): any {
   // TODO: There might be a better way to do this, using the project ID.
-  // const projectId = Constants.expoConfig?.extra?.eas?.projectId
+  const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+  if (projectId) {
+    // https://expo.dev/projects/[uuid]
+    return `https://expo.dev/projects/${projectId}`;
+  }
   const owner = Constants.expoConfig?.owner ?? "[account]";
   const slug = Constants.expoConfig?.slug ?? "[project]";
 
-  //
   return `https://expo.dev/accounts/${owner}/projects/${slug}`;
 }
+
 function guessDeploymentIdFromOrigin(): string | null {
   // https://expo.dev/accounts/bacon/projects/expo-ai/hosting/deployments/o70t5q6t0r/requests
-  // TODO: There might be a better way to do this, using the project ID.
   const origin = Constants.expoConfig?.extra?.router?.origin;
   if (!origin) {
     return null;
@@ -38,6 +43,7 @@ function guessDeploymentIdFromOrigin(): string | null {
     return null;
   }
 }
+
 function getDeploymentUrl(): any {
   const id = guessDeploymentIdFromOrigin();
   if (!id) {
@@ -71,21 +77,36 @@ export default function DebugRoute() {
       >
         <Form.Section
           title="window.location"
-          footer="Embedded origin URL that Expo Router uses to invoke server actions. This should be hosted and available to the client."
+          footer="Embedded origin URL that Expo Router uses to invoke React Server Functions. This should be hosted and available to the client."
         >
           <Form.Text
             onPress={() => Clipboard.setStringAsync(window.location?.href)}
             hint={window.location?.href}
           >
-            href
+            Origin
           </Form.Text>
+        </Form.Section>
+
+        <Form.Section title="Views">
+          <Form.Link href="/movie/693134?media_type=movie">
+            /movie/693134?media_type=movie
+          </Form.Link>
+          <Form.Link href="/movie/513?media_type=tv">
+            /movie/513?media_type=tv
+          </Form.Link>
+          <Form.Link href="/movie/actor/34947">/movie/actor/34947</Form.Link>
+          <Form.Link href="/_sitemap">/_sitemap</Form.Link>
         </Form.Section>
 
         <Form.Section
           title="Server"
           footer="Call a React server action from your app to test the connection."
         >
-          <Form.Link target="_blank" href={getDeploymentUrl()}>
+          <Form.Link
+            systemImage={"aqi.medium"}
+            target="_blank"
+            href={getDeploymentUrl()}
+          >
             Dashboard
           </Form.Link>
 
@@ -135,26 +156,26 @@ export default function DebugRoute() {
           >
             Fetch headers
           </Form.Text>
-          <View>
-            <Form.Text>{JSON.stringify(headers, null, 2)}</Form.Text>
-          </View>
+          {headers && (
+            <View>
+              <Form.Text>{JSON.stringify(headers, null, 2)}</Form.Text>
+            </View>
+          )}
         </Form.Section>
 
-        <Form.Section title="Manifest">
+        {/* <Form.Section title="Manifest">
           <View>
             <Form.Text>
               {JSON.stringify(Constants.expoConfig, null, 2)}
             </Form.Text>
           </View>
-        </Form.Section>
+        </Form.Section> */}
       </BodyScrollView>
 
       <Stack.Screen options={{ title: "Debug" }} />
     </>
   );
 }
-
-import * as Clipboard from "expo-clipboard";
 
 function NetworkErrorView({ error }: { error: Error }) {
   if (error instanceof Error) {

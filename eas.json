@@ -11,7 +11,16 @@
     "preview": {
       "distribution": "internal"
     },
+    "simulator": {
+      "environment": "production",
+      "ios": {
+        "simulator": true,
+        "buildConfiguration": "Release"
+      },
+      "resourceClass": "large"
+    },
     "production": {
+      "environment": "production",
       "autoIncrement": true,
       "resourceClass": "large"
     }
