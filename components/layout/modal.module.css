@@ -1,0 +1,22 @@
+.modal {
+    display: flex;
+    flex: 1;
+}
+
+@media (min-width: 640px) {
+    .modal {
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        z-index: 50;
+        width: 100%;
+        max-width: 40rem; 
+        min-height: 40rem;
+        transform: translate(-50%, -50%);
+        box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1); /* Replace with your shadow variable */
+        max-height: 80%;
+        overflow: scroll;
+        border-radius: 0.5rem; /* Equivalent to sm:rounded-lg */
+    }
+}
+

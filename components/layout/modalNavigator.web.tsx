@@ -15,6 +15,8 @@ import {
 import { Drawer } from "vaul";
 import { withLayoutContext } from "expo-router";
 
+import modalStyles from "./modal.module.css";
+
 /** Extend NativeStackNavigationOptions with extra sheet/detent props */
 type MyModalStackNavigationOptions = NativeStackNavigationOptions & {
   presentation?:
@@ -126,7 +128,7 @@ function MyModalStackView({
 
   return (
     <div
-      data-vaul-drawer-wrapper=""
+      // data-vaul-drawer-wrapper=""
       style={{ flex: 1, display: "flex", overflow: "hidden" }}
     >
       {/* Normal stack rendering for native & non-modal routes on web */}
@@ -186,39 +188,40 @@ function MyModalStackView({
                     bottom: 0,
                     left: 0,
                     right: 0,
-
                     borderRadius: "8px 8px 0 0",
                     overflow: "hidden",
                     height: "100%",
                     maxHeight: "97%",
                   }}
                 >
-                  {/* Optional "grabber" */}
-                  {sheetGrabberVisible && (
-                    <div
-                      style={{
-                        padding: 16,
-                        width: "100%",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        backgroundColor:
-                          AC.systemGroupedBackground as unknown as string,
-                      }}
-                    >
+                  <div className={modalStyles.modal}>
+                    {/* Optional "grabber" */}
+                    {sheetGrabberVisible && (
                       <div
                         style={{
-                          width: 36,
-                          height: 4,
-                          borderRadius: 2,
-                          backgroundColor: AC.separator as unknown as string,
+                          padding: 16,
+                          width: "100%",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          backgroundColor:
+                            AC.systemGroupedBackground as unknown as string,
                         }}
-                      />
-                    </div>
-                  )}
+                      >
+                        <div
+                          style={{
+                            width: 36,
+                            height: 4,
+                            borderRadius: 2,
+                            backgroundColor: AC.separator as unknown as string,
+                          }}
+                        />
+                      </div>
+                    )}
 
-                  {/* Render the actual screen */}
-                  {descriptor.render()}
+                    {/* Render the actual screen */}
+                    {descriptor.render()}
+                  </div>
                 </Drawer.Content>
               </Drawer.Portal>
             </Drawer.Root>

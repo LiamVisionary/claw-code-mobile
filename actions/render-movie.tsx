@@ -17,7 +17,7 @@ export async function renderMedia(id: string, type: MediaType = "movie") {
       <Stack.Screen
         options={{
           title: "",
-          headerTransparent: true,
+          // headerTransparent: true,
         }}
       />
 

@@ -60,6 +60,12 @@ export default function Layout() {
           }}
         />
         <Stack.Screen
+          name="legal/privacy"
+          options={{
+            presentation: "modal",
+          }}
+        />
+        <Stack.Screen
           name="settings"
           options={{
             title: "Settings",
@@ -81,7 +87,6 @@ export default function Layout() {
         />
         <Stack.Screen
           name="movie"
-          sheet
           options={{
             presentation: "modal",
             headerShown: false,

@@ -1,4 +1,5 @@
 import Stack from "@/components/ui/Stack";
+import { Platform } from "react-native";
 
 export { ErrorBoundary } from "expo-router";
 
@@ -7,8 +8,13 @@ export default function Layout() {
     <Stack
       screenOptions={{
         title: "Movies",
-        headerTransparent: false,
+
         headerTintColor: "white",
+        ...Platform.select({
+          ios: {
+            headerTransparent: false,
+          },
+        }),
         // headerLargeStyle: {
         //   backgroundColor: undefined,
         // },
