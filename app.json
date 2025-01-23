@@ -15,13 +15,13 @@
       "backgroundColor": "#000"
     },
     "ios": {
+      "appleTeamId": "QQ57RJ5UTD",
+      "bundleIdentifier": "app.bacon.expoai",
       "icon": {
         "light": "./assets/icons/bouquet.png",
         "dark": "./assets/icons/floral.png"
       },
-      "appleTeamId": "QQ57RJ5UTD",
       "supportsTablet": false,
-      "bundleIdentifier": "app.bacon.expoai",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       },
