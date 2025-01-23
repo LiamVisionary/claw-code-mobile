@@ -1,11 +1,11 @@
 // Fork of upstream but with forward ref for Link asChild
 // https://github.com/react-navigation/react-navigation/blob/bddcc44ab0e0ad5630f7ee0feb69496412a00217/packages/elements/src/Header/HeaderButton.tsx#L1
-import React, { forwardRef } from "react";
-import { Platform, StyleSheet } from "react-native";
 import {
   PlatformPressable,
   type HeaderButtonProps,
 } from "@react-navigation/elements";
+import React, { forwardRef } from "react";
+import { Platform, StyleSheet } from "react-native";
 
 export const HeaderButton = forwardRef<any, HeaderButtonProps>(
   function HeaderButton(

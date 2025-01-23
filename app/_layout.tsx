@@ -1,5 +1,4 @@
 import { DarkTheme, ThemeProvider } from "@react-navigation/native";
-import { Link } from "expo-router";
 import Stack from "@/components/ui/Stack";
 
 export const unstable_settings = {
@@ -12,13 +11,13 @@ import { IconSymbol } from "@/components/ui/IconSymbol";
 import * as AC from "@bacons/apple-colors";
 import TouchableBounce from "@/components/ui/TouchableBounce";
 import { View } from "react-native";
+
 export default function Layout() {
   return (
     <ThemeProvider value={DarkTheme}>
       <Stack
         screenOptions={{
           title: "Expo AI",
-          // headerTransparent: false,
         }}
       >
         <Stack.Screen
@@ -43,9 +42,6 @@ export default function Layout() {
                   </View>
                 </TouchableBounce>
               </Form.Link>
-              // <Link href="/_debug" style={{ color: "black" }}>
-              //   Debug
-              // </Link>
             ),
           }}
         />

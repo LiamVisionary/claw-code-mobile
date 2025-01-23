@@ -1,10 +1,16 @@
-import React from "react";
-import { ScrollView, Image, Text, View } from "react-native";
 import { Card } from "@/components/card";
-import { MovieTouchable } from "./movie-client-components";
 import Skeleton from "@/components/ui/Skeleton";
-import { MOCK_DATA } from "./mock-movie-data";
+import React from "react";
+import { Image, ScrollView, Text, View } from "react-native";
+import { MovieTouchable } from "./movie-client-components";
+// import { MOCK_DATA } from "./mock-movie-data";
 import { CircularProgressBar } from "./circular-progress";
+
+// export function TestMoviesCard() {
+//   return <MoviesCard data={MOCK_DATA} person="Jack Black" />;
+// }
+
+// import * as AC from '@bacons/apple-colors';
 
 export type MovieEntry = {
   adult: boolean;
@@ -254,10 +260,6 @@ function MovieSkeleton() {
       />
     </View>
   );
-}
-
-export function TestMoviesCard() {
-  return <MoviesCard data={MOCK_DATA} person="Jack Black" />;
 }
 
 export function MoviesSkeleton() {

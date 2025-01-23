@@ -2,8 +2,9 @@
 import { Text, View } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
 
-import { PromptOnTap } from "./prompt-on-tap";
 import * as AC from "@bacons/apple-colors";
+import { PromptOnTap } from "./prompt-on-tap";
+
 export function FirstSuggestions() {
   return (
     <View
@@ -53,15 +54,6 @@ export function FirstSuggestions() {
                 {title}
               </Text>
             </View>
-            {/* <Text
-            style={{
-              color: "white",
-              fontSize: 14,
-              opacity: 0.8,
-            }}
-          >
-            {subtitle}
-          </Text> */}
           </PromptOnTap>
         </Animated.View>
       ))}

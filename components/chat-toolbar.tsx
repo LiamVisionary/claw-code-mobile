@@ -13,11 +13,11 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { UserMessage } from "./user-message";
+import * as AC from "@bacons/apple-colors";
+import { BlurView } from "expo-blur";
 import type { AI } from "./ai-context";
 import { FirstSuggestions } from "./first-suggestions";
-import { BlurView } from "expo-blur";
-import * as AC from "@bacons/apple-colors";
+import { UserMessage } from "./user-message";
 
 const AnimatedBlurView = Animated.createAnimatedComponent(BlurView);
 

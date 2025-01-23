@@ -6,13 +6,12 @@ import { TouchableOpacity, View, ViewStyle } from "react-native";
 import type { AI } from "@/components/ai-context";
 import { useAIState, useUIState } from "ai/rsc";
 
-import { useId } from "react";
 import { Suggestions } from "@/components/suggestions";
-import { AssistantMessage } from "../assistant-message";
-import { router } from "expo-router";
-import type { MovieEntry } from "./movie-card";
-import TouchableBounce from "../ui/TouchableBounce";
 import * as Haptics from "expo-haptics";
+import { router } from "expo-router";
+import { useId } from "react";
+import { AssistantMessage } from "../assistant-message";
+import type { MovieEntry } from "./movie-card";
 
 export function MovieTouchable({
   movie,

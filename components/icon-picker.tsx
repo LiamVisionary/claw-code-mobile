@@ -1,14 +1,15 @@
 import Stack from "@/components/ui/Stack";
 import TouchableBounce from "@/components/ui/TouchableBounce";
 import * as AC from "@bacons/apple-colors";
-import { Image, ScrollView, useColorScheme, View } from "react-native";
 import * as AppIcon from "expo-quick-actions/icon";
+import { Image, ScrollView, useColorScheme, View } from "react-native";
+
+import MaskedView from "@react-native-masked-view/masked-view";
+
 const backgroundImage =
   process.env.EXPO_OS === "web"
     ? `backgroundImage`
     : `experimental_backgroundImage`;
-
-import MaskedView from "@react-native-masked-view/masked-view";
 
 export default function Page() {
   const icons = [

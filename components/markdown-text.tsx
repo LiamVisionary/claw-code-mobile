@@ -2,7 +2,9 @@
 
 import Markdown from "react-native-markdown-display";
 
-export default function MarkdownText(props) {
+export default function MarkdownText(
+  props: React.ComponentProps<typeof Markdown>
+) {
   return (
     <Markdown
       debugPrintTree={false}
@@ -12,11 +14,9 @@ export default function MarkdownText(props) {
           paddingHorizontal: 16,
         },
         paragraph: {
-          // fontFamily: "AnonymousPro-Regular",
           fontSize: 16,
         },
         em: {
-          // fontFamily: "AnonymousPro-Italic",
           fontStyle: "italic",
         },
         code_inline: {
@@ -24,9 +24,7 @@ export default function MarkdownText(props) {
           paddingHorizontal: 2,
           borderRadius: 2,
         },
-        strong: {
-          // fontFamily: "AnonymousPro-Bold",
-        },
+        strong: {},
         blockquote: {
           backgroundColor: "#191A20",
         },

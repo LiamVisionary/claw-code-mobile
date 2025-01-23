@@ -5,12 +5,12 @@ import { ScrollViewProps } from "react-native";
 
 import Animated, {
   KeyboardState,
+  scrollTo,
   useAnimatedKeyboard,
   useAnimatedRef,
   useAnimatedStyle,
   useDerivedValue,
   useSharedValue,
-  scrollTo,
 } from "react-native-reanimated";
 
 import { useSafeAreaInsets } from "react-native-safe-area-context";

@@ -1,13 +1,12 @@
 "use server";
 
+import { FadeIn } from "@/components/ui/FadeIn";
+import TouchableBounce from "@/components/ui/TouchableBounce";
 import { label, secondarySystemGroupedBackground } from "@bacons/apple-colors";
 import { ErrorBoundary, Link, Stack } from "expo-router";
-import { Image, ScrollView, Text, View } from "react-native";
-import TouchableBounce from "@/components/ui/TouchableBounce";
-import React from "react";
-import { FadeIn } from "@/components/ui/FadeIn";
 import { Try } from "expo-router/build/views/Try";
-// import { Image } from "expo-image";
+import React from "react";
+import { Image, ScrollView, Text, View } from "react-native";
 
 type MediaType = "movie" | "tv";
 

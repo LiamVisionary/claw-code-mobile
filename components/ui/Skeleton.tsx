@@ -2,10 +2,10 @@
 
 import React from "react";
 import {
-  View,
-  StyleSheet,
   Animated,
   Easing,
+  StyleSheet,
+  View,
   ViewStyle,
   useColorScheme,
 } from "react-native";

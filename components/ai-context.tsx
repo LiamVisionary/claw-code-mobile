@@ -1,24 +1,23 @@
 // import { unstable_headers } from "expo-router/rsc/headers";
 
 import type { CoreMessage } from "ai";
-import { createAI } from "ai/rsc";
+import { createAI, getMutableAIState, streamUI } from "ai/rsc";
 import "server-only";
-import { getMutableAIState, streamUI } from "ai/rsc";
 import { z } from "zod";
 
-import { getWeatherAsync, WeatherCard } from "./weather";
 import { openai } from "@ai-sdk/openai";
+import { getWeatherAsync, WeatherCard } from "./weather";
 
 if (!process.env.OPENAI_API_KEY) {
   throw new Error("OPENAI_API_KEY is required");
 }
 
 // Skeleton and display components
-import { MoviesCard, MoviesSkeleton } from "./movies/movie-card";
-import { MapCard, MapSkeleton } from "./map/map-card";
-import { getPlacesInfo } from "./map/googleapis-maps";
 import { unstable_headers } from "expo-router/rsc/headers";
+import { getPlacesInfo } from "./map/googleapis-maps";
+import { MapCard, MapSkeleton } from "./map/map-card";
 import MarkdownText from "./markdown-text";
+import { MoviesCard, MoviesSkeleton } from "./movies/movie-card";
 
 export async function onSubmit(message: string) {
   "use server";

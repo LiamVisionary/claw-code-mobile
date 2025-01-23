@@ -2,21 +2,20 @@
 
 import { IconSymbol, IconSymbolName } from "@/components/ui/IconSymbol";
 import * as AppleColors from "@bacons/apple-colors";
-import { Href, Link as RouterLink, LinkProps, Stack } from "expo-router";
+import { Href, LinkProps, Link as RouterLink, Stack } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
-import React from "react";
-import { forwardRef } from "react";
+import React, { forwardRef } from "react";
 import {
   OpaqueColorValue,
   Text as RNText,
   ScrollViewProps,
   StyleProp,
+  StyleSheet,
   TextProps,
   TextStyle,
   TouchableHighlight,
   View,
   ViewProps,
-  StyleSheet,
   ViewStyle,
 } from "react-native";
 import { BodyScrollView } from "./BodyScrollView";

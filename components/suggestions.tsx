@@ -1,8 +1,8 @@
-import { ViewStyle, Text, View } from "react-native";
+import { Text, View, ViewStyle } from "react-native";
 
+import SparkleSvg from "@/components/svg/sparkle";
 import { SubtleScaleAndFadeIn } from "./external-link";
 import { PromptOnTap } from "./prompt-on-tap";
-import SparkleSvg from "@/components/svg/sparkle";
 
 export function Suggestions({
   suggestions,
@@ -40,7 +40,6 @@ export function Suggestions({
               />
               <Text
                 style={{
-                  // fontFamily: "AnonymousPro-Bold",
                   color: "white",
                   fontWeight: "500",
                 }}

@@ -1,13 +1,13 @@
 "use client";
 
+import SegmentedControl from "@react-native-segmented-control/segmented-control";
 import React, {
+  Children,
   createContext,
+  ReactNode,
   useContext,
   useState,
-  ReactNode,
-  Children,
 } from "react";
-import SegmentedControl from "@react-native-segmented-control/segmented-control";
 import { StyleProp, View, ViewStyle } from "react-native";
 
 /* ----------------------------------------------------------------------------------

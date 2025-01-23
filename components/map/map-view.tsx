@@ -1,15 +1,14 @@
 "use client";
-import { View } from "react-native";
 import type NativeMapView from "react-native-maps";
 import type { Camera } from "react-native-maps";
 
 import {
+  Marker as AppleMarker,
   ColorScheme,
   FeatureVisibility,
   Map,
-  Marker as AppleMarker,
 } from "mapkit-react";
-import React, { useEffect } from "react";
+import React from "react";
 
 export const MapView = React.forwardRef<
   NativeMapView,

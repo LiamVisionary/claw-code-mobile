@@ -1,6 +1,6 @@
 // import { Stack as NativeStack } from "expo-router";
-import React from "react";
 import { NativeStackNavigationOptions } from "@react-navigation/native-stack";
+import React from "react";
 
 // Better transitions on web, no changes on native.
 import NativeStack from "@/components/layout/modalNavigator";

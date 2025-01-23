@@ -29,7 +29,6 @@ export function CardHeader({
       <Text
         style={{
           fontSize: 16,
-          // fontFamily: 'AnonymousPro-Bold',
           fontWeight: "bold",
         }}
       >
@@ -56,7 +55,6 @@ export function Card({
             fillSpace && { paddingHorizontal: 16 },
             {
               fontSize: 24,
-              // fontFamily: 'AnonymousPro-Bold',
               color: "white",
               fontWeight: "500",
             },

@@ -1,9 +1,9 @@
 // App Store privacy policy page
 "use dom";
 
-import React from "react";
 import { Stack } from "expo-router";
 import Head from "expo-router/head";
+import React from "react";
 import { ScrollView } from "react-native";
 
 const PrivacyPolicy = (_: { dom?: import("expo/dom").DOMProps }) => {

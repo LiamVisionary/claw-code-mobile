@@ -1,9 +1,9 @@
-import { BodyScrollView } from "@/components/ui/BodyScrollView";
 import { renderPersonDetails } from "@/actions/render-actor";
+import { BodyScrollView } from "@/components/ui/BodyScrollView";
+import * as AC from "@bacons/apple-colors";
 import { Stack, useLocalSearchParams } from "expo-router";
 import React, { useMemo } from "react";
 import { View } from "react-native";
-import * as AC from "@bacons/apple-colors";
 
 export { ErrorBoundary } from "expo-router";
 

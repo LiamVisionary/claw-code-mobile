@@ -2,21 +2,16 @@
 
 import { useActions, useAIState, useUIState } from "ai/rsc";
 import React from "react";
-import { Image, View, useWindowDimensions } from "react-native";
+import { Image, useWindowDimensions, View } from "react-native";
 
 import Animated from "react-native-reanimated";
 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { Stack } from "expo-router";
 import { AI } from "./ai-context";
 import { ChatToolbarInner } from "./chat-toolbar";
 import { KeyboardFriendlyScrollView } from "./keyboard-friendly-scrollview";
-// import { MapCard } from "./map/map-card";
-// import { MoviesCard } from "./movies/movie-card";
-// import { MOCK_TRENDING_SHOWS_THIS_WEEK } from "./movies/mock-movie-data";
-// import { ToolCallsFyi } from "./tool-calls-fyi";
-// import { MOCK_LOCATION_DATA_VEGAS } from "./map/googleapis-maps";
-import { Stack } from "expo-router";
 import { HeaderButton } from "./ui/Header";
 import { IconSymbol } from "./ui/IconSymbol";
 
@@ -50,7 +45,6 @@ function MessagesScrollView() {
             <View key={message.id}>{message.display}</View>
           ))
         }
-        {/* {messages.length === 0 && <ToolCallsFyi />} */}
         {messages.length === 0 && (
           <View
             style={{
@@ -71,7 +65,6 @@ function MessagesScrollView() {
 }
 
 import * as AC from "@bacons/apple-colors";
-// import { MOCK_AUSTIN_WEATHER_DATA, WeatherCard } from "./weather";
 
 const nanoid = () => Math.random().toString(36).slice(2);
 
@@ -79,21 +72,6 @@ export function ChatUI() {
   const { width } = useWindowDimensions();
   const [, setAIState] = useAIState<typeof AI>();
   const [, setMessages] = useUIState<typeof AI>();
-
-  // useEffect(() => {
-  //   setMessages([
-  //     {
-  //       id: nanoid(),
-  //       display: (
-  //         <MapCard city="Las Vegas" data={MOCK_LOCATION_DATA_VEGAS.results} />
-  //       ),
-  //     },
-  //     // {
-  //     //   id: nanoid(),
-  //     //   display: <WeatherCard city="Austin" data={MOCK_AUSTIN_WEATHER_DATA} />,
-  //     // },
-  //   ]);
-  // }, []);
 
   return (
     <Animated.View

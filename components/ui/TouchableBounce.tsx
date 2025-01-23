@@ -4,12 +4,12 @@
 import RNTouchableBounce from "react-native/Libraries/Components/Touchable/TouchableBounce";
 
 import {
-  View,
   TouchableOpacityProps as RNTouchableOpacityProps,
+  View,
 } from "react-native";
 
-import * as React from "react";
 import * as Haptics from "expo-haptics";
+import * as React from "react";
 
 export type TouchableScaleProps = Omit<
   RNTouchableOpacityProps,

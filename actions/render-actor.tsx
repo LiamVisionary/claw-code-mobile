@@ -1,10 +1,9 @@
 "use server";
 
-import TouchableBounce from "@/components/ui/TouchableBounce";
-import { Link, Stack } from "expo-router";
-import { Image, Text, View, ScrollView, TouchableOpacity } from "react-native";
-import * as AC from "@bacons/apple-colors";
 import ShowMore from "@/components/ui/ShowMore";
+import * as AC from "@bacons/apple-colors";
+import { Stack } from "expo-router";
+import { Image, Text, View } from "react-native";
 
 export async function renderPersonDetails(id: string) {
   // Fetch person details

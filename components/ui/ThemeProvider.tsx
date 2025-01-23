@@ -1,3 +1,4 @@
+import * as AppleColors from "@bacons/apple-colors";
 import {
   DarkTheme,
   DefaultTheme,
@@ -5,7 +6,6 @@ import {
   Theme,
 } from "@react-navigation/native";
 import { useColorScheme } from "react-native";
-import * as AppleColors from "@bacons/apple-colors";
 
 // Use exact native P3 colors and equivalents on Android/web.
 // This lines up well with React Navigation.

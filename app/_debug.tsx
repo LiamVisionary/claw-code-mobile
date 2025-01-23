@@ -1,15 +1,15 @@
-import { Stack } from "expo-router";
-import { Text, View } from "react-native";
-import Constants from "expo-constants";
 import {
   getRequestHeaders,
   pingServer,
   pingServerError,
 } from "@/components/debug/debug-actions";
-import { useState } from "react";
 import { BodyScrollView } from "@/components/ui/BodyScrollView";
 import * as Form from "@/components/ui/Form";
 import * as AC from "@bacons/apple-colors";
+import Constants from "expo-constants";
+import { Stack } from "expo-router";
+import { useState } from "react";
+import { Text, View } from "react-native";
 
 import * as Clipboard from "expo-clipboard";
 

@@ -6,7 +6,6 @@ export function AssistantMessage({ children }: { children?: React.ReactNode }) {
     <Text
       style={{
         color: "white",
-        //   fontFamily: "AnonymousPro-Regular",
         paddingHorizontal: 16,
         paddingBottom: 8,
         fontSize: 16,

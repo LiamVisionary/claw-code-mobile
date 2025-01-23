@@ -1,16 +1,10 @@
 "use client";
-import {
-  Image,
-  Linking,
-  Platform,
-  ScrollView,
-  Text,
-  TouchableOpacity,
-  View,
-} from "react-native";
-import { FlyoverMap } from "./flyover-map";
-import { useState, useId, useRef, useEffect } from "react";
+
 import { BlurView } from "expo-blur";
+import { useEffect, useRef, useState } from "react";
+import { Linking, Platform, ScrollView, Text, View } from "react-native";
+
+import { FlyoverMap } from "@/components/map/flyover-map";
 import TouchableBounce from "@/components/ui/TouchableBounce";
 
 const useWebOnScroll = ({
