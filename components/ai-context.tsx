@@ -9,15 +9,6 @@ import { z } from "zod";
 import { getWeatherAsync, WeatherCard } from "./weather";
 import { openai } from "@ai-sdk/openai";
 
-// const xai = createOpenAI({
-//   name: "xai",
-//   baseURL: "https://api.x.ai/v1",
-//   apiKey: process.env.XAI_API_KEY ?? "",
-// });
-
-if (!process.env.XAI_API_KEY) {
-  throw new Error("XAI_API_KEY is required");
-}
 if (!process.env.OPENAI_API_KEY) {
   throw new Error("OPENAI_API_KEY is required");
 }
