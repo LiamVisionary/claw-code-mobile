@@ -236,10 +236,6 @@ export function FlyoverCard({
                       </Text>
                     </View>
                   </View>
-
-                  {/* <Text style={{ color: '#EDEEE9', fontSize: 12, fontWeight: 'bold' }}>
-                {value.rating}★
-              </Text> */}
                 </View>
               </BlurView>
             </TouchableBounce>

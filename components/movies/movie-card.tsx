@@ -77,6 +77,12 @@ export enum Department {
   Writing = "Writing",
 }
 
+const Colors = {
+  gray: "#686F81",
+};
+const POSTER_WIDTH = 150;
+const POSTER_RATIO = 1.5;
+
 export async function getMoviesData(): Promise<MoviesData["results"]> {
   const url = "https://api.themoviedb.org/3/trending/movie/day?language=en-US";
 
@@ -148,9 +154,6 @@ export function MoviesCard({
     </>
   );
 }
-
-const POSTER_WIDTH = 150;
-const POSTER_RATIO = 1.5;
 
 function MovieCard({
   movie,
@@ -236,9 +239,7 @@ function MovieSkeleton() {
     <View
       style={{
         width: POSTER_WIDTH,
-
         flexDirection: "column",
-
         minHeight: 315,
       }}
     >
@@ -268,7 +269,6 @@ export function MoviesSkeleton() {
       title="Fetching..."
       style={{
         padding: 0,
-
         pointerEvents: "none",
       }}
     >
@@ -281,7 +281,3 @@ export function MoviesSkeleton() {
     </Card>
   );
 }
-
-const Colors = {
-  gray: "#686F81",
-};
