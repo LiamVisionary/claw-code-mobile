@@ -4,6 +4,7 @@ import React from "react";
 import {
   Animated,
   Easing,
+  StyleProp,
   StyleSheet,
   View,
   ViewStyle,
@@ -69,7 +70,7 @@ const Skeleton = ({
   delay,
   dark: inputDark,
 }: {
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
   delay?: number;
   dark?: boolean;
 } = {}) => {
