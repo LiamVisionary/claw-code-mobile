@@ -64,6 +64,7 @@ export function ChatToolbarInner({
   const onSubmitMessage = useCallback(
     (value: string) => {
       if (value.trim() === "") {
+        textInput.current?.blur();
         return;
       }
 
@@ -108,6 +109,7 @@ export function ChatToolbarInner({
           right: 0,
           backgroundColor: "transparent",
           gap: 8,
+          pointerEvents: "box-none",
         },
         translateStyle,
       ]}
@@ -141,7 +143,8 @@ export function ChatToolbarInner({
             color: "white",
             // #1E1E1E
             padding: 16,
-            borderColor: AC.systemGray5,
+            borderColor: "rgba(44, 44, 46, 1)",
+            // borderColor: AC.systemGray5,
             backgroundColor: AC.secondarySystemGroupedBackground,
             borderWidth: 1,
             borderRadius: 999,

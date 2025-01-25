@@ -5,7 +5,7 @@ import { Image, ScrollView, Text, View } from "react-native";
 import { IconSymbol } from "./ui/IconSymbol";
 import TouchableBounce from "./ui/TouchableBounce";
 
-type LocationData = any;
+type LocationData = { forecast: any; location: any; current: any };
 
 export async function getWeatherAsync(city: string): Promise<LocationData> {
   const data = await fetch(
@@ -15,7 +15,7 @@ export async function getWeatherAsync(city: string): Promise<LocationData> {
   return data;
 }
 
-function Card({ title, children, style }: any) {
+function Card({ children, style }: any) {
   return (
     <View
       style={{
@@ -43,17 +43,17 @@ export function WeatherCard({
   data,
 }: {
   city: string;
-  data: LocationData;
+  data?: LocationData;
 }) {
-  // current hour on...
-  const currentHour = new Date(data.location.localtime).getHours();
-  const currentHourIndex = data.forecast.forecastday[0].hour.findIndex(
-    (hour: any) => new Date(hour.time).getHours() === currentHour
-  );
-  const upcoming = data.forecast.forecastday[0].hour.slice(
-    currentHourIndex + 1
-  );
-
+  const upcoming = (() => {
+    if (!data) return [];
+    // current hour on...
+    const currentHour = new Date(data.location.localtime).getHours();
+    const currentHourIndex = data.forecast.forecastday[0].hour.findIndex(
+      (hour: any) => new Date(hour.time).getHours() === currentHour
+    );
+    return data.forecast.forecastday[0].hour.slice(currentHourIndex + 1);
+  })();
   return (
     <Card
       style={{
@@ -91,7 +91,7 @@ export function WeatherCard({
                     fontWeight: "bold",
                   }}
                 >
-                  {data.current.temp_f}°
+                  {data?.current?.temp_f ?? "--"}°
                 </Text>
                 <Text
                   style={{
@@ -122,7 +122,7 @@ export function WeatherCard({
                   marginBottom: 6,
                 }}
               >
-                {data.location.name}
+                {data?.location?.name ?? city}
               </Text>
               {/* 30° / 21° Feels like 43° */}
               <Text
@@ -131,9 +131,14 @@ export function WeatherCard({
                   fontSize: 16,
                 }}
               >
-                <Text>{data.forecast.forecastday[0].day.maxtemp_f}</Text> /{" "}
-                <Text>{data.forecast.forecastday[0].day.mintemp_f}</Text> Feels
-                like <Text>{data.current.feelslike_f}</Text>
+                <Text>
+                  {data?.forecast?.forecastday[0].day.maxtemp_f ?? "--"}
+                </Text>{" "}
+                /{" "}
+                <Text>
+                  {data?.forecast?.forecastday[0].day.mintemp_f ?? "--"}
+                </Text>{" "}
+                Feels like <Text>{data?.current?.feelslike_f ?? "--"}</Text>
               </Text>
             </View>
 

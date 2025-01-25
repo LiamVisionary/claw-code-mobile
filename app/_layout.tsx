@@ -23,6 +23,7 @@ export default function Layout() {
         <Stack.Screen
           name="index"
           options={{
+            headerTransparent: false,
             headerLeft: () => (
               <Form.Link href="/settings" asChild>
                 <TouchableBounce sensory>

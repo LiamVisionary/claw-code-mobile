@@ -56,7 +56,7 @@ export function KeyboardFriendlyScrollView({
       return;
     }
     scrollToBottom();
-  }, [keyboard, scrollToBottom, isScrollViewControlled]);
+  }, [keyboard, isScrollViewControlled, scrollToBottom]);
 
   useDerivedValue(() => {
     if (
@@ -126,11 +126,10 @@ export function KeyboardFriendlyScrollView({
     lastKeyboardPosition.value = keyboard.height.value;
   });
 
-  const translateStyle2 = useAnimatedStyle(() => {
-    const h = Math.max(keyboard.height.value, bottom);
+  const keyboardBlurUnderlayStyle = useAnimatedStyle(() => {
+    const height = Math.max(keyboard.height.value, bottom);
     return {
-      minHeight: h,
-      maxHeight: h,
+      height,
     };
   }, [bottom]);
 
@@ -158,7 +157,7 @@ export function KeyboardFriendlyScrollView({
       ref={ref}
     >
       {children}
-      <Animated.View style={translateStyle2} />
+      <Animated.View style={keyboardBlurUnderlayStyle} />
     </Animated.ScrollView>
   );
 }

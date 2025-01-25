@@ -1,8 +1,14 @@
 "use client";
 
 import { useActions, useAIState, useUIState } from "ai/rsc";
-import React from "react";
-import { Image, useWindowDimensions, View } from "react-native";
+import React, { useEffect } from "react";
+import {
+  Appearance,
+  Image,
+  Keyboard,
+  useWindowDimensions,
+  View,
+} from "react-native";
 
 import Animated from "react-native-reanimated";
 
@@ -16,8 +22,32 @@ import { HeaderButton } from "./ui/Header";
 import { IconSymbol } from "./ui/IconSymbol";
 
 import * as AC from "@bacons/apple-colors";
+import {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
 
 const HEADER_HEIGHT = 0;
+const nanoid = () => Math.random().toString(36).slice(2);
+
+function useKeyboardOpen() {
+  const [keyboardOpen, setKeyboardOpen] = React.useState(false);
+  useEffect(() => {
+    const off = Keyboard.addListener("keyboardWillShow", () => {
+      setKeyboardOpen(true);
+    });
+    const off2 = Keyboard.addListener("keyboardWillHide", () => {
+      setKeyboardOpen(false);
+    });
+    return () => {
+      off.remove();
+      off2.remove();
+    };
+  }, []);
+
+  return keyboardOpen;
+}
 
 function MessagesScrollView() {
   const [messages] = useUIState<typeof AI>();
@@ -32,7 +62,7 @@ function MessagesScrollView() {
         style={{ flex: 1 }}
         contentInsetAdjustmentBehavior="automatic"
         keyboardDismissMode="interactive"
-        keyboardShouldPersistTaps="always"
+        keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{
           paddingTop: top + HEADER_HEIGHT + 24,
@@ -47,31 +77,60 @@ function MessagesScrollView() {
             <View key={message.id}>{message.display}</View>
           ))
         }
-        {messages.length === 0 && (
-          <View
-            style={{
-              justifyContent: "center",
-              alignItems: "center",
-              flex: 1,
-            }}
-          >
-            <Image
-              source={require("@/assets/images/logo.dark.png")}
-              style={{ width: 128, height: 128, opacity: 0.3 }}
-            />
-          </View>
-        )}
       </KeyboardFriendlyScrollView>
+      {messages.length === 0 && <Logo />}
     </>
   );
 }
 
-const nanoid = () => Math.random().toString(36).slice(2);
+function Logo() {
+  const isOpen = useKeyboardOpen();
+  const translateY = useSharedValue(0);
+  const { height } = useWindowDimensions();
+  useEffect(() => {
+    translateY.value = withTiming(isOpen ? height * -0.25 : 0, {
+      duration: 200,
+    });
+  }, [isOpen, translateY, height]);
+
+  const animatedStyle = useAnimatedStyle(() => {
+    return {
+      transform: [{ translateY: translateY.value }],
+    };
+  });
+
+  return (
+    <Animated.View
+      style={[
+        {
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          justifyContent: "center",
+          alignItems: "center",
+          flex: 1,
+        },
+        animatedStyle,
+      ]}
+    >
+      <Image
+        source={require("@/assets/images/logo.dark.png")}
+        style={{ width: 128, height: 128, opacity: 0.3 }}
+      />
+    </Animated.View>
+  );
+}
 
 export function ChatUI() {
   const { width } = useWindowDimensions();
   const [, setAIState] = useAIState<typeof AI>();
   const [, setMessages] = useUIState<typeof AI>();
+
+  useEffect(() => {
+    Appearance.setColorScheme("dark");
+  }, []);
 
   return (
     <Animated.View
