@@ -77,7 +77,7 @@ User info:
           ],
         });
       }
-      return <MarkdownText>{content}</MarkdownText>;
+      return <MarkdownText done={done}>{content}</MarkdownText>;
     },
     // Define the tools here:
     tools: {

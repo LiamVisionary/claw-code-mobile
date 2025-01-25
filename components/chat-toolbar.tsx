@@ -1,6 +1,9 @@
 "use client";
 
+import * as AC from "@bacons/apple-colors";
 import { useActions, useUIState } from "ai/rsc";
+import { BlurView } from "expo-blur";
+import * as Haptics from "expo-haptics";
 import React, { useCallback, useRef, useState } from "react";
 import {
   NativeSyntheticEvent,
@@ -12,9 +15,6 @@ import Animated, {
   useAnimatedStyle,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-
-import * as AC from "@bacons/apple-colors";
-import { BlurView } from "expo-blur";
 import type { AI } from "./ai-context";
 import { FirstSuggestions } from "./first-suggestions";
 import { UserMessage } from "./user-message";
@@ -23,31 +23,33 @@ const AnimatedBlurView = Animated.createAnimatedComponent(BlurView);
 
 const nanoid = () => String(Math.random().toString(36).slice(2));
 
-export function ChatToolbarInner({
-  messages,
-  setMessages,
-  onSubmit,
-  disabled,
-}: {
+interface ChatToolbarInnerProps {
   messages: ReturnType<typeof useUIState<typeof AI>>[0];
   setMessages: ReturnType<typeof useUIState<typeof AI>>[1];
   onSubmit: ReturnType<typeof useActions<typeof AI>>["onSubmit"];
   disabled?: boolean;
-}) {
-  const [, setInputValue] = useState("");
+}
+
+export function ChatToolbarInner({
+  messages,
+  setMessages,
+  onSubmit,
+  disabled = false,
+}: ChatToolbarInnerProps) {
+  const [inputValue, setInputValue] = useState("");
   const textInput = useRef<TextInput>(null);
   const { bottom } = useSafeAreaInsets();
   const keyboard = useAnimatedKeyboard();
 
-  const translateStyle = useAnimatedStyle(() => {
-    return {
+  const translateStyle = useAnimatedStyle(
+    () => ({
       transform: [{ translateY: -keyboard.height.value }],
-    };
-  }, [bottom]);
+    }),
+    [bottom]
+  );
 
   const blurStyle = useAnimatedStyle(() => {
     const assumedKeyboardHeight = 100;
-
     const inverse = Math.max(
       0,
       Math.min(
@@ -68,11 +70,14 @@ export function ChatToolbarInner({
         return;
       }
 
+      if (process.env.EXPO_OS === "ios") {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      }
+
       setTimeout(() => {
         textInput.current?.clear();
       });
 
-      // Add user message to UI state
       setMessages((currentMessages) => [
         ...currentMessages,
         {
@@ -81,14 +86,13 @@ export function ChatToolbarInner({
         },
       ]);
 
-      // Submit and get response message
       onSubmit(value).then((responseMessage) => {
         setMessages((currentMessages) => [...currentMessages, responseMessage]);
       });
 
       setInputValue("");
     },
-    [textInput, setMessages, onSubmit, setInputValue]
+    [textInput, setMessages, onSubmit]
   );
 
   const onSubmitEditing = useCallback(
@@ -97,7 +101,6 @@ export function ChatToolbarInner({
     },
     [onSubmitMessage]
   );
-  //   const [messages] = useUIState<typeof AI>();
 
   return (
     <Animated.View
@@ -133,18 +136,16 @@ export function ChatToolbarInner({
           ref={textInput}
           onChangeText={setInputValue}
           keyboardAppearance="dark"
-          cursorColor={"white"}
+          cursorColor="white"
           returnKeyType="send"
           blurOnSubmit={false}
-          selectionHandleColor={"white"}
-          selectionColor={"white"}
+          selectionHandleColor="white"
+          selectionColor="white"
           style={{
             pointerEvents: disabled ? "none" : "auto",
             color: "white",
-            // #1E1E1E
             padding: 16,
             borderColor: "rgba(44, 44, 46, 1)",
-            // borderColor: AC.systemGray5,
             backgroundColor: AC.secondarySystemGroupedBackground,
             borderWidth: 1,
             borderRadius: 999,

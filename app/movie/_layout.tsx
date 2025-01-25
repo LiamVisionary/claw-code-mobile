@@ -8,7 +8,6 @@ export default function Layout() {
     <Stack
       screenOptions={{
         title: "Movies",
-
         headerTintColor: "white",
         ...Platform.select({
           ios: {
