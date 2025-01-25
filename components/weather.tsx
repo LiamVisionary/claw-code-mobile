@@ -102,15 +102,6 @@ export function WeatherCard({
                 >
                   F
                 </Text>
-                {/* <Text
-                  style={{
-                    color: AC.label,
-                    fontSize: 16,
-                    opacity: 0.5,
-                  }}
-                >
-                  C
-                </Text> */}
               </View>
 
               {/*  */}
@@ -170,39 +161,66 @@ export function WeatherCard({
         }}
       >
         {upcoming.map((hour: any, index: number) => (
-          <View key={index} style={{ alignItems: "center", gap: 4 }}>
-            <Text
-              style={{
-                color: AC.label,
-                fontSize: 12,
-                fontWeight: index === 0 ? "bold" : "normal",
-              }}
-            >
-              {index === 0
-                ? "Now"
-                : new Date(hour.time).toLocaleTimeString("en-US", {
-                    hour: "numeric",
-                  })}
-            </Text>
-            <Image
-              style={{
-                width: 48,
-                height: 48,
-                aspectRatio: 1,
-              }}
-              source={{ uri: `https:${hour.condition.icon}` }}
-            />
-            <Text
-              style={{
-                color: AC.label,
-                fontSize: 16,
-              }}
-            >
-              {hour.temp_f}°
-            </Text>
-          </View>
+          <HourlyForecastItem hour={hour} index={index} />
         ))}
+        {!upcoming.length && (
+          <>
+            <HourlyForecastItem index={1} />
+            <HourlyForecastItem index={1} />
+            <HourlyForecastItem index={1} />
+            <HourlyForecastItem index={1} />
+            <HourlyForecastItem index={1} />
+            <HourlyForecastItem index={1} />
+            <HourlyForecastItem index={1} />
+          </>
+        )}
       </ScrollView>
     </Card>
+  );
+}
+
+function HourlyForecastItem({
+  hour,
+  index,
+}: {
+  hour?: { time: string; condition: any; temp_f: number };
+  index: number;
+}) {
+  return (
+    <View key={index} style={{ alignItems: "center", gap: 4 }}>
+      <Text
+        style={{
+          color: AC.label,
+          fontSize: 12,
+          fontWeight: index === 0 ? "bold" : "normal",
+        }}
+      >
+        {index === 0
+          ? "Now"
+          : hour
+          ? new Date(hour.time).toLocaleTimeString("en-US", {
+              hour: "numeric",
+            })
+          : "--"}
+      </Text>
+
+      <Image
+        style={{
+          width: 48,
+          height: 48,
+          aspectRatio: 1,
+        }}
+        source={hour ? { uri: `https:${hour.condition.icon}` } : undefined}
+      />
+
+      <Text
+        style={{
+          color: AC.label,
+          fontSize: 16,
+        }}
+      >
+        {hour?.temp_f ?? "--"}°
+      </Text>
+    </View>
   );
 }
