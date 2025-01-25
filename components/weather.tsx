@@ -1,4 +1,4 @@
-import * as Form from "@/components/ui/Form";
+import { Link } from "@/components/ui/Form";
 import * as AC from "@bacons/apple-colors";
 import { Image, ScrollView, Text, View } from "react-native";
 
@@ -46,14 +46,6 @@ export async function getWeatherAsync(city: string): Promise<LocationData> {
   return await response.json();
 }
 
-const Card = ({
-  children,
-  style,
-}: {
-  children: React.ReactNode;
-  style?: any;
-}) => <View style={[styles.card, style]}>{children}</View>;
-
 export function WeatherCard({
   city,
   data,
@@ -72,8 +64,8 @@ export function WeatherCard({
   })();
 
   return (
-    <Card style={styles.weatherCard}>
-      <Form.Link
+    <View style={[styles.card, styles.weatherCard]}>
+      <Link
         target="_blank"
         asChild
         href={`https://www.google.com/search?q=weather in ${city}`}
@@ -108,7 +100,7 @@ export function WeatherCard({
             />
           </View>
         </TouchableBounce>
-      </Form.Link>
+      </Link>
 
       <View style={styles.divider} />
 
@@ -125,7 +117,7 @@ export function WeatherCard({
               <HourlyForecastItem key={index} index={index} />
             ))}
       </ScrollView>
-    </Card>
+    </View>
   );
 }
 
