@@ -1,0 +1,17 @@
+
+.suggestion {
+   
+    border-radius: 16px;
+    border-bottom-left-radius: 4px;
+    padding: 8px;
+    border-color: var(--apple-systemGray5);
+    background-color: var(--apple-secondarySystemGroupedBackground);
+    border-width: 1px;
+    flex-direction: row;
+    align-items: center;
+    transition: all 0.2s;
+}
+
+.suggestion:hover {
+    background-color: var(--apple-systemGray4);
+}

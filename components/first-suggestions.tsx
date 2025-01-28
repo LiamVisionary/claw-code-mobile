@@ -1,9 +1,11 @@
 "use client";
-import { Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
 
 import * as AC from "@bacons/apple-colors";
 import { PromptOnTap } from "./prompt-on-tap";
+
+import { unstable_styles } from "./first-suggestions.module.css";
 
 export function FirstSuggestions() {
   return (
@@ -33,19 +35,7 @@ export function FirstSuggestions() {
             activeOpacity={0.7}
             prompt={title}
           >
-            <View
-              style={{
-                borderRadius: 16,
-                borderBottomLeftRadius: 4,
-                borderCurve: "continuous",
-                padding: 8,
-                borderColor: AC.systemGray5,
-                backgroundColor: AC.secondarySystemGroupedBackground,
-                borderWidth: 1,
-                flexDirection: "row",
-                alignItems: "center",
-              }}
-            >
+            <View style={[styles.suggestion, unstable_styles.suggestion]}>
               <Text
                 style={{
                   color: AC.secondaryLabel,
@@ -62,3 +52,17 @@ export function FirstSuggestions() {
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  suggestion: {
+    borderRadius: 16,
+    borderBottomLeftRadius: 4,
+    borderCurve: "continuous",
+    padding: 8,
+    borderColor: AC.systemGray5,
+    backgroundColor: AC.secondarySystemGroupedBackground,
+    borderWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+});
