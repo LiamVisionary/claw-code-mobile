@@ -14,6 +14,8 @@ This is the Expo Router AI demo from my [React Conf talk](https://www.youtube.co
 
 ## APIs
 
+You need to use the environment variables defined below in your `.env.local` file to run this project. I recommend using [EAS Environment Variables](https://docs.expo.dev/eas/using-environment-variables/#create-environment-variables) to securely store and share your environment variables since they should never be committed to git or exposed publicly.
+
 - `OPENAI_API_KEY` — [OpenAI](https://platform.openai.com/docs/overview) model (this can be swapped out for others)
 - `WEATHER_API_KEY` — [Weather API](https://www.weatherapi.com/) for realtime data.
 - `TMDB_READ_ACCESS_TOKEN` — [The MovieDB](https://developer.themoviedb.org/docs/getting-started)
