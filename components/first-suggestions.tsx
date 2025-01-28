@@ -15,12 +15,14 @@ export function FirstSuggestions() {
         paddingHorizontal: 16,
       }}
     >
-      {[
-        // ['server rendering apps', 'for native platforms'],
-        ["What's the weather"],
-        ["Things to do around me"],
-        ["Trending movies this week"],
-      ].map(([title], index) => (
+      {(
+        [
+          // ['server rendering apps', 'for native platforms'],
+          "What's the weather",
+          process.env.EXPO_OS !== "web" && "Things to do around me",
+          "Trending movies this week",
+        ].filter(Boolean) as string[]
+      ).map((title, index) => (
         <Animated.View
           entering={FadeInDown.delay((3 - index) * 100)}
           key={String(index)}

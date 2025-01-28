@@ -2,13 +2,7 @@
 
 import { useActions, useAIState, useUIState } from "ai/rsc";
 import React, { useEffect } from "react";
-import {
-  Appearance,
-  Image,
-  Keyboard,
-  useWindowDimensions,
-  View,
-} from "react-native";
+import { Image, Keyboard, useWindowDimensions, View } from "react-native";
 
 import Animated from "react-native-reanimated";
 
@@ -27,6 +21,7 @@ import {
   useSharedValue,
   withTiming,
 } from "react-native-reanimated";
+import { ChatContainer } from "./chat-container";
 
 const HEADER_HEIGHT = 0;
 const nanoid = () => Math.random().toString(36).slice(2);
@@ -128,18 +123,8 @@ export function ChatUI() {
   const [, setAIState] = useAIState<typeof AI>();
   const [, setMessages] = useUIState<typeof AI>();
 
-  useEffect(() => {
-    Appearance.setColorScheme("dark");
-  }, []);
-
   return (
-    <Animated.View
-      style={[
-        { backgroundColor: "#000", flex: 1, alignItems: "stretch" },
-        // @ts-expect-error
-        process.env.EXPO_OS === "web" && { maxHeight: "100vh" },
-      ]}
-    >
+    <ChatContainer>
       <Stack.Screen
         options={{
           headerRight: () => (
@@ -168,20 +153,11 @@ export function ChatUI() {
           ),
         }}
       />
-      <View
-        style={[
-          { flex: 1, maxWidth: 640, flexGrow: 1 },
-          width > 640 && {
-            width: 640,
-            marginHorizontal: "auto",
-          },
-        ]}
-      >
-        <MessagesScrollView />
 
-        <ChatToolbar />
-      </View>
-    </Animated.View>
+      <MessagesScrollView />
+
+      <ChatToolbar />
+    </ChatContainer>
   );
 }
 

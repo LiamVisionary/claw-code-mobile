@@ -1,9 +1,10 @@
 /// <reference types="react/canary" />
 
 import { renderRoot } from "@/actions/render-root";
+import { ChatContainer } from "@/components/chat-container";
 import { ChatToolbarInner } from "@/components/chat-toolbar";
 import React from "react";
-import { ActivityIndicator, View } from "react-native";
+import { ActivityIndicator } from "react-native";
 
 export { ErrorBoundary } from "expo-router";
 
@@ -13,14 +14,17 @@ export default function Index() {
 
 function Loading() {
   return (
-    <View style={{ flex: 1, justifyContent: "center" }}>
-      <ActivityIndicator size={"large"} />
+    <ChatContainer style={{ justifyContent: "center", alignItems: "center" }}>
+      <ActivityIndicator size="large" />
       <ChatToolbarInner
         disabled
         messages={[]}
         setMessages={() => {}}
-        onSubmit={() => {}}
+        onSubmit={async () => ({
+          id: Math.random().toString(36).slice(2),
+          display: <></>,
+        })}
       />
-    </View>
+    </ChatContainer>
   );
 }

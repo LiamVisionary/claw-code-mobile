@@ -81,6 +81,7 @@ User info:
     },
     // Define the tools here:
     tools: {
+      // TODO: The UI for this needs to be reworked on web
       get_points_of_interest: {
         description: "Get things to do for a point of interest or city",
         parameters: z
@@ -99,7 +100,12 @@ User info:
 
           let pointsOfInterest = await getPlacesInfo(poi);
 
-          function distance(lat1, lon1, lat2, lon2) {
+          function distance(
+            lat1: number,
+            lon1: number,
+            lat2: number,
+            lon2: number
+          ): number {
             var p = 0.017453292519943295; // Math.PI / 180
             var c = Math.cos;
             var a =
@@ -159,12 +165,12 @@ User info:
           media_type,
           query,
         }) {
-          console.log("get_media:", {
-            time_window,
-            media_type,
-            generated_description,
-            query,
-          });
+          // console.log("get_media:", {
+          //   time_window,
+          //   media_type,
+          //   generated_description,
+          //   query,
+          // });
           yield <MoviesSkeleton />;
 
           let url: string;
@@ -188,7 +194,7 @@ User info:
             return media;
           });
 
-          console.log("results:", movies);
+          // console.log("results:", movies);
           return <MoviesCard data={movies} title={generated_description} />;
         },
       },
@@ -201,6 +207,8 @@ User info:
           .required(),
         async *generate({ city }) {
           yield <WeatherCard city={city} />;
+          await new Promise((resolve) => setTimeout(resolve, 5000));
+
           const weatherInfo = await getWeatherAsync(city);
           // console.log("weatherInfo", JSON.stringify(weatherInfo));
           return <WeatherCard city={city} data={weatherInfo} />;

@@ -23,6 +23,9 @@ export default function Layout() {
         <Stack.Screen
           name="index"
           options={{
+            headerLargeStyle: {
+              backgroundColor: undefined,
+            },
             headerTransparent: false,
             headerLeft: () => (
               <Form.Link href="/settings" asChild>
