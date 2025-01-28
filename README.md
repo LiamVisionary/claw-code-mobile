@@ -23,6 +23,10 @@ You need to use the environment variables defined below in your `.env.local` fil
 - `GOOGLE_MAPS_API_KEY` - [Google Maps API](https://console.cloud.google.com/google/maps-apis/home) for fetching locations.
 - `EXPO_PUBLIC_APPLE_MAPKIT_JS_KEY` - [Apple Maps API](https://developer.apple.com/account/resources/services/maps-tokens) for web maps.
 
+## Development
+
+Install the project dependencies and run `npx expo` to see the project. This project can be opened in Expo Go, development builds, and in the web—no Xcode needed!
+
 # Deployment
 
 > Expo RSC is still in developer preview and subject to breaking changes! Production deployment is not officially supported yet.
