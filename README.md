@@ -1,7 +1,7 @@
 # Expo AI
 
 
-https://github.com/user-attachments/assets/851bab04-837b-4b0c-aaae-2853c95577c2
+https://github.com/user-attachments/assets/3bb52f8e-1b3d-48cf-88dc-d38feba9a98e
 
 
 This is the Expo Router AI demo from my [React Conf talk](https://www.youtube.com/watch?v=djhEgxQf3Kw). This project uses universal React Server Components in Expo Router to render native UI on the server and stream it down as part of an AI chat response.
