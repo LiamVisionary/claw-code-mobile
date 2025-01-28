@@ -1,19 +1,31 @@
 # Expo AI
 
-This is the Expo Router AI demo from my [React Conf talk](https://www.youtube.com/watch?v=djhEgxQf3Kw). This project uses experimental universal React Server Components in Expo Router to render native UI on the server and stream it down as part of an AI chat response.
+This is the Expo Router AI demo from my [React Conf talk](https://www.youtube.com/watch?v=djhEgxQf3Kw). This project uses universal React Server Components in Expo Router to render native UI on the server and stream it down as part of an AI chat response.
+
+## Features
+
+- [Expo Router](https://docs.expo.dev/router/introduction/) — The universal React framework.
+  - Universal routing and rendering for native and web platforms.
+  - Full deep linking support everywhere.
+  - React Server Functions and streamed responses from the edge.
+  - Native navigation, gestures, and animations.
+- [AI SDK](https://sdk.vercel.ai/docs) — Uses experimental RSC support in the `ai` package for tool calls to OpenAI.
+
+
+## APIs
+
+- `OPENAI_API_KEY` — [OpenAI](https://platform.openai.com/docs/overview) model (this can be swapped out for others)
+- `WEATHER_API_KEY` — [Weather API](https://www.weatherapi.com/) for realtime data.
+- `TMDB_READ_ACCESS_TOKEN` — [The MovieDB](https://developer.themoviedb.org/docs/getting-started)
+- `TMDB_API_KEY` — [The MovieDB](https://developer.themoviedb.org/docs/getting-started)
+- `GOOGLE_MAPS_API_KEY` - [Google Maps API](https://console.cloud.google.com/google/maps-apis/home) for fetching locations.
+- `EXPO_PUBLIC_APPLE_MAPKIT_JS_KEY` - [Apple Maps API](https://developer.apple.com/account/resources/services/maps-tokens) for web maps.
 
 # Deployment
 
 > Expo RSC is still in developer preview and subject to breaking changes! Production deployment is not officially supported yet.
 
 Ensure the environment variables are all configured, check the `.env` file for a template. Set the environment variables in your EAS project dashboard.
-
-- `WEATHER_API_KEY` https://www.weatherapi.com/
-- `OPENAI_API_KEY` https://platform.openai.com/docs/overview
-- `TMDB_READ_ACCESS_TOKEN` https://developer.themoviedb.org/docs/getting-started
-- `TMDB_API_KEY` https://developer.themoviedb.org/docs/getting-started
-- `GOOGLE_MAPS_API_KEY` https://console.cloud.google.com/google/maps-apis/home
-- `EXPO_PUBLIC_APPLE_MAPKIT_JS_KEY` https://developer.apple.com/account/resources/services/maps-tokens
 
 ## Web
 
