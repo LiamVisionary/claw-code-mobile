@@ -4,6 +4,7 @@ import Stack from "@/components/ui/Stack";
 import TouchableBounce from "@/components/ui/TouchableBounce";
 import * as AC from "@bacons/apple-colors";
 import { DarkTheme, ThemeProvider } from "@react-navigation/native";
+import { Link } from "expo-router";
 import { View } from "react-native";
 
 export const unstable_settings = {
@@ -28,7 +29,7 @@ export default function Layout() {
             },
             headerTransparent: false,
             headerLeft: () => (
-              <Form.Link href="/settings" asChild>
+              <Link href="/settings" asChild>
                 <TouchableBounce sensory>
                   <View
                     style={[
@@ -45,7 +46,7 @@ export default function Layout() {
                     <IconSymbol name="gear" color={AC.label} />
                   </View>
                 </TouchableBounce>
-              </Form.Link>
+              </Link>
             ),
           }}
         />

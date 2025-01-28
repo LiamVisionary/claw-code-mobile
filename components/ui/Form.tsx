@@ -78,7 +78,7 @@ export function FormItem({
   children,
   href,
   onPress,
-  ref,
+  ...props
 }: Pick<ViewProps, "children"> & { href?: Href<any>; onPress?: () => void }) {
   if (href == null) {
     if (onPress == null) {
@@ -90,7 +90,7 @@ export function FormItem({
     }
     return (
       <TouchableHighlight
-        ref={ref}
+        {...props}
         underlayColor={AppleColors.systemGray4}
         onPress={onPress}
       >
@@ -103,7 +103,7 @@ export function FormItem({
 
   return (
     <Link asChild href={href} onPress={onPress}>
-      <TouchableHighlight ref={ref} underlayColor={AppleColors.systemGray4}>
+      <TouchableHighlight {...props} underlayColor={AppleColors.systemGray4}>
         <View style={styles.itemPadding}>
           <HStack style={{ minHeight: minItemHeight }}>{children}</HStack>
         </View>

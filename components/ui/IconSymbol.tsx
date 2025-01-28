@@ -28,6 +28,7 @@ const MAPPING = {
   "arrow.down.circle.fill": "arrow-downward",
   "aqi.medium": "dashboard",
   "ellipsis.circle.fill": "more-vert",
+  "arrow.up": "arrow-upward",
 } as Partial<
   Record<
     import("expo-symbols").SymbolViewProps["name"],

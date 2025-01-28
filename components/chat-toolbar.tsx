@@ -9,6 +9,7 @@ import {
   NativeSyntheticEvent,
   TextInput,
   TextInputSubmitEditingEventData,
+  View,
 } from "react-native";
 import Animated, {
   useAnimatedKeyboard,
@@ -17,6 +18,8 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { AI } from "./ai-context";
 import { FirstSuggestions } from "./first-suggestions";
+import { IconSymbol } from "./ui/IconSymbol";
+import TouchableBounce from "./ui/TouchableBounce";
 import { UserMessage } from "./user-message";
 
 const AnimatedBlurView = Animated.createAnimatedComponent(BlurView);
@@ -128,6 +131,7 @@ export function ChatToolbarInner({
             paddingHorizontal: 16,
             flexDirection: "row",
             gap: 8,
+            alignItems: "stretch",
           },
           blurStyle,
         ]}
@@ -160,7 +164,36 @@ export function ChatToolbarInner({
           placeholderTextColor={AC.systemGray2}
           onSubmitEditing={onSubmitEditing}
         />
+        <SendButton onPress={() => onSubmitMessage(inputValue)} />
       </AnimatedBlurView>
     </Animated.View>
+  );
+}
+
+function SendButton({ onPress }: { onPress: () => void }) {
+  return (
+    <TouchableBounce
+      sensory
+      // @ts-expect-error
+      style={{
+        display: process.env.EXPO_OS === "web" ? "grid" : "flex",
+      }}
+      onPress={onPress}
+    >
+      <View
+        style={{
+          flex: 1,
+          justifyContent: "center",
+          alignItems: "center",
+          borderColor: "rgba(44, 44, 46, 1)",
+          borderWidth: 1,
+          aspectRatio: 1,
+          backgroundColor: AC.label,
+          borderRadius: 999,
+        }}
+      >
+        <IconSymbol name="arrow.up" size={20} color={AC.systemBackground} />
+      </View>
+    </TouchableBounce>
   );
 }
