@@ -1,5 +1,6 @@
 // Use CSS to prevent blocking the suspense loading state with a skeleton loader.
 import React from "react";
+import { View } from "react-native";
 
 import * as AC from "@bacons/apple-colors";
 
@@ -51,13 +52,15 @@ const Skeleton = ({
         };
 
   return (
-    <div
-      style={{
-        background: dark.bg,
-        position: "relative",
-        overflow: "hidden",
-        ...(style ?? {}),
-      }}
+    <View
+      style={[
+        {
+          background: dark.bg,
+          position: "relative",
+          overflow: "hidden",
+        },
+        style,
+      ]}
     >
       <div
         style={{
@@ -82,7 +85,7 @@ const Skeleton = ({
           }
         `}
       </style>
-    </div>
+    </View>
   );
 };
 

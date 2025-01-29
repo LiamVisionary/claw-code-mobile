@@ -154,7 +154,7 @@ User info:
             query: z
               .string()
               .describe(
-                "The query to use for searching movies or TV shows. Undefined if looking for trending or popular media."
+                "The query to use for searching movies or TV shows. Set to undefined if looking for trending, new, or popular media."
               )
               .optional(),
           })
@@ -207,7 +207,7 @@ User info:
           .required(),
         async *generate({ city }) {
           yield <WeatherCard city={city} />;
-          await new Promise((resolve) => setTimeout(resolve, 5000));
+          // await new Promise((resolve) => setTimeout(resolve, 5000));
 
           const weatherInfo = await getWeatherAsync(city);
           // console.log("weatherInfo", JSON.stringify(weatherInfo));
