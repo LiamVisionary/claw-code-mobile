@@ -165,15 +165,26 @@ export function ChatToolbarInner({
           placeholderTextColor={AC.systemGray2}
           onSubmitEditing={onSubmitEditing}
         />
-        <SendButton onPress={() => onSubmitMessage(inputValue)} />
+
+        <SendButton
+          enabled={!!inputValue.length}
+          onPress={() => onSubmitMessage(inputValue)}
+        />
       </AnimatedBlurView>
     </Animated.View>
   );
 }
 
-function SendButton({ onPress }: { onPress: () => void }) {
+function SendButton({
+  enabled,
+  onPress,
+}: {
+  enabled?: boolean;
+  onPress: () => void;
+}) {
   return (
     <TouchableBounce
+      disabled={!enabled}
       sensory
       // @ts-expect-error
       style={{
@@ -193,6 +204,7 @@ function SendButton({ onPress }: { onPress: () => void }) {
             backgroundColor: AC.label,
             borderRadius: 999,
           },
+          !enabled && { opacity: 0.5 },
           tw`transition-transform hover:scale-95`,
         ]}
       >
