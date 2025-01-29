@@ -1,5 +1,6 @@
 "use client";
 
+import { tw } from "@/util/tw";
 import * as AC from "@bacons/apple-colors";
 import { useActions, useUIState } from "ai/rsc";
 import { BlurView } from "expo-blur";
@@ -181,16 +182,19 @@ function SendButton({ onPress }: { onPress: () => void }) {
       onPress={onPress}
     >
       <View
-        style={{
-          flex: 1,
-          justifyContent: "center",
-          alignItems: "center",
-          borderColor: "rgba(44, 44, 46, 1)",
-          borderWidth: 1,
-          aspectRatio: 1,
-          backgroundColor: AC.label,
-          borderRadius: 999,
-        }}
+        style={[
+          {
+            flex: 1,
+            justifyContent: "center",
+            alignItems: "center",
+            borderColor: "rgba(44, 44, 46, 1)",
+            borderWidth: 1,
+            aspectRatio: 1,
+            backgroundColor: AC.label,
+            borderRadius: 999,
+          },
+          tw`transition-transform hover:scale-95`,
+        ]}
       >
         <IconSymbol name="arrow.up" size={20} color={AC.systemBackground} />
       </View>

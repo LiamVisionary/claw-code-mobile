@@ -2,10 +2,9 @@
 import { StyleSheet, Text, View } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
 
+import { tw } from "@/util/tw";
 import * as AC from "@bacons/apple-colors";
 import { PromptOnTap } from "./prompt-on-tap";
-
-import { unstable_styles } from "./first-suggestions.module.css";
 
 export function FirstSuggestions() {
   return (
@@ -35,7 +34,12 @@ export function FirstSuggestions() {
             activeOpacity={0.7}
             prompt={title}
           >
-            <View style={[styles.suggestion, unstable_styles.suggestion]}>
+            <View
+              style={[
+                styles.suggestion,
+                tw`transition-colors hover:bg-systemGray4`,
+              ]}
+            >
               <Text
                 style={{
                   color: AC.secondaryLabel,

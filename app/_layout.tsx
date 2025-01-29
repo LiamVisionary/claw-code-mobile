@@ -7,6 +7,8 @@ import { DarkTheme, ThemeProvider } from "@react-navigation/native";
 import { Link } from "expo-router";
 import { View } from "react-native";
 
+import "@/global.css";
+
 export const unstable_settings = {
   initialRouteName: "index",
 };

@@ -114,13 +114,6 @@ export function FormItem({
 
 FormItem.displayName = "FormItem";
 
-const Colors = {
-  systemGray4: AppleColors.systemGray4, // "rgba(209, 209, 214, 1)",
-  secondarySystemGroupedBackground:
-    AppleColors.secondarySystemGroupedBackground, // "rgba(255, 255, 255, 1)",
-  separator: AppleColors.separator, // "rgba(61.2, 61.2, 66, 0.29)",
-};
-
 type SystemImageProps =
   | IconSymbolName
   | {
@@ -476,7 +469,7 @@ export function Section({
           borderCurve: "continuous",
           overflow: "hidden",
           borderRadius: 10,
-          backgroundColor: Colors.secondarySystemGroupedBackground,
+          backgroundColor: AppleColors.secondarySystemGroupedBackground,
         },
         props.style,
       ]}
@@ -562,7 +555,7 @@ function Separator() {
         marginStart: 60,
         borderBottomWidth: 0.5, //StyleSheet.hairlineWidth,
         marginTop: -0.5, // -StyleSheet.hairlineWidth,
-        borderBottomColor: Colors.separator,
+        borderBottomColor: AppleColors.separator,
       }}
     />
   );
