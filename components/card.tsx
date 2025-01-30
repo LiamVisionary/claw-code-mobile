@@ -1,7 +1,7 @@
 import { Text, View, ViewProps } from "react-native";
 
 import SkeletonLoading from "@/components/ui/Skeleton";
-
+import * as AC from "@bacons/apple-colors";
 export function CardHeader({
   icon,
   title,
@@ -43,19 +43,16 @@ export function Card({
   title,
   children,
   fillSpace,
-  ...props
 }: ViewProps & { fillSpace?: boolean; title?: string }) {
   return (
-    <View
-      style={[!fillSpace && { paddingHorizontal: 16 }, { gap: 8, flex: 1 }]}
-    >
+    <View style={[!fillSpace && { paddingHorizontal: 16 }, { gap: 8 }]}>
       {title && (
         <Text
           style={[
             fillSpace && { paddingHorizontal: 16 },
             {
               fontSize: 24,
-              color: "white",
+              color: AC.label,
               fontWeight: "500",
             },
           ]}
@@ -74,28 +71,13 @@ export function Card({
             flexShrink: 0,
             overflow: "hidden",
             backgroundColor: "white",
+            borderWidth: 1,
+            borderColor: AC.separator,
           },
-          // {
-          //   backgroundImage: 'radial-gradient(rgb(209, 209, 209) 1px, transparent 0px)',
-          //   backgroundPosition: 'fixed 0 0',
-          //   backgroundSize: '10px 10px',
-          // },
+
           style,
         ]}
       >
-        {/* <View
-          style={[
-            {
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              bottom: 0,
-              right: 0,
-              backgroundImage:
-                'linear-gradient(185deg, rgba(255, 255, 255, 0), rgb(255, 255, 255) 300px)',
-            },
-          ]}
-        /> */}
         {children}
       </View>
     </View>

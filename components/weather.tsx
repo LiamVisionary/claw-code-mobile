@@ -1,50 +1,10 @@
 import { Link } from "@/components/ui/Form";
-import * as AC from "@bacons/apple-colors";
 import { Image, ScrollView, Text, View } from "react-native";
 
 import { IconSymbol } from "./ui/IconSymbol";
 import Skeleton from "./ui/Skeleton";
 import TouchableBounce from "./ui/TouchableBounce";
-
-type ForecastDay = {
-  date: string;
-  day: {
-    maxtemp_f: number;
-    mintemp_f: number;
-  };
-  hour: Hour[];
-};
-
-type Hour = {
-  time: string;
-  temp_f: number;
-  condition: {
-    icon: string;
-  };
-};
-
-type Location = {
-  name: string;
-  localtime: string;
-};
-
-type Current = {
-  temp_f: number;
-  feelslike_f: number;
-};
-
-type LocationData = {
-  forecast: { forecastday: ForecastDay[] };
-  location: Location;
-  current: Current;
-};
-
-export async function getWeatherAsync(city: string): Promise<LocationData> {
-  const response = await fetch(
-    `http://api.weatherapi.com/v1/forecast.json?key=${process.env.WEATHER_API_KEY}&q=${city}&days=1&aqi=no&alerts=no`
-  );
-  return await response.json();
-}
+import { Hour, LocationData } from "./weather-data";
 
 export function WeatherCard({
   city,
@@ -96,7 +56,7 @@ export function WeatherCard({
             </View>
             <IconSymbol
               name="ellipsis.circle.fill"
-              color={AC.systemGray}
+              color={"rgba(142, 142, 147, 1)"}
               size={24}
             />
           </View>
@@ -114,7 +74,7 @@ export function WeatherCard({
           ? upcoming.map((hour, index) => (
               <HourlyForecastItem key={index} hour={hour} index={index} />
             ))
-          : Array.from({ length: 7 }).map((_, index) => (
+          : Array.from({ length: 10 }).map((_, index) => (
               <HourlyForecastItem key={index} index={index} />
             ))}
       </ScrollView>
@@ -183,27 +143,27 @@ const styles = {
   },
   tempText: {
     fontSize: 30,
-    color: AC.label,
+    color: "#ffffff",
     fontWeight: "bold",
   },
   tempUnit: {
-    color: AC.label,
+    color: "#ffffff",
     fontSize: 16,
     marginTop: 4,
   },
   cityText: {
     fontSize: 24,
-    color: AC.label,
+    color: "#ffffff",
     marginBottom: 6,
   },
   feelsLikeText: {
-    color: AC.secondaryLabel,
+    color: "rgba(234.6, 234.6, 244.8, 0.6)",
     fontSize: 16,
   },
   divider: {
     height: 0.5,
     opacity: 0.3,
-    backgroundColor: AC.label,
+    backgroundColor: "#ffffff",
   },
   scrollContainer: {
     gap: 8,
@@ -213,7 +173,7 @@ const styles = {
     gap: 4,
   },
   hourlyText: {
-    color: AC.label,
+    color: "#ffffff",
     fontSize: 12,
   },
   boldText: {
@@ -225,7 +185,7 @@ const styles = {
     aspectRatio: 1,
   },
   hourlyTemp: {
-    color: AC.label,
+    color: "#ffffff",
     fontSize: 16,
   },
 } as const;

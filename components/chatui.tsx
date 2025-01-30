@@ -1,10 +1,8 @@
 "use client";
 
 import { useActions, useAIState, useUIState } from "ai/rsc";
-import React, { useEffect } from "react";
-import { Image, Keyboard, useWindowDimensions, View } from "react-native";
-
-import Animated from "react-native-reanimated";
+import React from "react";
+import { View } from "react-native";
 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -16,33 +14,12 @@ import { HeaderButton } from "./ui/Header";
 import { IconSymbol } from "./ui/IconSymbol";
 
 import * as AC from "@bacons/apple-colors";
-import {
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-} from "react-native-reanimated";
+
+import { nanoid } from "@/util/nanoid";
+import { AnimatedLogo } from "./animated-logo";
 import { ChatContainer } from "./chat-container";
 
 const HEADER_HEIGHT = 0;
-const nanoid = () => Math.random().toString(36).slice(2);
-
-function useKeyboardOpen() {
-  const [keyboardOpen, setKeyboardOpen] = React.useState(false);
-  useEffect(() => {
-    const off = Keyboard.addListener("keyboardWillShow", () => {
-      setKeyboardOpen(true);
-    });
-    const off2 = Keyboard.addListener("keyboardWillHide", () => {
-      setKeyboardOpen(false);
-    });
-    return () => {
-      off.remove();
-      off2.remove();
-    };
-  }, []);
-
-  return keyboardOpen;
-}
 
 function MessagesScrollView() {
   const [messages] = useUIState<typeof AI>();
@@ -73,53 +50,12 @@ function MessagesScrollView() {
           ))
         }
       </KeyboardFriendlyScrollView>
-      {messages.length === 0 && <Logo />}
+      {messages.length === 0 && <AnimatedLogo />}
     </>
   );
 }
 
-function Logo() {
-  const isOpen = useKeyboardOpen();
-  const translateY = useSharedValue(0);
-  const { height } = useWindowDimensions();
-  useEffect(() => {
-    translateY.value = withTiming(isOpen ? height * -0.25 : 0, {
-      duration: 200,
-    });
-  }, [isOpen, translateY, height]);
-
-  const animatedStyle = useAnimatedStyle(() => {
-    return {
-      transform: [{ translateY: translateY.value }],
-    };
-  });
-
-  return (
-    <Animated.View
-      style={[
-        {
-          position: "absolute",
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          justifyContent: "center",
-          alignItems: "center",
-          flex: 1,
-        },
-        animatedStyle,
-      ]}
-    >
-      <Image
-        source={require("@/assets/images/logo.dark.png")}
-        style={{ width: 128, height: 128, opacity: 0.3 }}
-      />
-    </Animated.View>
-  );
-}
-
 export function ChatUI() {
-  const { width } = useWindowDimensions();
   const [, setAIState] = useAIState<typeof AI>();
   const [, setMessages] = useUIState<typeof AI>();
 

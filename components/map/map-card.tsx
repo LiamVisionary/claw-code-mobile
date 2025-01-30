@@ -1,3 +1,4 @@
+import { View } from "react-native";
 import { Card } from "../card";
 import Skeleton from "../ui/Skeleton";
 import { FlyoverCard } from "./flyover-map-spots";
@@ -6,8 +7,12 @@ import { PointOfInterestData } from "./googleapis-maps";
 export function MapSkeleton() {
   return (
     <Card title="Searching area..." fillSpace={process.env.EXPO_OS !== "web"}>
-      <Skeleton dark={false} style={{ height: 240 }} />
-      <Skeleton dark={false} style={{ height: 96 }} delay={200} />
+      <View style={{ borderRadius: 10, height: 240 }} />
+      <Skeleton
+        dark={false}
+        style={{ borderRadius: 10, height: 96 }}
+        delay={200}
+      />
     </Card>
   );
 }
@@ -23,7 +28,7 @@ export function MapCard({
     <Card
       fillSpace={process.env.EXPO_OS !== "web"}
       title={`Results for ${city}`}
-      style={{ padding: 0, flex: 1 }}
+      style={{ padding: 0 }}
     >
       <FlyoverCard
         locations={data

@@ -1,3 +1,4 @@
+import * as AC from "@bacons/apple-colors";
 import {
   DarkTheme,
   DefaultTheme,
@@ -11,13 +12,13 @@ import { useColorScheme } from "react-native";
 const BaconDefaultTheme: Theme = {
   dark: false,
   colors: {
-    ...DefaultTheme.colors,
-    // primary: AppleColors.systemBlue,
-    // background: AppleColors.systemGroupedBackground,
-    // card: AppleColors.secondarySystemGroupedBackground,
-    // text: AppleColors.label,
-    // border: AppleColors.separator,
-    // notification: AppleColors.systemRed,
+    // ...DefaultTheme.colors,
+    primary: AC.systemBlue,
+    background: AC.systemGroupedBackground,
+    card: AC.secondarySystemGroupedBackground,
+    text: AC.label,
+    border: AC.separator,
+    notification: AC.systemRed,
   },
   fonts: DefaultTheme.fonts,
 };

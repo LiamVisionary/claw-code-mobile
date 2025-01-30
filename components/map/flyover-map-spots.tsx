@@ -165,7 +165,7 @@ export function FlyoverCard({
             >
               <BlurView
                 experimentalBlurMethod="dimezisBlurView"
-                tint="systemMaterialDark"
+                tint="systemMaterial"
                 style={{
                   //   backgroundColor: '#191A20',
                   borderRadius: 10,

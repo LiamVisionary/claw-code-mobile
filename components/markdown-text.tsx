@@ -1,5 +1,6 @@
 "use client";
 
+import * as AC from "@bacons/apple-colors";
 import * as Haptics from "expo-haptics";
 import { useEffect } from "react";
 import Markdown from "react-native-markdown-display";
@@ -23,7 +24,7 @@ export default function MarkdownText({
         debugPrintTree={false}
         style={{
           body: {
-            color: "white",
+            color: AC.label,
             paddingHorizontal: 16,
           },
           paragraph: {
@@ -33,17 +34,18 @@ export default function MarkdownText({
             fontStyle: "italic",
           },
           code_inline: {
-            backgroundColor: "#353940",
+            backgroundColor: AC.systemGray5,
             paddingHorizontal: 2,
             borderRadius: 2,
+            paddingVertical: 0,
           },
           strong: {},
           blockquote: {
-            backgroundColor: "#191A20",
+            backgroundColor: AC.systemGray3,
           },
           fence: {
             borderWidth: 0,
-            backgroundColor: "#191A20",
+            backgroundColor: AC.systemGroupedBackground,
           },
         }}
         {...props}

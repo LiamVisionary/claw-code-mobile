@@ -1,5 +1,6 @@
 "use client";
 
+import { nanoid } from "@/util/nanoid";
 import { tw } from "@/util/tw";
 import * as AC from "@bacons/apple-colors";
 import { useActions, useUIState } from "ai/rsc";
@@ -10,6 +11,7 @@ import {
   NativeSyntheticEvent,
   TextInput,
   TextInputSubmitEditingEventData,
+  useColorScheme,
   View,
 } from "react-native";
 import Animated, {
@@ -24,8 +26,6 @@ import TouchableBounce from "./ui/TouchableBounce";
 import { UserMessage } from "./user-message";
 
 const AnimatedBlurView = Animated.createAnimatedComponent(BlurView);
-
-const nanoid = () => String(Math.random().toString(36).slice(2));
 
 interface ChatToolbarInnerProps {
   messages: ReturnType<typeof useUIState<typeof AI>>[0];
@@ -106,6 +106,8 @@ export function ChatToolbarInner({
     [onSubmitMessage]
   );
 
+  const theme = useColorScheme();
+
   return (
     <Animated.View
       style={[
@@ -124,7 +126,11 @@ export function ChatToolbarInner({
       {!disabled && messages.length === 0 && <FirstSuggestions />}
 
       <AnimatedBlurView
-        tint="systemChromeMaterialDark"
+        tint={
+          theme === "light"
+            ? "systemChromeMaterial"
+            : "systemChromeMaterialDark"
+        }
         style={[
           {
             paddingTop: 8,
@@ -140,17 +146,17 @@ export function ChatToolbarInner({
         <TextInput
           ref={textInput}
           onChangeText={setInputValue}
-          keyboardAppearance="dark"
-          cursorColor="white"
+          keyboardAppearance={theme ?? "light"}
+          cursorColor={AC.label}
           returnKeyType="send"
           blurOnSubmit={false}
-          selectionHandleColor="white"
-          selectionColor="white"
+          selectionHandleColor={AC.label}
+          selectionColor={AC.label}
           style={{
             pointerEvents: disabled ? "none" : "auto",
-            color: "white",
+            color: AC.label,
             padding: 16,
-            borderColor: "rgba(44, 44, 46, 1)",
+            borderColor: AC.separator,
             backgroundColor: AC.secondarySystemGroupedBackground,
             borderWidth: 1,
             borderRadius: 999,
@@ -198,7 +204,7 @@ function SendButton({
             flex: 1,
             justifyContent: "center",
             alignItems: "center",
-            borderColor: "rgba(44, 44, 46, 1)",
+            borderColor: AC.separator,
             borderWidth: 1,
             aspectRatio: 1,
             backgroundColor: AC.label,

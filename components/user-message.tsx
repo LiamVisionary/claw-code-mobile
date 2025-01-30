@@ -1,4 +1,5 @@
 "use client";
+import * as AC from "@bacons/apple-colors";
 import React from "react";
 import { Text, View } from "react-native";
 
@@ -20,12 +21,14 @@ export function UserMessage({ children }: { children?: React.ReactNode }) {
           style={{
             borderCurve: "continuous",
             backgroundColor: "white",
+            borderWidth: 1,
+            borderColor: AC.separator,
             borderRadius: 20,
             borderBottomRightRadius: 8,
             flexWrap: "wrap",
             wordWrap: "break-word",
             textAlign: "right",
-            color: "#102151",
+            color: "black",
             padding: 12,
             fontSize: 16,
           }}

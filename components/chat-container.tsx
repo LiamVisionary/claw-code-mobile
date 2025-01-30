@@ -1,5 +1,6 @@
 import { StyleProp, View, ViewStyle } from "react-native";
 // Media queries for web layout.
+import * as AC from "@bacons/apple-colors";
 import { unstable_styles } from "./chat-container.module.css";
 
 export function ChatContainer({
@@ -12,7 +13,11 @@ export function ChatContainer({
   return (
     <View
       style={[
-        { backgroundColor: "#000", flex: 1, alignItems: "stretch" },
+        {
+          backgroundColor: AC.systemBackground,
+          flex: 1,
+          alignItems: "stretch",
+        },
         // @ts-expect-error
         process.env.EXPO_OS === "web" && { maxHeight: "100vh" },
       ]}
