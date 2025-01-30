@@ -2,6 +2,7 @@
 
 import { FadeIn } from "@/components/ui/FadeIn";
 import TouchableBounce from "@/components/ui/TouchableBounce";
+import { tw } from "@/util/tw";
 import { label, secondarySystemGroupedBackground } from "@bacons/apple-colors";
 import { ErrorBoundary, Link, Stack } from "expo-router";
 import { Try } from "expo-router/build/views/Try";
@@ -22,9 +23,9 @@ export async function renderMedia(id: string, type: MediaType = "movie") {
 
       <MediaDetails id={id} type={type} />
 
-      <React.Suspense fallback={<ListSkeleton />}>
+      {/* <React.Suspense fallback={<ListSkeleton />}>
         <MediaVideos id={id} type={type} />
-      </React.Suspense>
+      </React.Suspense> */}
 
       <Try catch={ErrorBoundary}>
         <React.Suspense fallback={<ListSkeleton />}>
@@ -32,11 +33,11 @@ export async function renderMedia(id: string, type: MediaType = "movie") {
         </React.Suspense>
       </Try>
 
-      <Try catch={ErrorBoundary}>
+      {/* <Try catch={ErrorBoundary}>
         <React.Suspense fallback={<ListSkeleton />}>
           <MediaCompanies id={id} type={type} />
         </React.Suspense>
-      </Try>
+      </Try> */}
 
       <Try catch={ErrorBoundary}>
         <React.Suspense fallback={<ListSkeleton />}>
@@ -141,7 +142,6 @@ function VideoCard({ video }: { video: any }) {
 }
 
 function CastCard({ person }: { person: any }) {
-  // Something is broken here when deployed to expo
   return (
     <Link href={`/movie/actor/${person.id}`} asChild>
       <TouchableBounce
@@ -154,12 +154,15 @@ function CastCard({ person }: { person: any }) {
               ? `https://image.tmdb.org/t/p/w200${person.profile_path}`
               : "https://via.placeholder.com/100x150",
           }}
-          style={{
-            width: 100,
-            height: 150,
-            borderRadius: 8,
-            backgroundColor: secondarySystemGroupedBackground,
-          }}
+          style={[
+            {
+              width: 100,
+              height: 150,
+              borderRadius: 8,
+              backgroundColor: secondarySystemGroupedBackground,
+            },
+            tw`transition-transform hover:scale-95`,
+          ]}
         />
         <Text
           style={{ fontSize: 14, color: label, marginTop: 4, maxWidth: 100 }}
@@ -214,7 +217,7 @@ function MediaCard({ media, type }: { media: any; type: MediaType }) {
       asChild
     >
       <TouchableBounce style={{ marginHorizontal: 4 }}>
-        <View style={{ width: 140 }}>
+        <View style={[{ width: 140 }, tw`transition-transform hover:scale-95`]}>
           <Image
             source={{
               uri: `https://image.tmdb.org/t/p/w300${media.poster_path}`,
@@ -374,6 +377,8 @@ async function MediaVideos({ id, type }: { id: string; type: MediaType }) {
 
   if (!videos.results.length) return null;
 
+  console.log(videos);
+
   return (
     <HorizontalList title="Teasers & Trailers">
       {videos.results.map((video: any) => (
@@ -393,21 +398,6 @@ async function MediaCast({ id, type }: { id: string; type: MediaType }) {
     <HorizontalList title="Cast & Crew">
       {credits.cast.slice(0, 10).map((person: any) => (
         <CastCard key={person.id} person={person} />
-      ))}
-    </HorizontalList>
-  );
-}
-
-async function MediaCompanies({ id, type }: { id: string; type: MediaType }) {
-  const response = await fetch(
-    `https://api.themoviedb.org/3/${type}/${id}?api_key=${process.env.TMDB_API_KEY}`
-  );
-  const media = await response.json();
-
-  return (
-    <HorizontalList title="Companies">
-      {media.production_companies.map((company: any) => (
-        <CompanyCard key={company.id} company={company} />
       ))}
     </HorizontalList>
   );

@@ -181,18 +181,8 @@ function MyModalStackView({
                   }}
                 />
                 <Drawer.Content
-                  style={{
-                    position: "fixed",
-                    display: "flex",
-                    flexDirection: "column",
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    borderRadius: "8px 8px 0 0",
-                    overflow: "hidden",
-                    height: "100%",
-                    maxHeight: "97%",
-                  }}
+                  className={modalStyles.drawerContent}
+                  style={{ pointerEvents: "none" }}
                 >
                   <div className={modalStyles.modal}>
                     {/* Optional "grabber" */}

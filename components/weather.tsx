@@ -67,10 +67,11 @@ export function WeatherCard({
     <View style={[styles.card, styles.weatherCard]}>
       <Link
         target="_blank"
-        asChild
+        style={{ display: "flex" }}
+        asChild={process.env.EXPO_OS !== "web"}
         href={`https://www.google.com/search?q=weather in ${city}`}
       >
-        <TouchableBounce sensory>
+        <TouchableBounce sensory style={{ flex: 1 }}>
           <View style={styles.upperContainer}>
             <View style={styles.tempContainer}>
               <View style={styles.tempRow}>

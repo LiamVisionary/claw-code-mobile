@@ -4,6 +4,7 @@ import React from "react";
 import { Image, ScrollView, Text, View } from "react-native";
 import { MovieTouchable } from "./movie-client-components";
 // import { MOCK_DATA } from "./mock-movie-data";
+import { tw } from "@/util/tw";
 import { CircularProgressBar } from "./circular-progress";
 
 // export function TestMoviesCard() {
@@ -184,14 +185,17 @@ function MovieCard({
           source={{
             uri: `https://image.tmdb.org/t/p/w500${movie.poster_path}`,
           }}
-          style={{
-            resizeMode: "cover",
-            width: POSTER_WIDTH,
-            height: POSTER_WIDTH * POSTER_RATIO,
-            backgroundColor: "rgb(205, 205, 205)",
-            overflow: "hidden",
-            borderRadius: 8,
-          }}
+          style={[
+            {
+              resizeMode: "cover",
+              width: POSTER_WIDTH,
+              height: POSTER_WIDTH * POSTER_RATIO,
+              backgroundColor: "rgb(205, 205, 205)",
+              overflow: "hidden",
+              borderRadius: 8,
+            },
+            tw`transition-transform hover:scale-95`,
+          ]}
         />
 
         {showRating && (
