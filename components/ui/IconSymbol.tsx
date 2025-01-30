@@ -24,7 +24,7 @@ const MAPPING = {
   gear: "settings",
   "square.and.pencil": "edit",
   ladybug: "bug-report",
-  "xmark.circle.fill": "close",
+  "xmark.circle.fill": "arrow-circle-down",
   "arrow.down.circle.fill": "arrow-downward",
   "aqi.medium": "dashboard",
   "ellipsis.circle.fill": "more-vert",

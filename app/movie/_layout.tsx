@@ -10,23 +10,8 @@ export default function Layout() {
     <Stack
       screenOptions={{
         title: "Movies",
-        headerTintColor: "white",
-        headerRight: () => (
-          <Link
-            href="/"
-            dismissTo
-            asChild
-            style={{ padding: 8, marginRight: -8 }}
-          >
-            <TouchableOpacity>
-              <IconSymbol
-                name="xmark.circle.fill"
-                color={AC.systemGray}
-                size={28}
-              />
-            </TouchableOpacity>
-          </Link>
-        ),
+        headerTintColor: AC.label,
+        headerRight: () => <HeaderRightClose />,
         ...Platform.select({
           ios: {
             headerTransparent: false,
@@ -34,5 +19,23 @@ export default function Layout() {
         }),
       }}
     />
+  );
+}
+
+function HeaderRightClose() {
+  return (
+    <Link
+      href="/"
+      dismissTo
+      asChild
+      style={{
+        padding: 8,
+        marginRight: process.env.EXPO_OS === "web" ? 0 : -12,
+      }}
+    >
+      <TouchableOpacity>
+        <IconSymbol name="xmark.circle.fill" color={AC.systemGray} size={28} />
+      </TouchableOpacity>
+    </Link>
   );
 }

@@ -1,7 +1,6 @@
 import { StyleProp, View, ViewStyle } from "react-native";
 // Media queries for web layout.
 import { tw } from "@/util/tw";
-import * as AC from "@bacons/apple-colors";
 
 export function ChatContainer({
   children,
@@ -14,7 +13,6 @@ export function ChatContainer({
     <View
       style={[
         {
-          backgroundColor: AC.systemBackground,
           flex: 1,
           alignItems: "stretch",
         },
@@ -23,10 +21,9 @@ export function ChatContainer({
       ]}
     >
       <View
-        className="w-160"
         style={[
           { flex: 1, maxWidth: 640, flexGrow: 1 },
-          tw`md:w-160 md:mx-auto`,
+          tw`md:w-[640px] md:mx-auto`,
           style,
         ]}
       >
