@@ -1,6 +1,5 @@
 import { StyleProp, View, ViewStyle } from "react-native";
 // Media queries for web layout.
-import { tw } from "@/util/tw";
 
 export function ChatContainer({
   children,
@@ -20,15 +19,7 @@ export function ChatContainer({
         process.env.EXPO_OS === "web" && { maxHeight: "100vh" },
       ]}
     >
-      <View
-        style={[
-          { flex: 1, maxWidth: 640, flexGrow: 1 },
-          tw`md:w-[640px] md:mx-auto`,
-          style,
-        ]}
-      >
-        {children}
-      </View>
+      <View style={[{ flex: 1, flexGrow: 1 }, style]}>{children}</View>
     </View>
   );
 }

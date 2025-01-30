@@ -5,7 +5,7 @@
   border: 1px solid var(--apple-separator); /* Replace with your separator variable */
 }
 
-@media (min-width: 640px) {
+@media (min-width: 768px) {
   .modal {
     position: fixed;
     left: 50%;
@@ -38,7 +38,7 @@
   outline: none;
 }
 
-@media (min-width: 640px) {
+@media (min-width: 768px) {
   .drawerContent {
     max-height: 100%;
     /* pointer-events: box-none; */

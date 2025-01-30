@@ -123,7 +123,9 @@ export function ChatToolbarInner({
         translateStyle,
       ]}
     >
-      {!disabled && messages.length === 0 && <FirstSuggestions />}
+      <View style={tw`md:w-[768px] max-w-[768px] md:mx-auto`}>
+        {!disabled && messages.length === 0 && <FirstSuggestions />}
+      </View>
 
       <AnimatedBlurView
         tint={
@@ -136,46 +138,56 @@ export function ChatToolbarInner({
             paddingTop: 8,
             paddingBottom: 8,
             paddingHorizontal: 16,
-            flexDirection: "row",
-            gap: 8,
             alignItems: "stretch",
           },
           blurStyle,
         ]}
       >
-        <TextInput
-          ref={textInput}
-          onChangeText={setInputValue}
-          keyboardAppearance={theme ?? "light"}
-          cursorColor={AC.label}
-          returnKeyType="send"
-          blurOnSubmit={false}
-          selectionHandleColor={AC.label}
-          selectionColor={AC.label}
-          style={{
-            pointerEvents: disabled ? "none" : "auto",
-            color: AC.label,
-            padding: 16,
-            borderColor: AC.separator,
-            backgroundColor: AC.secondarySystemGroupedBackground,
-            borderWidth: 1,
-            borderRadius: 999,
-            paddingVertical: 8,
-            fontSize: 16,
-            outline: "none",
-            flex: 1,
-          }}
-          placeholder="Ask anything"
-          autoCapitalize="sentences"
-          autoCorrect
-          placeholderTextColor={AC.systemGray2}
-          onSubmitEditing={onSubmitEditing}
-        />
+        <View
+          style={[
+            {
+              flexDirection: "row",
+              gap: 8,
 
-        <SendButton
-          enabled={!!inputValue.length}
-          onPress={() => onSubmitMessage(inputValue)}
-        />
+              alignItems: "stretch",
+            },
+            tw`md:w-[768px] max-w-[768px] md:mx-auto`,
+          ]}
+        >
+          <TextInput
+            ref={textInput}
+            onChangeText={setInputValue}
+            keyboardAppearance={theme ?? "light"}
+            cursorColor={AC.label}
+            returnKeyType="send"
+            blurOnSubmit={false}
+            selectionHandleColor={AC.label}
+            selectionColor={AC.label}
+            style={{
+              pointerEvents: disabled ? "none" : "auto",
+              color: AC.label,
+              padding: 16,
+              borderColor: AC.separator,
+              backgroundColor: AC.secondarySystemGroupedBackground,
+              borderWidth: 1,
+              borderRadius: 999,
+              paddingVertical: 8,
+              fontSize: 16,
+              outline: "none",
+              flex: 1,
+            }}
+            placeholder="Ask anything"
+            autoCapitalize="sentences"
+            autoCorrect
+            placeholderTextColor={AC.systemGray2}
+            onSubmitEditing={onSubmitEditing}
+          />
+
+          <SendButton
+            enabled={!!inputValue.length}
+            onPress={() => onSubmitMessage(inputValue)}
+          />
+        </View>
       </AnimatedBlurView>
     </Animated.View>
   );

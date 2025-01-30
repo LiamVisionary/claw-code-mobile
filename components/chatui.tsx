@@ -16,6 +16,7 @@ import { IconSymbol } from "./ui/IconSymbol";
 import * as AC from "@bacons/apple-colors";
 
 import { nanoid } from "@/util/nanoid";
+import { tw } from "@/util/tw";
 import { AnimatedLogo } from "./animated-logo";
 import { ChatContainer } from "./chat-container";
 
@@ -31,7 +32,7 @@ function MessagesScrollView() {
   return (
     <>
       <KeyboardFriendlyScrollView
-        style={{ flex: 1 }}
+        style={[{ flex: 1 }, tw`md:w-[768px] max-w-[768px] md:mx-auto`]}
         contentInsetAdjustmentBehavior="automatic"
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
