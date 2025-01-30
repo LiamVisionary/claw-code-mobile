@@ -7,7 +7,7 @@
     "orientation": "portrait",
     "icon": "./assets/icons/bouquet.png",
     "scheme": "expoai",
-    "userInterfaceStyle": "dark",
+    "userInterfaceStyle": "automatic",
     "backgroundColor": "#000",
     "newArchEnabled": true,
     "splash": {

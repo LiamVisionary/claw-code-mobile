@@ -42,7 +42,7 @@ export function FirstSuggestions() {
             >
               <Text
                 style={{
-                  color: AC.secondaryLabel,
+                  color: AC.label,
                   fontSize: 16,
                   // fontWeight: "bold",
                 }}

@@ -1,7 +1,12 @@
 "use client";
 
 import React, { useEffect } from "react";
-import { Image, Keyboard, useWindowDimensions } from "react-native";
+import {
+  Image,
+  Keyboard,
+  useColorScheme,
+  useWindowDimensions,
+} from "react-native";
 
 import Animated from "react-native-reanimated";
 
@@ -45,6 +50,8 @@ export function AnimatedLogo() {
     };
   });
 
+  const theme = useColorScheme();
+
   return (
     <Animated.View
       style={[
@@ -62,7 +69,11 @@ export function AnimatedLogo() {
       ]}
     >
       <Image
-        source={require("@/assets/images/logo.dark.png")}
+        source={
+          theme === "light"
+            ? require("@/assets/images/logo.light.png")
+            : require("@/assets/images/logo.dark.png")
+        }
         style={{ width: 128, height: 128, opacity: 0.3 }}
       />
     </Animated.View>

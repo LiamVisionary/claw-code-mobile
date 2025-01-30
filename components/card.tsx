@@ -1,7 +1,8 @@
+import * as AC from "@bacons/apple-colors";
 import { Text, View, ViewProps } from "react-native";
 
 import SkeletonLoading from "@/components/ui/Skeleton";
-import * as AC from "@bacons/apple-colors";
+
 export function CardHeader({
   icon,
   title,

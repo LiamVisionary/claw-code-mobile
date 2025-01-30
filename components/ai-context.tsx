@@ -140,12 +140,6 @@ User info:
           media_type,
           query,
         }) {
-          // console.log("get_media:", {
-          //   time_window,
-          //   media_type,
-          //   generated_description,
-          //   query,
-          // });
           yield <MoviesSkeleton />;
 
           let url: string;
@@ -168,8 +162,6 @@ User info:
             }
             return media;
           });
-
-          // console.log("results:", JSON.stringify(movies));
           return <MoviesCard data={movies} title={generated_description} />;
         },
       },
