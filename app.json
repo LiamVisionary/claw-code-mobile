@@ -8,6 +8,7 @@
     "icon": "./assets/icons/bouquet.png",
     "scheme": "expoai",
     "userInterfaceStyle": "dark",
+    "backgroundColor": "#000",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/icons/bouquet.png",
