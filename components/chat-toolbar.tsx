@@ -205,9 +205,14 @@ function SendButton({
       disabled={!enabled}
       sensory
       // @ts-expect-error
-      style={{
-        display: process.env.EXPO_OS === "web" ? "grid" : "flex",
-      }}
+      style={
+        process.env.EXPO_OS === "web"
+          ? {
+              display: "grid",
+              marginRight: 8,
+            }
+          : {}
+      }
       onPress={onPress}
     >
       <View

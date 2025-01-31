@@ -11,6 +11,9 @@ export default function Layout() {
       screenOptions={{
         title: "Movies",
         headerTintColor: AC.label,
+        headerLargeStyle: {
+          backgroundColor: AC.systemGroupedBackground,
+        },
         headerRight: () => <HeaderRightClose />,
         ...Platform.select({
           ios: {

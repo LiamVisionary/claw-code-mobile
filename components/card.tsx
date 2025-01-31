@@ -65,14 +65,13 @@ export function Card({
         style={[
           {
             padding: 16,
-            maxWidth: 608,
             borderCurve: "continuous",
             borderRadius: fillSpace ? 0 : 12,
             gap: 8,
             flexShrink: 0,
             overflow: "hidden",
             backgroundColor: "white",
-            borderWidth: 1,
+            borderWidth: fillSpace ? 0 : 1,
             borderColor: AC.separator,
           },
 

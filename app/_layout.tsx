@@ -27,8 +27,10 @@ export default function Layout() {
           name="index"
           options={{
             headerLargeStyle: {
-              backgroundColor: undefined,
+              backgroundColor: AC.systemGroupedBackground,
             },
+            headerBlurEffect: undefined,
+
             headerTransparent: false,
             headerLeft: () => (
               <Link href="/settings" asChild>
@@ -56,8 +58,9 @@ export default function Layout() {
           name="_debug"
           options={{
             headerTransparent: false,
+
             headerLargeStyle: {
-              backgroundColor: undefined,
+              backgroundColor: AC.systemGroupedBackground,
             },
             presentation: "modal",
           }}

@@ -157,7 +157,9 @@ export function KeyboardFriendlyScrollView({
       ref={ref}
     >
       {children}
-      <Animated.View style={keyboardBlurUnderlayStyle} />
+      {process.env.EXPO_OS !== "web" && (
+        <Animated.View style={keyboardBlurUnderlayStyle} />
+      )}
     </Animated.ScrollView>
   );
 }

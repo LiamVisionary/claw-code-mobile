@@ -17,9 +17,6 @@ export default function PersonDetails() {
       <Stack.Screen
         options={{
           title: "Person",
-          headerLargeStyle: {
-            // backgroundColor: undefined,
-          },
         }}
       />
       <React.Suspense fallback={<PersonDetailsSkeleton />}>
