@@ -6,6 +6,7 @@ import { IconSymbol } from "@/components/ui/IconSymbol";
 import * as AppIcon from "expo-quick-actions/icon";
 export { ErrorBoundary } from "expo-router";
 
+// @ts-expect-error
 const HERMES_RUNTIME = global.HermesInternal?.getRuntimeProperties?.() ?? {};
 const HERMES_VERSION = HERMES_RUNTIME["OSS Release Version"];
 const isStaticHermes = HERMES_RUNTIME["Static Hermes"];

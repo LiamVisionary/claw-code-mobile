@@ -12,20 +12,6 @@ export async function renderPersonDetails(id: string) {
   );
   const person = await response.json();
 
-  // Fetch person credits
-  //   const creditsResponse = await fetch(
-  //     `https://api.themoviedb.org/3/person/${id}/combined_credits?api_key=${process.env.TMDB_API_KEY}`
-  //   );
-  //   const credits = await creditsResponse.json();
-
-  // Process credits into categories
-  //   const allCredits = credits.cast.concat(credits.crew);
-  //   const actingCredits = credits.cast;
-  //   const crewCredits = credits.crew;
-  //   const directingCredits = crewCredits.filter(
-  //     (credit: any) => credit.job === "Director"
-  //   );
-
   return (
     <View style={{ flex: 1 }}>
       <Stack.Screen options={{ title: person.name }} />
@@ -159,100 +145,6 @@ export async function renderPersonDetails(id: string) {
           <ShowMore text={person.biography} />
         </View>
       </View>
-
-      {/* Credits Section */}
-      {/* <View style={{ flex: 1, marginTop: 16 }}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={{ paddingHorizontal: 16 }}
-        >
-          <TouchableBounce style={{ marginRight: 16 }}>
-            <Text style={{ color: AC.systemBlue }}>
-              All ({allCredits.length})
-            </Text>
-          </TouchableBounce>
-          <TouchableBounce style={{ marginRight: 16 }}>
-            <Text style={{ color: AC.label }}>
-              Acting ({actingCredits.length})
-            </Text>
-          </TouchableBounce>
-          <TouchableBounce>
-            <Text style={{ color: AC.label }}>
-              Directing ({directingCredits.length})
-            </Text>
-          </TouchableBounce>
-        </ScrollView>
-
-        <ScrollView contentContainerStyle={{ padding: 16 }}>
-          <View
-            style={{
-              flexDirection: "row",
-              flexWrap: "wrap",
-              justifyContent: "space-between",
-            }}
-          >
-            {allCredits.map((credit: any) => (
-              <Link
-                key={credit.id}
-                // @ts-expect-error
-                href={`/${credit.media_type}/${credit.id}`}
-                asChild
-              >
-                <TouchableBounce
-                  style={{
-                    width: "48%",
-                    marginBottom: 16,
-                  }}
-                >
-                  <View
-                    style={{
-                      backgroundColor: AC.secondarySystemBackground,
-                      borderRadius: 12,
-                      overflow: "hidden",
-                    }}
-                  >
-                    <Image
-                      transition={200}
-                      source={{
-                        uri: credit.poster_path
-                          ? `https://image.tmdb.org/t/p/w300${credit.poster_path}`
-                          : undefined,
-                      }}
-                      style={{
-                        borderRadius: 12,
-                        width: "100%",
-                        height: 200,
-                        backgroundColor: AC.systemGray5,
-                      }}
-                    />
-                    <View style={{ padding: 8 }}>
-                      <Text
-                        numberOfLines={2}
-                        style={{
-                          fontSize: 14,
-                          fontWeight: "500",
-                          color: AC.label,
-                        }}
-                      >
-                        {credit.title || credit.name}
-                      </Text>
-                      <Text
-                        style={{
-                          fontSize: 12,
-                          color: AC.secondaryLabel,
-                        }}
-                      >
-                        {credit.character || credit.job}
-                      </Text>
-                    </View>
-                  </View>
-                </TouchableBounce>
-              </Link>
-            ))}
-          </View>
-        </ScrollView>
-      </View> */}
     </View>
   );
 }
