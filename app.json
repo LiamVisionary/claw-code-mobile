@@ -46,6 +46,7 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      "@bacons/apple-colors",
       ["expo-router", {}],
       "expo-font",
       [
