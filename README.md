@@ -81,12 +81,10 @@ This will require the following:
 
 1. Ensure hosting is setup for the project by deploying once locally first. `npx expo export -p web && eas deploy`
 2. Set the `EXPO_UNSTABLE_DEPLOY_SERVER=1` environment variable in your `.env`. This will be used to deploy and link the server during EAS Build.
-3. Create an `EXPO_TOKEN` for the project. https://expo.dev/accounts/[account]/settings/access-tokens
-4. Set the `owner` field in the `app.json` to the owner of the project (this is your EAS username).
-5. Ensure all the environment variables are set in the EAS project dashboard.
-6. Ensure the `origin` field is **NOT** set in the `app.json` or in the `expo.extra.router.origin` field. Also ensure you aren't using `app.config.js` as this is not supported with automatically linked deployments yet.
+3. Ensure all the environment variables are set in the EAS project dashboard.
+4. Ensure the `origin` field is **NOT** set in the `app.json` or in the `expo.extra.router.origin` field. Also ensure you aren't using `app.config.js` as this is not supported with automatically linked deployments yet.
 
-Then run `eas build --platform ios` to build the app and deploy a versioned a server.
+Then run `eas build --platform ios -s` to build the app and deploy a versioned a server.
 
 ## Known Issues
 
