@@ -27,7 +27,9 @@
         "ITSAppUsesNonExemptEncryption": false
       },
       "entitlements": {
-        "com.apple.security.application-groups": ["group.app.bacon.expoai"]
+        "com.apple.security.application-groups": [
+          "group.app.bacon.expoai"
+        ]
       },
       "associatedDomains": [
         "applinks:exai.expo.app",
@@ -47,7 +49,10 @@
     },
     "plugins": [
       "@bacons/apple-colors",
-      ["expo-router", {}],
+      [
+        "expo-router",
+        {}
+      ],
       "expo-font",
       [
         "expo-quick-actions/icon/plugin",
@@ -67,7 +72,8 @@
           "resizeMode": "cover",
           "backgroundColor": "#000"
         }
-      ]
+      ],
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,
