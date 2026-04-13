@@ -343,7 +343,9 @@ export const clawRuntime = {
     const run = runService.start(threadId);
     threadService.setStatus(threadId, "running");
     streamService.publish(threadId, { type: "status", status: "running" });
-    messageService.ensureAssistantMessage(threadId, messageId);
+    // Do NOT eagerly create the assistant message here — appendAssistantDelta
+    // creates it lazily on first content. This prevents empty ghost bubbles
+    // when a run produces no output (e.g. compact-only cycle).
 
     const sessionDir = path.join(workspaceDir(threadId), ".claw", "sessions");
     const cwd =

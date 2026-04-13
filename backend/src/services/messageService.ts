@@ -59,10 +59,13 @@ export const messageService = {
     return { ...message, content: updated };
   },
 
-  finalizeAssistant(threadId: string, messageId: string): Message {
+  finalizeAssistant(threadId: string, messageId: string): Message | null {
     const message = this.get(messageId);
-    if (!message) {
-      return this.ensureAssistantMessage(threadId, messageId);
+    if (!message) return null; // no content was ever written — leave no ghost bubble
+    if (!message.content.trim()) {
+      // Empty assistant message — delete it so it never appears as a blank bubble
+      db.prepare("DELETE FROM messages WHERE id = ?").run(messageId);
+      return null;
     }
     threadService.updatePreview(threadId, message.content.slice(-180));
     return message;

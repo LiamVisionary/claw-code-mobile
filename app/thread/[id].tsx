@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Animated,
   ActivityIndicator,
   FlatList,
   KeyboardAvoidingView,
@@ -29,6 +30,8 @@ export default function ThreadScreen() {
   );
   const messageMap = useGatewayStore((s) => s.messages);
   const terminalMap = useGatewayStore((s) => s.terminal);
+  const toolSteps = useGatewayStore((s) => s.toolSteps[id ?? ""] ?? []);
+  const permissionReqs = useGatewayStore((s) => (s.permissionRequests[id ?? ""] ?? []).filter((r) => r.pending));
   const messages = messageMap[id ?? ""] ?? [];
   const terminalLines = terminalMap[id ?? ""] ?? [];
   const listRef = useRef<FlatList<Message>>(null);
@@ -59,7 +62,7 @@ export default function ThreadScreen() {
 
   useEffect(() => {
     listRef.current?.scrollToEnd({ animated: true });
-  }, [messages.length]);
+  }, [messages.length, threadStatus]);
 
   const handleInputChange = (text: string) => {
     setInput(text);
@@ -68,11 +71,13 @@ export default function ThreadScreen() {
 
   const send = async () => {
     if (!id || !input.trim()) return;
+    const msg = input.trim();
+    // Clear immediately — don't wait for claw to finish (HTTP POST blocks until done)
+    setInput("");
     setSlashPickerVisible(false);
     setSending(true);
     try {
-      await actions.sendMessage(id, input.trim());
-      setInput("");
+      await actions.sendMessage(id, msg);
     } catch {
       // error handled in store
     } finally {
@@ -167,18 +172,6 @@ export default function ThreadScreen() {
     [threadStatus, id, actions, onStop, messages.length, copiedConvo, isDark]
   );
 
-  const statusColor = (() => {
-    switch (threadStatus) {
-      case "running":
-        return AC.systemBlue;
-      case "waiting":
-        return AC.systemOrange;
-      case "error":
-        return AC.systemRed;
-      default:
-        return AC.systemGray2;
-    }
-  })();
 
   if (!thread) {
     return (
@@ -195,9 +188,6 @@ export default function ThreadScreen() {
     );
   }
 
-  const toolSteps = useGatewayStore((s) => s.toolSteps[id ?? ""] ?? []);
-  const permissionReqs = useGatewayStore((s) => (s.permissionRequests[id ?? ""] ?? []).filter((r) => r.pending));
-
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: AC.systemGroupedBackground }}
@@ -213,14 +203,6 @@ export default function ThreadScreen() {
             return (
               <View style={{ alignItems: "center" }}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                  {threadStatus === "running" && (
-                    <View style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: 3,
-                      backgroundColor: AC.systemBlue,
-                    }} />
-                  )}
                   <Text style={{ color: AC.label, fontSize: 15, fontWeight: "600" }} numberOfLines={1}>
                     {thread.title}
                   </Text>
@@ -253,8 +235,16 @@ export default function ThreadScreen() {
             flexGrow: 1,
           }}
           renderItem={({ item }) => <MessageBubble message={item} />}
-          ListFooterComponent={
-            threadStatus === "running" || threadStatus === "waiting" ? (
+          ListFooterComponent={(() => {
+            // Show bouncing dots only while waiting for the FIRST delta to arrive
+            // (last message is from user). Once the assistant bubble starts filling,
+            // hide the indicator so it doesn't stack above a streaming response.
+            // Always show for "waiting" so permission prompts are visible.
+            const lastMsg = messages[messages.length - 1];
+            const needsIndicator =
+              threadStatus === "waiting" ||
+              (threadStatus === "running" && (!lastMsg || lastMsg.role === "user"));
+            return needsIndicator ? (
               <ThinkingIndicator
                 status={threadStatus}
                 toolSteps={toolSteps}
@@ -263,8 +253,8 @@ export default function ThreadScreen() {
                 onDeny={(permId) => actions.respondToPermission(id ?? "", permId, false)}
                 isDark={isDark}
               />
-            ) : null
-          }
+            ) : null;
+          })()}
           ListEmptyComponent={() => (
             <View
               style={{
@@ -547,6 +537,243 @@ function MessageBubble({ message }: { message: Message }) {
         >
           <IconSymbol name="checkmark" size={10} color={AC.systemGreen} />
           <Text style={{ fontSize: 11, color: AC.systemGreen }}>Copied</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+/** Icon mapping for tool step types */
+const TOOL_ICONS: Record<string, string> = {
+  bash: "terminal",
+  edit: "pencil",
+  read: "doc.text",
+  write: "square.and.pencil",
+  search: "magnifyingglass",
+  think: "brain.head.profile",
+  grep: "magnifyingglass",
+  glob: "folder",
+};
+
+/** iMessage-style three bouncing dots */
+function BouncingDots({ color }: { color: string }) {
+  const d1 = useRef(new Animated.Value(0)).current;
+  const d2 = useRef(new Animated.Value(0)).current;
+  const d3 = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const bounce = (val: Animated.Value, delay: number) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(val, { toValue: -5, duration: 280, useNativeDriver: true }),
+          Animated.timing(val, { toValue: 0, duration: 280, useNativeDriver: true }),
+          Animated.delay(Math.max(0, 840 - delay - 560)),
+        ])
+      );
+    const a1 = bounce(d1, 0);
+    const a2 = bounce(d2, 140);
+    const a3 = bounce(d3, 280);
+    a1.start(); a2.start(); a3.start();
+    return () => { a1.stop(); a2.stop(); a3.stop(); };
+  }, []);
+
+  const dot = (val: Animated.Value) => (
+    <Animated.View
+      style={{
+        width: 7, height: 7, borderRadius: 3.5,
+        backgroundColor: color,
+        transform: [{ translateY: val }],
+      }}
+    />
+  );
+  return (
+    <View style={{ flexDirection: "row", gap: 5, alignItems: "center" }}>
+      {dot(d1)}{dot(d2)}{dot(d3)}
+    </View>
+  );
+}
+
+function ThinkingIndicator({
+  status,
+  toolSteps,
+  permissionRequests,
+  onApprove,
+  onDeny,
+  isDark,
+}: {
+  status: ThreadStatus;
+  toolSteps: ToolStep[];
+  permissionRequests: PermissionRequest[];
+  onApprove: (id: string) => void;
+  onDeny: (id: string) => void;
+  isDark: boolean;
+}) {
+  const latestRunning = toolSteps.filter((s) => s.status === "running");
+  const recentDone = toolSteps.filter((s) => s.status === "done").slice(-3);
+  const isWaiting = status === "waiting";
+  const dotColor = isWaiting
+    ? AC.systemOrange
+    : (isDark ? "rgba(255,255,255,0.45)" : "rgba(0,0,0,0.35)");
+
+  return (
+    <View style={{ gap: SPACING.sm, paddingTop: SPACING.xs }}>
+      {/* Main indicator: assistant bubble with bouncing dots */}
+      <View
+        style={{
+          alignSelf: "flex-start",
+          backgroundColor: isDark ? "#1c1c1e" : "#fff",
+          borderRadius: BORDER_RADIUS.xl,
+          borderBottomLeftRadius: SPACING.xs,
+          borderWidth: 1,
+          borderColor: isWaiting
+            ? AC.systemOrange
+            : (isDark ? "rgba(255,255,255,0.06)" : AC.separator),
+          paddingHorizontal: 14,
+          paddingVertical: 12,
+          ...SHADOW.sm,
+        }}
+      >
+        {isWaiting ? (
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <ActivityIndicator size="small" color={AC.systemOrange} />
+            <Text style={{ color: AC.systemOrange, fontSize: 13, fontWeight: "500" }}>
+              Waiting for approval…
+            </Text>
+          </View>
+        ) : (
+          <BouncingDots color={dotColor} />
+        )}
+      </View>
+
+      {/* Active tool steps */}
+      {latestRunning.length > 0 && (
+        <View style={{ gap: 4, paddingLeft: SPACING.xs }}>
+          {latestRunning.map((step) => (
+            <View
+              key={step.id}
+              style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+            >
+              <ActivityIndicator size="small" color={AC.systemBlue} />
+              <IconSymbol
+                name={TOOL_ICONS[step.tool] ?? "hammer"}
+                size={11}
+                color={AC.systemGray}
+              />
+              <Text
+                style={{
+                  color: AC.systemGray,
+                  fontSize: 12,
+                  fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+                }}
+                numberOfLines={1}
+              >
+                {step.label}
+              </Text>
+            </View>
+          ))}
+        </View>
+      )}
+
+      {/* Recently completed steps — subtle checkmarks */}
+      {recentDone.length > 0 && (
+        <View style={{ gap: 2, paddingLeft: SPACING.xs }}>
+          {recentDone.map((step) => (
+            <View
+              key={step.id}
+              style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+            >
+              <IconSymbol name="checkmark" size={10} color={AC.systemGreen} />
+              <Text
+                style={{
+                  color: AC.systemGray3,
+                  fontSize: 11,
+                }}
+                numberOfLines={1}
+              >
+                {step.label}
+              </Text>
+            </View>
+          ))}
+        </View>
+      )}
+
+      {/* Permission prompts — inline approval cards */}
+      {permissionRequests.length > 0 && (
+        <View style={{ gap: SPACING.sm }}>
+          {permissionRequests.map((req) => (
+            <View
+              key={req.id}
+              style={{
+                backgroundColor: isDark ? "#1c1c1e" : "#fff",
+                borderRadius: BORDER_RADIUS.lg,
+                borderWidth: 1,
+                borderColor: status === "waiting"
+                  ? AC.systemOrange
+                  : isDark
+                    ? "rgba(255,255,255,0.08)"
+                    : AC.separator,
+                padding: SPACING.md,
+                gap: SPACING.sm,
+              }}
+            >
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <IconSymbol
+                  name={TOOL_ICONS[req.tool] ?? "exclamationmark.shield"}
+                  size={14}
+                  color={AC.systemOrange}
+                />
+                <Text style={{ color: AC.label, fontSize: 13, fontWeight: "600" }}>
+                  Permission Required
+                </Text>
+              </View>
+              <Text
+                style={{
+                  color: AC.secondaryLabel,
+                  fontSize: 13,
+                  lineHeight: 18,
+                }}
+              >
+                {req.description}
+              </Text>
+              <View style={{ flexDirection: "row", gap: SPACING.sm }}>
+                <TouchableBounce
+                  sensory
+                  onPress={() => onApprove(req.id)}
+                >
+                  <View
+                    style={{
+                      backgroundColor: AC.systemBlue,
+                      borderRadius: BORDER_RADIUS.md,
+                      paddingHorizontal: SPACING.lg,
+                      paddingVertical: SPACING.sm,
+                    }}
+                  >
+                    <Text style={{ color: "#fff", fontSize: 13, fontWeight: "600" }}>
+                      Allow
+                    </Text>
+                  </View>
+                </TouchableBounce>
+                <TouchableBounce
+                  sensory
+                  onPress={() => onDeny(req.id)}
+                >
+                  <View
+                    style={{
+                      backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.05)",
+                      borderRadius: BORDER_RADIUS.md,
+                      paddingHorizontal: SPACING.lg,
+                      paddingVertical: SPACING.sm,
+                    }}
+                  >
+                    <Text style={{ color: AC.label, fontSize: 13, fontWeight: "600" }}>
+                      Deny
+                    </Text>
+                  </View>
+                </TouchableBounce>
+              </View>
+            </View>
+          ))}
         </View>
       )}
     </View>
