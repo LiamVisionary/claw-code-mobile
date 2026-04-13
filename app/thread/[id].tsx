@@ -287,11 +287,51 @@ export default function ThreadScreen() {
     >
       <Stack.Screen
         options={{
-          headerTitle: () => (
-            <Text style={{ color: AC.label, fontSize: 16, fontWeight: "600" }} numberOfLines={1}>
-              {thread.title}
-            </Text>
-          ),
+          headerTitle: () => {
+            const queue = (settings.modelQueue ?? []).filter((m) => m.enabled);
+            if (queue.length === 0) {
+              return (
+                <Text style={{ color: AC.label, fontSize: 16, fontWeight: "600" }} numberOfLines={1}>
+                  {thread?.title ?? "Chat"}
+                </Text>
+              );
+            }
+            const active    = queue[0];
+            const dotColor  = PROVIDER_COLOR[active.provider] ?? "#6B7280";
+            const shortName = active.name.includes("/")
+              ? active.name.split("/").pop()!
+              : active.name;
+            return (
+              <TouchableBounce sensory onPress={() => setModelPickerOpen((v) => !v)}>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 6,
+                    paddingHorizontal: 10,
+                    paddingVertical: 5,
+                    backgroundColor: isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.05)",
+                    borderRadius: BORDER_RADIUS.full,
+                    borderWidth: 1,
+                    borderColor: isDark ? "rgba(255,255,255,0.10)" : "rgba(0,0,0,0.08)",
+                  }}
+                >
+                  <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: dotColor }} />
+                  <Text
+                    style={{ color: AC.label, fontSize: 13, fontWeight: "600", maxWidth: 180 }}
+                    numberOfLines={1}
+                  >
+                    {shortName}
+                  </Text>
+                  <IconSymbol
+                    name={modelPickerOpen ? "chevron.up" : "chevron.down"}
+                    size={9}
+                    color={isDark ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.35)"}
+                  />
+                </View>
+              </TouchableBounce>
+            );
+          },
           headerRight: () => headerRight,
         }}
       />
@@ -1086,12 +1126,6 @@ function ModelPickerBar({
 
   if (queue.length === 0) return null;
 
-  const active  = queue[0];
-  const dotColor = PROVIDER_COLOR[active.provider] ?? "#6B7280";
-  const shortName = active.name.includes("/")
-    ? active.name.split("/").pop()!
-    : active.name;
-
   const selectModel = (entry: ModelEntry) => {
     const newQueue = [entry, ...settings.modelQueue.filter((m) => m.id !== entry.id)];
     actions.setSettings({
@@ -1105,57 +1139,11 @@ function ModelPickerBar({
     onToggle();
   };
 
-  const pillBg     = isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.05)";
-  const pillBorder = isDark ? "rgba(255,255,255,0.10)" : "rgba(0,0,0,0.08)";
   const dropBg     = isDark ? "#1c1c1e" : "#fff";
   const dropBorder = isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)";
 
   return (
     <>
-      {/* Trigger pill */}
-      <View style={{ alignItems: "center", paddingVertical: 6 }}>
-        <TouchableBounce sensory onPress={onToggle}>
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 6,
-              paddingHorizontal: 12,
-              paddingVertical: 5,
-              backgroundColor: pillBg,
-              borderRadius: BORDER_RADIUS.full,
-              borderWidth: 1,
-              borderColor: pillBorder,
-            }}
-          >
-            <View
-              style={{
-                width: 7,
-                height: 7,
-                borderRadius: 3.5,
-                backgroundColor: dotColor,
-              }}
-            />
-            <Text
-              style={{
-                color: AC.label,
-                fontSize: 12.5,
-                fontWeight: "500",
-                maxWidth: 220,
-              }}
-              numberOfLines={1}
-            >
-              {shortName}
-            </Text>
-            <IconSymbol
-              name={open ? "chevron.up" : "chevron.down"}
-              size={9}
-              color={isDark ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.35)"}
-            />
-          </View>
-        </TouchableBounce>
-      </View>
-
       {/* Dropdown — rendered in a Modal so it's never clipped by parent overflow */}
       <Modal
         transparent
