@@ -359,7 +359,8 @@ async function processSuccess(
   const result = JSON.parse(stdoutBuf.trim()) as {
     type?: string;
     message: string;
-    tool_uses?: Array<{ tool_name: string; input: unknown }>;
+    // Claw emits { id, name, input } — note: "name", NOT "tool_name"
+    tool_uses?: Array<{ id?: string; name: string; input: unknown }>;
     tool_results?: Array<{ content: string }>;
     usage?: { input_tokens: number; output_tokens: number };
     estimated_cost?: string;
@@ -381,13 +382,14 @@ async function processSuccess(
   const toolUses = result.tool_uses ?? [];
   for (const tu of toolUses) {
     if (active.stopped) break;
-    const stepId = `step-${tu.tool_name}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    const label = toolLabel(tu.tool_name, tu.input) || tu.tool_name;
+    const toolName = tu.name ?? "unknown";
+    const stepId = `step-${toolName}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const label = toolLabel(toolName, tu.input) || toolName;
     streamService.publish(threadId, {
       type: "tool_start",
       id: stepId,
       messageId,
-      tool: tu.tool_name,
+      tool: toolName,
       label,
     });
     // Brief pause so the badge renders as "running" before flipping to done
@@ -398,7 +400,7 @@ async function processSuccess(
       messageId,
     });
     // Also emit to terminal for the debug view
-    emitTerminal(threadId, `[${tu.tool_name}] ${JSON.stringify(tu.input).slice(0, 200)}`);
+    emitTerminal(threadId, `[${toolName}] ${JSON.stringify(tu.input).slice(0, 200)}`);
     // Short gap between steps for a natural appearance
     await sleep(55);
   }
@@ -416,7 +418,25 @@ async function processSuccess(
     );
   }
 
-  await streamWords(threadId, messageId, result.message ?? "", () => active.stopped, streamingEnabled);
+  // Parse <thinking>...</thinking> blocks from the model's text response.
+  // Some models (e.g. extended thinking, DeepSeek-R1 style) embed their chain-of-thought
+  // inside explicit XML tags in the message text.
+  const thinkRegex = /<thinking>([\s\S]*?)<\/thinking>/gi;
+  const thinkMatches = [...(result.message ?? "").matchAll(thinkRegex)];
+  if (thinkMatches.length > 0) {
+    const thinkingContent = thinkMatches.map((m) => m[1].trim()).join("\n\n");
+    if (thinkingContent && !active.stopped) {
+      streamService.publish(threadId, {
+        type: "thinking_content",
+        messageId,
+        content: thinkingContent,
+      });
+    }
+  }
+  // Strip <thinking> blocks from the visible message text
+  const cleanMessage = (result.message ?? "").replace(thinkRegex, "").trim();
+
+  await streamWords(threadId, messageId, cleanMessage, () => active.stopped, streamingEnabled);
 }
 
 export const clawRuntime = {
