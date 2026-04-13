@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useFocusEffect } from "expo-router";
 import {
   Animated,
   ActivityIndicator,
@@ -57,14 +58,33 @@ export default function ThreadScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
 
+  // Track whether messages were successfully loaded so we never accidentally
+  // delete a thread whose messages just failed to fetch.
+  const messagesLoaded = useRef(false);
+
   useEffect(() => {
     if (!id) return;
     actions.setActiveThread(id);
-    actions.loadMessages(id).catch(() => {});
+    actions.loadMessages(id)
+      .then(() => { messagesLoaded.current = true; })
+      .catch(() => {});
     actions.loadTerminal(id).catch(() => {});
     actions.openStream(id);
     return () => actions.closeStream(id);
   }, [id, actions]);
+
+  // Auto-delete empty threads when the user navigates away without sending any messages.
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        if (!id || !messagesLoaded.current) return;
+        const currentMessages = useGatewayStore.getState().messages[id] ?? [];
+        if (currentMessages.length === 0) {
+          actions.deleteThread(id).catch(() => {});
+        }
+      };
+    }, [id, actions])
+  );
 
   useEffect(() => {
     if (id && !thread) {
