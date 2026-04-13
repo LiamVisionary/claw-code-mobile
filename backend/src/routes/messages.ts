@@ -36,6 +36,7 @@ messagesRouter.post("/threads/:threadId/messages", async (req, res, next) => {
         modelQueue: z.array(modelEntrySchema).optional(),
         model: modelEntrySchema.optional(),
         autoCompact: z.boolean().optional(),
+        streamingEnabled: z.boolean().optional(),
       })
       .parse(req.body);
 
@@ -52,7 +53,8 @@ messagesRouter.post("/threads/:threadId/messages", async (req, res, next) => {
       body.content,
       assistantMessageId,
       models,
-      body.autoCompact ?? true
+      body.autoCompact ?? true,
+      body.streamingEnabled ?? true
     );
 
     res.status(202).json({ ok: true, runId });
