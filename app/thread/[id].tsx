@@ -487,16 +487,16 @@ function MessageBubble({ message }: { message: Message }) {
       <View
         style={{
           maxWidth: "82%",
-          backgroundColor: isUser ? AC.systemGray6 : AC.systemGroupedBackground,
+          backgroundColor: isUser ? AC.systemBlue : AC.secondarySystemGroupedBackground,
           borderRadius: BORDER_RADIUS.lg,
           paddingHorizontal: SPACING.lg,
           paddingVertical: SPACING.md,
           borderWidth: isUser ? 0 : 1,
-          borderColor: isUser ? AC.label : AC.separator,
+          borderColor: AC.separator,
           ...(isUser ? SHADOW.md : {}),
         }}
       >
-        <Text style={{ color: isUser ? AC.systemBackground : AC.label, fontSize: TYPOGRAPHY.fontSizes.md, lineHeight: TYPOGRAPHY.lineHeights.md }}>
+        <Text style={{ color: isUser ? "#fff" : AC.label, fontSize: TYPOGRAPHY.fontSizes.md, lineHeight: TYPOGRAPHY.lineHeights.md }}>
           {message.content}
         </Text>
       </View>
