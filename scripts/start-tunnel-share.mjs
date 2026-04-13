@@ -313,6 +313,28 @@ async function readExpoUrlFromStateFiles() {
   return null;
 }
 
+async function pollNgrokForTunnelUrl(signal) {
+  while (!signal.aborted) {
+    try {
+      const res = await fetch("http://127.0.0.1:4040/api/tunnels");
+      if (res.ok) {
+        const data = await res.json();
+        const tunnel = data.tunnels?.find(
+          (t) => t.proto === "https" || t.proto === "http"
+        );
+        if (tunnel?.public_url) {
+          const host = new URL(tunnel.public_url).host;
+          return `exp://${host}`;
+        }
+      }
+    } catch {
+      // ngrok not ready yet
+    }
+    await sleep(2000);
+  }
+  return null;
+}
+
 function runExpoAttempt(useClear) {
   return new Promise((resolve) => {
     const expo = spawn("npx", getExpoArgs(useClear), {
@@ -320,29 +342,21 @@ function runExpoAttempt(useClear) {
       env: process.env,
     });
 
-    let exited = false;
     let sentForRun = false;
+    const abort = new AbortController();
 
-    const poll = setInterval(async () => {
-      if (exited || sentForRun) {
-        return;
-      }
-
-      const expoUrl = await readExpoUrlFromStateFiles();
-      if (!expoUrl) {
-        return;
-      }
-
+    // Poll ngrok API for the tunnel URL instead of scraping stdout
+    pollNgrokForTunnelUrl(abort.signal).then(async (expoUrl) => {
+      if (!expoUrl || sentForRun) return;
       sentForRun = true;
       sent = true;
       await notify(expoUrl).catch((error) => {
         console.error(`[share] notify failed: ${error.message}`);
       });
-    }, 1500);
+    });
 
     expo.on("exit", (code, signal) => {
-      exited = true;
-      clearInterval(poll);
+      abort.abort();
 
       if (signal) {
         resolve({ code: 1, hadUrl: sentForRun || sent });
@@ -352,10 +366,8 @@ function runExpoAttempt(useClear) {
       resolve({ code: code ?? 0, hadUrl: sentForRun || sent });
     });
 
-    function forwardSignal(signal) {
-      if (!expo.killed) {
-        expo.kill(signal);
-      }
+    function forwardSignal(sig) {
+      if (!expo.killed) expo.kill(sig);
     }
 
     process.once("SIGINT", () => forwardSignal("SIGINT"));
