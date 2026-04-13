@@ -82,6 +82,15 @@ export const threadService = {
     return result.changes > 0;
   },
 
+  update(threadId: string, fields: { workDir?: string; title?: string }): Thread | undefined {
+    const sets: string[] = ["updatedAt = @now"];
+    const params: Record<string, any> = { threadId, now: new Date().toISOString() };
+    if (fields.workDir !== undefined) { sets.push("workDir = @workDir"); params.workDir = fields.workDir; }
+    if (fields.title   !== undefined) { sets.push("title = @title");     params.title   = fields.title; }
+    db.prepare(`UPDATE threads SET ${sets.join(", ")} WHERE id = @threadId`).run(params);
+    return this.get(threadId);
+  },
+
   /** Count messages belonging to a thread. */
   messageCount(threadId: string): number {
     const row = db

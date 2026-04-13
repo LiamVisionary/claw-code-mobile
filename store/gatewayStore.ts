@@ -222,6 +222,7 @@ type GatewayState = {
     respondToPermission: (threadId: string, permissionId: string, approved: boolean) => Promise<void>;
     deleteThread: (threadId: string) => Promise<void>;
     duplicateThread: (threadId: string) => Promise<Thread>;
+    updateThreadWorkDir: (threadId: string, workDir: string) => Promise<void>;
   };
 };
 
@@ -646,6 +647,22 @@ export const useGatewayStore = create<GatewayState>()(
             threads: [copy, ...current.threads],
           }));
           return copy;
+        },
+
+        updateThreadWorkDir: async (threadId: string, workDir: string) => {
+          const state = get();
+          const { baseUrl, headers } = getClientConfig(state);
+          const res = await fetch(`${baseUrl}/threads/${threadId}`, {
+            method: "PATCH",
+            headers,
+            body: JSON.stringify({ workDir }),
+          });
+          if (!res.ok) throw new Error("Failed to update thread");
+          const data = await res.json();
+          const updated = data.thread as Thread;
+          set((current) => ({
+            threads: current.threads.map((t) => (t.id === threadId ? updated : t)),
+          }));
         },
       },
     }),

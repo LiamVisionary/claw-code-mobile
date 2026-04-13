@@ -28,6 +28,21 @@ threadsRouter.post("/threads", (req, res, next) => {
   }
 });
 
+threadsRouter.patch("/threads/:threadId", (req, res, next) => {
+  try {
+    const thread = threadService.get(req.params.threadId);
+    if (!thread) throw new HttpError(404, "Thread not found");
+    const body = z.object({
+      workDir: z.string().optional(),
+      title: z.string().optional(),
+    }).parse(req.body);
+    const updated = threadService.update(req.params.threadId, body);
+    res.json({ thread: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
 threadsRouter.delete("/threads/:threadId", (req, res, next) => {
   try {
     const thread = threadService.get(req.params.threadId);
