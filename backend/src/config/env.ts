@@ -15,7 +15,7 @@ const dataDir = parsed.DATA_DIR
   : path.resolve(process.cwd(), "backend", "data");
 
 export const env = {
-  port: Number(parsed.PORT ?? 4000),
+  port: Number(parsed.PORT ?? 5000),
   authToken: parsed.GATEWAY_AUTH_TOKEN ?? "dev-token",
   databasePath: path.resolve(
     parsed.DATABASE_FILE ?? path.join(dataDir, "gateway.db")
