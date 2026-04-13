@@ -29,6 +29,12 @@ const MAPPING = {
   "aqi.medium": "dashboard",
   "ellipsis.circle.fill": "more-vert",
   "arrow.up": "arrow-upward",
+  "arrow.triangle.2.circlepath": "sync",
+  folder: "folder",
+  "arrow.triangle.branch": "call-split",
+  "arrow.left.arrow.right": "compare-arrows",
+  location: "location-on",
+  "questionmark.circle": "help-outline",
 } as Partial<
   Record<
     import("expo-symbols").SymbolViewProps["name"],

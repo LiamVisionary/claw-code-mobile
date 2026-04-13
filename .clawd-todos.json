@@ -1,22 +1,12 @@
 [
   {
-    "content": "Extend store with tool step tracking and permission request handling",
-    "activeForm": "Extending store for tool steps and permissions",
+    "content": "Fix assistant running indicator - move to top, show below most recent message",
+    "activeForm": "Fixing assistant running indicator",
     "status": "in_progress"
   },
   {
-    "content": "Build ActivityStream component showing thinking steps with icons inline below last message",
-    "activeForm": "Building the ActivityStream component",
-    "status": "pending"
-  },
-  {
-    "content": "Add inline permission prompt UI when agent needs approval",
-    "activeForm": "Adding inline permission prompt UI",
-    "status": "pending"
-  },
-  {
-    "content": "Integrate ActivityStream and permission prompt into thread screen, move status indicator below last message",
-    "activeForm": "Integrating into thread screen",
+    "content": "Verify build compiles without errors",
+    "activeForm": "Verifying build",
     "status": "pending"
   }
 ]
