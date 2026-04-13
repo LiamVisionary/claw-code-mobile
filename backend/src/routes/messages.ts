@@ -5,6 +5,7 @@ import { messageService } from "../services/messageService";
 import { threadService } from "../services/threadService";
 import { HttpError } from "../utils/errors";
 import { createId } from "../utils/ids";
+import { logger } from "../utils/logger";
 
 export const messagesRouter = Router();
 
@@ -48,16 +49,24 @@ messagesRouter.post("/threads/:threadId/messages", async (req, res, next) => {
 
     messageService.addUserMessage(thread.id, body.content);
     const assistantMessageId = createId("msg");
-    const runId = await clawRuntime.sendMessage(
-      thread.id,
-      body.content,
-      assistantMessageId,
-      models,
-      body.autoCompact ?? true,
-      body.streamingEnabled ?? true
-    );
 
-    res.status(202).json({ ok: true, runId });
+    // Respond immediately so the mobile client isn't blocked waiting for the
+    // entire claw run to finish. The run executes in the background and pushes
+    // progress over the SSE stream.
+    res.status(202).json({ ok: true });
+
+    clawRuntime
+      .sendMessage(
+        thread.id,
+        body.content,
+        assistantMessageId,
+        models,
+        body.autoCompact ?? true,
+        body.streamingEnabled ?? true
+      )
+      .catch((err: unknown) => {
+        logger.error({ err }, "clawRuntime.sendMessage failed");
+      });
   } catch (err) {
     next(err);
   }

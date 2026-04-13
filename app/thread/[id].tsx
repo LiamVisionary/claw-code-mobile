@@ -505,10 +505,10 @@ export default function ThreadScreen() {
             />
             <TouchableBounce
               sensory
-              disabled={!input.trim() || sending}
+              disabled={!input.trim()}
               onPress={send}
               style={{
-                opacity: !input.trim() || sending ? 0.3 : 1,
+                opacity: !input.trim() ? 0.3 : 1,
                 marginBottom: SPACING.xs,
               }}
             >
