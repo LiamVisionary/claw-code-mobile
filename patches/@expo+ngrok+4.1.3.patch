@@ -1,0 +1,53 @@
+diff --git a/node_modules/@expo/ngrok/src/client.js b/node_modules/@expo/ngrok/src/client.js
+index 3f748a3..3aeaefc 100644
+--- a/node_modules/@expo/ngrok/src/client.js
++++ b/node_modules/@expo/ngrok/src/client.js
+@@ -29,18 +29,26 @@ class NgrokClient {
+     } catch (error) {
+       let clientError;
+       try {
+-        const response = JSON.parse(error.response.body);
++        if (!error.response) {
++          throw new NgrokClientError(error.message, undefined, undefined);
++        }
++        const body = error.response.body;
++        const response = typeof body === "string" ? JSON.parse(body) : body;
+         clientError = new NgrokClientError(
+-          response.msg,
++          response.msg || error.message,
+           error.response,
+           response
+         );
+       } catch (e) {
+-        clientError = new NgrokClientError(
+-          error.response.body,
+-          error.response,
+-          error.response.body
+-        );
++        if (e instanceof NgrokClientError) {
++          clientError = e;
++        } else {
++          clientError = new NgrokClientError(
++            error.message,
++            error.response,
++            error.response ? error.response.body : undefined
++          );
++        }
+       }
+       throw clientError;
+     }
+@@ -52,8 +60,12 @@ class NgrokClient {
+         (response) => response.statusCode === 204
+       );
+     } catch (error) {
+-      const response = JSON.parse(error.response.body);
+-      throw new NgrokClientError(response.msg, error.response, response);
++      if (!error.response) {
++        throw new NgrokClientError(error.message, undefined, undefined);
++      }
++      const body = error.response.body;
++      const response = typeof body === "string" ? JSON.parse(body) : body;
++      throw new NgrokClientError(response.msg || error.message, error.response, response);
+     }
+   }
+ 
