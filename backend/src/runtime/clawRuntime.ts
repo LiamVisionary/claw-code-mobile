@@ -13,9 +13,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const CLAW_BINARY = path.resolve(
   __dirname,
-  "../../../../claw-code/rust/target/debug/claw"
+  "../../../claw-code/rust/target/debug/claw"
 );
-const WORKSPACES_DIR = path.resolve(__dirname, "../../../data/workspaces");
+const WORKSPACES_DIR = path.resolve(__dirname, "../../data/workspaces");
 
 fs.mkdirSync(WORKSPACES_DIR, { recursive: true });
 
