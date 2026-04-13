@@ -7,6 +7,7 @@ import {
   Text,
   TextInput,
   View,
+  useColorScheme,
 } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { Stack, useLocalSearchParams } from "expo-router";
@@ -17,6 +18,7 @@ import { IconSymbol } from "@/components/ui/IconSymbol";
 import { useGatewayStore } from "@/store/gatewayStore";
 import type { Message } from "@/store/gatewayStore";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { BORDER_RADIUS, SPACING, SHADOW, TYPOGRAPHY } from "@/constants/theme";
 
 export default function ThreadScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -35,6 +37,8 @@ export default function ThreadScreen() {
   const [copiedConvo, setCopiedConvo] = useState(false);
   const terminalRef = useRef<BottomSheetModal>(null);
   const { bottom } = useSafeAreaInsets();
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === "dark";
 
   useEffect(() => {
     if (!id) return;
@@ -88,17 +92,20 @@ export default function ThreadScreen() {
 
   const headerRight = useMemo(
     () => (
-      <View style={{ flexDirection: "row", gap: 12 }}>
+      <View style={{ flexDirection: "row", gap: 8 }}>
         {threadStatus === "running" && (
           <TouchableBounce sensory onPress={onStop}>
             <View
               style={{
-                padding: 8,
+                width: 32,
+                height: 32,
+                justifyContent: "center",
+                alignItems: "center",
                 backgroundColor: AC.systemRed,
-                borderRadius: 12,
+                borderRadius: BORDER_RADIUS.full,
               }}
             >
-              <IconSymbol name="stop.fill" color={AC.systemBackground} />
+              <IconSymbol name="stop.fill" color="#fff" size={12} />
             </View>
           </TouchableBounce>
         )}
@@ -111,19 +118,45 @@ export default function ThreadScreen() {
         >
           <View
             style={{
-              padding: 8,
-              backgroundColor: AC.secondarySystemGroupedBackground,
-              borderRadius: 12,
-              borderWidth: 1,
-              borderColor: AC.separator,
+              width: 32,
+              height: 32,
+              justifyContent: "center",
+              alignItems: "center",
+              backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.05)",
+              borderRadius: BORDER_RADIUS.full,
             }}
           >
-            <IconSymbol name="terminal" color={AC.label} />
+            <IconSymbol name="terminal" color={AC.label} size={14} />
+          </View>
+        </TouchableBounce>
+        <TouchableBounce
+          sensory
+          disabled={!messages.length}
+          onPress={copyConversation}
+          style={{ opacity: messages.length ? 1 : 0.3 }}
+        >
+          <View
+            style={{
+              width: 32,
+              height: 32,
+              justifyContent: "center",
+              alignItems: "center",
+              backgroundColor: copiedConvo
+                ? AC.systemGreen
+                : isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.05)",
+              borderRadius: BORDER_RADIUS.full,
+            }}
+          >
+            <IconSymbol
+              name={copiedConvo ? "checkmark" : "doc.on.doc"}
+              color={copiedConvo ? "#fff" : AC.label}
+              size={14}
+            />
           </View>
         </TouchableBounce>
       </View>
     ),
-    [threadStatus, id, actions, onStop]
+    [threadStatus, id, actions, onStop, messages.length, copiedConvo, isDark]
   );
 
   const statusColor = (() => {
@@ -168,12 +201,22 @@ export default function ThreadScreen() {
               : null;
             return (
               <View style={{ alignItems: "center" }}>
-                <Text style={{ color: AC.label, fontSize: 16, fontWeight: "600" }} numberOfLines={1}>
-                  {thread.title}
-                </Text>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  {threadStatus === "running" && (
+                    <View style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: 3,
+                      backgroundColor: AC.systemBlue,
+                    }} />
+                  )}
+                  <Text style={{ color: AC.label, fontSize: 15, fontWeight: "600" }} numberOfLines={1}>
+                    {thread.title}
+                  </Text>
+                </View>
                 {dirName ? (
-                  <Text style={{ color: AC.systemGray, fontSize: 11, fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace" }} numberOfLines={1}>
-                    📁 {dirName}
+                  <Text style={{ color: AC.systemGray, fontSize: 11, fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", marginTop: 1 }} numberOfLines={1}>
+                    {dirName}
                   </Text>
                 ) : null}
               </View>
@@ -184,182 +227,138 @@ export default function ThreadScreen() {
       />
       <View
         style={{
-          paddingHorizontal: 16,
-          paddingTop: 12,
-          paddingBottom: bottom + 12,
-          gap: 12,
           flex: 1,
+          paddingBottom: bottom,
         }}
       >
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: AC.secondarySystemGroupedBackground,
-            borderRadius: 18,
-            borderColor: AC.separator,
-            borderWidth: 1,
-            overflow: "hidden",
+        {/* Status indicator - slim inline pill */}
+        {threadStatus === "running" && (
+          <View
+            style={{
+              marginHorizontal: SPACING.lg,
+              marginTop: SPACING.sm,
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+              paddingHorizontal: SPACING.md,
+              paddingVertical: SPACING.xs,
+              backgroundColor: isDark ? "rgba(10,132,255,0.12)" : "rgba(10,132,255,0.08)",
+              borderRadius: BORDER_RADIUS.full,
+              alignSelf: "flex-start",
+            }}
+          >
+            <ActivityIndicator size="small" color={AC.systemBlue} />
+            <Text style={{ color: AC.systemBlue, fontSize: 12, fontWeight: "500" }}>
+              Thinking…
+            </Text>
+          </View>
+        )}
+
+        {/* Messages */}
+        <FlatList
+          ref={listRef}
+          data={messages}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={{
+            padding: SPACING.lg,
+            gap: SPACING.sm,
+            flexGrow: 1,
           }}
-        >
-          {threadStatus === "running" && (
+          renderItem={({ item }) => <MessageBubble message={item} />}
+          ListEmptyComponent={() => (
             <View
               style={{
-                padding: 12,
-                flexDirection: "row",
+                flex: 1,
+                justifyContent: "center",
                 alignItems: "center",
-                gap: 8,
-                borderBottomWidth: 1,
-                borderBottomColor: AC.separator,
+                gap: SPACING.sm,
+                paddingVertical: 48,
               }}
             >
-              <ActivityIndicator />
-              <Text style={{ color: AC.label }}>Assistant is running…</Text>
-            </View>
-          )}
-          <FlatList
-            ref={listRef}
-            data={messages}
-            keyExtractor={(item) => item.id}
-            contentContainerStyle={{ padding: 16, gap: 12 }}
-            renderItem={({ item }) => <MessageBubble message={item} />}
-            ListEmptyComponent={() => (
-              <View
-                style={{
-                  paddingVertical: 32,
-                  alignItems: "center",
-                  gap: 8,
-                }}
-              >
+              <View style={{
+                width: 48,
+                height: 48,
+                borderRadius: 24,
+                backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
+                justifyContent: "center",
+                alignItems: "center",
+              }}>
                 <IconSymbol
                   name="ellipsis.bubble"
-                  color={AC.systemGray2}
-                  size={28}
+                  color={AC.systemGray3}
+                  size={22}
                 />
-                <Text style={{ color: AC.systemGray }}>
-                  No messages yet. Say hi!
-                </Text>
               </View>
-            )}
-          />
-        </View>
+              <Text style={{ color: AC.systemGray, fontSize: 14 }}>
+                Start a conversation
+              </Text>
+            </View>
+          )}
+        />
 
+        {/* Input bar - clean, minimal */}
         <View
           style={{
-            backgroundColor: AC.secondarySystemGroupedBackground,
-            borderRadius: 16,
-            padding: 12,
-            borderColor: AC.separator,
-            borderWidth: 1,
-            gap: 8,
+            paddingHorizontal: SPACING.lg,
+            paddingTop: SPACING.sm,
+            paddingBottom: SPACING.sm,
+            gap: SPACING.sm,
           }}
         >
-          <TextInput
-            placeholder="Send a message to your Claw agent"
-            placeholderTextColor={AC.systemGray}
-            value={input}
-            onChangeText={setInput}
-            multiline
-            style={{
-              minHeight: 48,
-              maxHeight: 140,
-              color: AC.label,
-              padding: 12,
-              backgroundColor: AC.systemBackground,
-              borderRadius: 12,
-              borderWidth: 1,
-              borderColor: AC.separator,
-            }}
-          />
           <View
             style={{
               flexDirection: "row",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: 8,
+              alignItems: "flex-end",
+              gap: SPACING.sm,
+              backgroundColor: isDark ? "#1c1c1e" : "#fff",
+              borderRadius: 22,
+              borderWidth: 1,
+              borderColor: isDark ? "rgba(255,255,255,0.08)" : AC.separator,
+              paddingHorizontal: SPACING.md,
+              paddingVertical: SPACING.xs,
+              ...SHADOW.sm,
             }}
           >
-            <View style={{ flexDirection: "row", gap: 8 }}>
-              <TouchableBounce
-                sensory
-                onPress={() => terminalRef.current?.present()}
-              >
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 6,
-                    paddingHorizontal: 12,
-                    paddingVertical: 10,
-                    backgroundColor: AC.systemGroupedBackground,
-                    borderRadius: 12,
-                    borderWidth: 1,
-                    borderColor: AC.separator,
-                  }}
-                >
-                  <IconSymbol name="chevron.up" color={AC.label} />
-                  <Text style={{ color: AC.label }}>Terminal</Text>
-                </View>
-              </TouchableBounce>
-
-              <TouchableBounce
-                sensory
-                disabled={!messages.length}
-                onPress={copyConversation}
-                style={{ opacity: messages.length ? 1 : 0.4 }}
-              >
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 6,
-                    paddingHorizontal: 12,
-                    paddingVertical: 10,
-                    backgroundColor: copiedConvo
-                      ? AC.systemGreen
-                      : AC.systemGroupedBackground,
-                    borderRadius: 12,
-                    borderWidth: 1,
-                    borderColor: copiedConvo ? AC.systemGreen : AC.separator,
-                  }}
-                >
-                  <IconSymbol
-                    name={copiedConvo ? "checkmark" : "doc.on.doc"}
-                    color={copiedConvo ? AC.systemBackground : AC.label}
-                    size={14}
-                  />
-                  <Text
-                    style={{
-                      color: copiedConvo ? AC.systemBackground : AC.label,
-                      fontSize: 14,
-                    }}
-                  >
-                    {copiedConvo ? "Copied!" : "Copy"}
-                  </Text>
-                </View>
-              </TouchableBounce>
-            </View>
-
+            <TextInput
+              placeholder="Message…"
+              placeholderTextColor={AC.systemGray3}
+              value={input}
+              onChangeText={setInput}
+              multiline
+              style={{
+                minHeight: 40,
+                maxHeight: 120,
+                color: AC.label,
+                fontSize: TYPOGRAPHY.fontSizes.md,
+                lineHeight: TYPOGRAPHY.lineHeights.md,
+                paddingVertical: SPACING.sm,
+                flex: 1,
+              }}
+            />
             <TouchableBounce
               sensory
               disabled={!input.trim() || sending}
               onPress={send}
-              style={{ opacity: !input.trim() || sending ? 0.6 : 1 }}
+              style={{
+                opacity: !input.trim() || sending ? 0.3 : 1,
+                marginBottom: SPACING.xs,
+              }}
             >
               <View
                 style={{
-                  backgroundColor: AC.label,
-                  paddingHorizontal: 18,
-                  paddingVertical: 12,
-                  borderRadius: 14,
-                  flexDirection: "row",
+                  width: 32,
+                  height: 32,
+                  borderRadius: 16,
+                  backgroundColor: input.trim() ? AC.label : (isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.08)"),
+                  justifyContent: "center",
                   alignItems: "center",
-                  gap: 8,
                 }}
               >
-                <IconSymbol name="arrow.up" color={AC.systemBackground} />
-                <Text style={{ color: AC.systemBackground, fontWeight: "600" }}>
-                  Send
-                </Text>
+                <IconSymbol
+                  name="arrow.up"
+                  size={14}
+                  color={input.trim() ? (isDark ? "#000" : "#fff") : AC.systemGray3}
+                />
               </View>
             </TouchableBounce>
           </View>
@@ -374,17 +373,34 @@ export default function ThreadScreen() {
         }}
         handleIndicatorStyle={{ backgroundColor: AC.systemGray3 }}
       >
-        <View style={{ flex: 1, padding: 12, gap: 12 }}>
-          <Text style={{ color: AC.label, fontWeight: "600" }}>
-            Terminal
-          </Text>
+        <View style={{ flex: 1, padding: SPACING.md, gap: SPACING.md }}>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+            <Text style={{ color: AC.label, fontWeight: "600", fontSize: 15 }}>
+              Terminal
+            </Text>
+            <TouchableBounce
+              sensory
+              onPress={() => terminalRef.current?.dismiss()}
+            >
+              <View style={{
+                width: 28,
+                height: 28,
+                borderRadius: 14,
+                backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.05)",
+                justifyContent: "center",
+                alignItems: "center",
+              }}>
+                <IconSymbol name="xmark" color={AC.systemGray} size={12} />
+              </View>
+            </TouchableBounce>
+          </View>
           <View
             style={{
               flex: 1,
-              backgroundColor: "#0f0f0f",
-              borderRadius: 12,
-              padding: 12,
-              gap: 6,
+              backgroundColor: "#0a0a0a",
+              borderRadius: BORDER_RADIUS.lg,
+              padding: SPACING.md,
+              gap: SPACING.xs,
             }}
           >
             <FlatList
@@ -393,12 +409,14 @@ export default function ThreadScreen() {
               renderItem={({ item }) => (
                 <Text
                   style={{
-                    color: "#c8f8c8",
+                    color: "#a8e6a8",
                     fontFamily: Platform.select({
                       ios: "Menlo",
                       android: "monospace",
                       default: "monospace",
                     }),
+                    fontSize: 12,
+                    lineHeight: 18,
                   }}
                 >
                   {item}
@@ -406,20 +424,22 @@ export default function ThreadScreen() {
               )}
             />
           </View>
-          <View style={{ flexDirection: "row", gap: 8 }}>
+          <View style={{ flexDirection: "row", gap: SPACING.sm, alignItems: "center" }}>
             <TextInput
               value={command}
               onChangeText={setCommand}
               placeholder="Run a command"
-              placeholderTextColor={AC.systemGray2}
+              placeholderTextColor={AC.systemGray3}
               style={{
                 flex: 1,
-                backgroundColor: AC.secondarySystemGroupedBackground,
-                borderRadius: 10,
-                paddingHorizontal: 12,
+                backgroundColor: isDark ? "#1c1c1e" : AC.secondarySystemGroupedBackground,
+                borderRadius: BORDER_RADIUS.md,
+                paddingHorizontal: SPACING.md,
+                paddingVertical: SPACING.sm,
                 borderWidth: 1,
-                borderColor: AC.separator,
+                borderColor: isDark ? "rgba(255,255,255,0.06)" : AC.separator,
                 color: AC.label,
+                fontSize: 14,
               }}
             />
             <TouchableBounce
@@ -433,14 +453,16 @@ export default function ThreadScreen() {
             >
               <View
                 style={{
-                  paddingHorizontal: 14,
-                  paddingVertical: 12,
-                  backgroundColor: AC.label,
-                  borderRadius: 12,
-                  opacity: command.trim() ? 1 : 0.6,
+                  width: 36,
+                  height: 36,
+                  borderRadius: 18,
+                  backgroundColor: command.trim() ? AC.label : (isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.05)"),
+                  justifyContent: "center",
+                  alignItems: "center",
+                  opacity: command.trim() ? 1 : 0.5,
                 }}
               >
-                <Text style={{ color: AC.systemBackground }}>Send</Text>
+                <IconSymbol name="arrow.up" color={command.trim() ? (isDark ? "#000" : "#fff") : AC.systemGray3} size={14} />
               </View>
             </TouchableBounce>
           </View>
@@ -450,25 +472,11 @@ export default function ThreadScreen() {
   );
 }
 
-const BORDER_RADIUS = { sm: 8, md: 12, lg: 18 };
-const SPACING = { xs: 4, sm: 8, md: 12, lg: 16 };
-const SHADOW = {
-  md: {
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.12,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-};
-const TYPOGRAPHY = {
-  fontSizes: { xs: 12, sm: 13, md: 15, lg: 17 },
-  lineHeights: { xs: 16, sm: 18, md: 22, lg: 26 },
-};
-
 function MessageBubble({ message }: { message: Message }) {
   const isUser = message.role === "user";
   const [copied, setCopied] = useState(false);
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === "dark";
 
   const onCopy = useCallback(async () => {
     await Clipboard.setStringAsync(message.content);
@@ -481,55 +489,56 @@ function MessageBubble({ message }: { message: Message }) {
       style={{
         flexDirection: "column",
         alignItems: isUser ? "flex-end" : "flex-start",
-        gap: 6,
+        gap: 4,
       }}
     >
-      <View
-        style={{
-          maxWidth: "82%",
-          backgroundColor: isUser ? AC.systemBlue : AC.secondarySystemGroupedBackground,
-          borderRadius: BORDER_RADIUS.lg,
-          paddingHorizontal: SPACING.lg,
-          paddingVertical: SPACING.md,
-          borderWidth: isUser ? 0 : 1,
-          borderColor: AC.separator,
-          ...(isUser ? SHADOW.md : {}),
-        }}
-      >
-        <Text style={{ color: isUser ? "#fff" : AC.label, fontSize: TYPOGRAPHY.fontSizes.md, lineHeight: TYPOGRAPHY.lineHeights.md }}>
-          {message.content}
-        </Text>
-      </View>
-
       <TouchableBounce sensory onPress={onCopy}>
+        <View
+          style={{
+            maxWidth: "80%",
+            backgroundColor: isUser
+              ? AC.systemBlue
+              : isDark
+                ? "#1c1c1e"
+                : "#fff",
+            borderRadius: BORDER_RADIUS.xl,
+            borderBottomRightRadius: isUser ? SPACING.xs : BORDER_RADIUS.xl,
+            borderBottomLeftRadius: isUser ? BORDER_RADIUS.xl : SPACING.xs,
+            paddingHorizontal: SPACING.md,
+            paddingVertical: SPACING.sm + 2,
+            borderWidth: isUser ? 0 : 1,
+            borderColor: isDark ? "rgba(255,255,255,0.06)" : AC.separator,
+            ...(isUser
+              ? SHADOW.md
+              : SHADOW.sm),
+          }}
+        >
+          <Text
+            style={{
+              color: isUser ? "#fff" : AC.label,
+              fontSize: TYPOGRAPHY.fontSizes.md,
+              lineHeight: TYPOGRAPHY.lineHeights.md,
+            }}
+          >
+            {message.content}
+          </Text>
+        </View>
+      </TouchableBounce>
+
+      {/* Subtle copy indicator on long press — shown inline as tiny action */}
+      {copied && (
         <View
           style={{
             flexDirection: "row",
             alignItems: "center",
-            gap: SPACING.sm,
+            gap: 3,
             paddingHorizontal: SPACING.sm,
-            paddingVertical: SPACING.xs,
-            borderRadius: BORDER_RADIUS.sm,
-            backgroundColor: copied
-              ? AC.systemGreen
-              : AC.tertiarySystemGroupedBackground,
           }}
         >
-          <IconSymbol
-            name={copied ? "checkmark" : "doc.on.doc"}
-            size={TYPOGRAPHY.fontSizes.xs}
-            color={copied ? AC.systemBackground : AC.systemGray}
-          />
-          <Text
-            style={{
-              fontSize: TYPOGRAPHY.fontSizes.xs,
-              color: copied ? AC.systemBackground : AC.systemGray,
-            }}
-          >
-            {copied ? "Copied" : "Copy"}
-          </Text>
+          <IconSymbol name="checkmark" size={10} color={AC.systemGreen} />
+          <Text style={{ fontSize: 11, color: AC.systemGreen }}>Copied</Text>
         </View>
-      </TouchableBounce>
+      )}
     </View>
   );
 }

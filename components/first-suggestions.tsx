@@ -1,5 +1,5 @@
 "use client";
-import { StyleSheet, Text, View } from "react-native";
+import { Text, View, useColorScheme } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
 
 import { tw } from "@/util/tw";
@@ -7,6 +7,9 @@ import * as AC from "@bacons/apple-colors";
 import { PromptOnTap } from "./prompt-on-tap";
 
 export function FirstSuggestions() {
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === "dark";
+
   return (
     <View
       style={{
@@ -18,33 +21,40 @@ export function FirstSuggestions() {
     >
       {(
         [
-          // ['server rendering apps', 'for native platforms'],
           "What's the weather",
           process.env.EXPO_OS !== "web" && "Things to do around me",
           "Trending movies this week",
         ].filter(Boolean) as string[]
       ).map((title, index) => (
         <Animated.View
-          entering={FadeInDown.delay((3 - index) * 100)}
+          entering={FadeInDown.delay((3 - index) * 80).springify()}
           key={String(index)}
         >
           <PromptOnTap
             key={String(index)}
             style={{}}
-            activeOpacity={0.7}
+            activeOpacity={0.6}
             prompt={title}
           >
             <View
               style={[
-                styles.suggestion,
+                {
+                  borderRadius: 20,
+                  borderBottomLeftRadius: 6,
+                  paddingHorizontal: 14,
+                  paddingVertical: 9,
+                  backgroundColor: isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.04)",
+                  flexDirection: "row",
+                  alignItems: "center",
+                },
                 tw`transition-colors hover:bg-systemGray4`,
               ]}
             >
               <Text
                 style={{
                   color: AC.label,
-                  fontSize: 16,
-                  // fontWeight: "bold",
+                  fontSize: 14,
+                  fontWeight: "400",
                 }}
               >
                 {title}
@@ -56,17 +66,3 @@ export function FirstSuggestions() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  suggestion: {
-    borderRadius: 16,
-    borderBottomLeftRadius: 4,
-    borderCurve: "continuous",
-    padding: 8,
-    borderColor: AC.systemGray5,
-    backgroundColor: AC.secondarySystemGroupedBackground,
-    borderWidth: 1,
-    flexDirection: "row",
-    alignItems: "center",
-  },
-});
