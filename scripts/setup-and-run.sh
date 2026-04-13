@@ -56,5 +56,15 @@ mkdir -p ~/.expo
 echo "authtoken: $NGROK_AUTHTOKEN" > ~/.expo/ngrok.yml
 echo "[setup] Configured ngrok with NGROK_AUTHTOKEN"
 
+# Build claw binary if not already present
+CLAW_BINARY="claw-code/rust/target/debug/claw"
+if [ ! -f "$CLAW_BINARY" ]; then
+  echo "[setup] claw binary not found — building in background (this takes a few minutes)..."
+  bash scripts/build-claw.sh &
+  echo "[setup] Claw build started in background (PID $!)"
+else
+  echo "[setup] claw binary already built at $CLAW_BINARY"
+fi
+
 # Run tunnel share script
 exec node scripts/start-tunnel-share.mjs

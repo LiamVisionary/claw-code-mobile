@@ -116,7 +116,7 @@ type GatewayState = {
   threads: Thread[];
   messages: Record<string, Message[]>;
   terminal: Record<string, string[]>;
-  streams: Record<string, AbortController | undefined>;
+  streams: Record<string, { abort: () => void } | undefined>;
   loadingThreads: boolean;
   activeThreadId?: string;
   actions: {
@@ -126,7 +126,7 @@ type GatewayState = {
     loadMessages: (threadId: string) => Promise<void>;
     sendMessage: (threadId: string, content: string) => Promise<void>;
     stopRun: (threadId: string) => Promise<void>;
-    openStream: (threadId: string) => Promise<void>;
+    openStream: (threadId: string) => void;
     closeStream: (threadId: string) => void;
     loadTerminal: (threadId: string) => Promise<void>;
     sendTerminalCommand: (threadId: string, command: string) => Promise<void>;
@@ -258,11 +258,9 @@ export const useGatewayStore = create<GatewayState>()(
             const res = await fetch(`${baseUrl}/threads/${threadId}/messages`, {
               method: "POST",
               headers,
-              body: JSON.stringify({ content }),
+              body: JSON.stringify({ content, model: state.settings.model }),
             });
-            if (!res.ok) {
-              throw new Error("Failed to send message");
-            }
+            if (!res.ok) throw new Error("Failed to send message");
           } catch (err) {
             set((current) => ({
               threads: current.threads.map((t) =>
@@ -287,105 +285,92 @@ export const useGatewayStore = create<GatewayState>()(
           }));
         },
 
-        openStream: async (threadId: string) => {
+        openStream: (threadId: string) => {
           const state = get();
-          const { baseUrl, headers } = getClientConfig(state);
+          let baseUrl: string;
+          let headers: Record<string, string>;
+          try {
+            ({ baseUrl, headers } = getClientConfig(state));
+          } catch {
+            return; // not configured yet — skip stream
+          }
 
           const existing = state.streams[threadId];
-          if (existing) {
-            existing.abort();
-          }
-          const controller = new AbortController();
-          set((current) => ({
-            streams: { ...current.streams, [threadId]: controller },
-          }));
+          if (existing) existing.abort();
 
-          fetchEventSource(`${baseUrl}/threads/${threadId}/stream`, {
-            method: "GET",
-            headers,
-            signal: controller.signal,
-            openWhenHidden: true,
-            onmessage(event) {
-              if (!event.data) return;
-              const payload = JSON.parse(event.data);
-              const evt = event.event;
-              switch (evt) {
-                case "status":
-                  set((current) => ({
-                    threads: current.threads.map((t) =>
-                      t.id === threadId ? { ...t, status: payload.status } : t
-                    ),
-                  }));
-                  break;
-                case "delta": {
-                  set((current) => {
-                    const existing =
-                      current.messages[threadId]?.find(
-                        (m) => m.id === payload.messageId
-                      ) ??
-                      ({
-                        id: payload.messageId,
-                        threadId,
-                        role: "assistant",
-                        content: "",
-                        createdAt: new Date().toISOString(),
-                      } as Message);
-                    const updated: Message = {
+          const handleMessage = (eventName: string, data: string) => {
+            if (!data) return;
+            let payload: any;
+            try { payload = JSON.parse(data); } catch { return; }
+
+            switch (eventName) {
+              case "status":
+                set((current) => ({
+                  threads: current.threads.map((t) =>
+                    t.id === threadId ? { ...t, status: payload.status } : t
+                  ),
+                }));
+                break;
+              case "delta":
+                set((current) => {
+                  const msgs = current.messages[threadId] ?? [];
+                  const existing = msgs.find((m) => m.id === payload.messageId) ?? {
+                    id: payload.messageId,
+                    threadId,
+                    role: "assistant" as const,
+                    content: "",
+                    createdAt: new Date().toISOString(),
+                  };
+                  return {
+                    messages: upsertMessage(current.messages, {
                       ...existing,
-                      content: `${existing.content}${payload.chunk}`,
-                    };
-                    return {
-                      messages: upsertMessage(current.messages, updated),
-                    };
-                  });
-                  break;
-                }
-                case "done": {
-                  set((current) => ({
-                    threads: current.threads.map((t) =>
-                      t.id === threadId ? { ...t, status: "idle" } : t
-                    ),
-                  }));
-                  break;
-                }
-                case "terminal": {
-                  set((current) => ({
-                    terminal: {
-                      ...current.terminal,
-                      [threadId]: [
-                        ...(current.terminal[threadId] ?? []),
-                        payload.chunk.replace(/\n$/, ""),
-                      ].slice(-400),
-                    },
-                  }));
-                  break;
-                }
-                case "error": {
-                  set((current) => ({
-                    threads: current.threads.map((t) =>
-                      t.id === threadId ? { ...t, status: "error" } : t
-                    ),
-                  }));
-                  break;
-                }
-              }
-            },
-            onerror(err) {
-              console.warn("Stream error", err);
-              set((current) => ({
-                threads: current.threads.map((t) =>
-                  t.id === threadId ? { ...t, status: "error" } : t
-                ),
-              }));
-            },
-          }).catch((err) => {
-            console.warn("Stream closed", err);
-          });
+                      content: existing.content + payload.chunk,
+                    }),
+                  };
+                });
+                break;
+              case "done":
+                set((current) => ({
+                  threads: current.threads.map((t) =>
+                    t.id === threadId ? { ...t, status: "idle" } : t
+                  ),
+                }));
+                break;
+              case "terminal":
+                set((current) => ({
+                  terminal: {
+                    ...current.terminal,
+                    [threadId]: [
+                      ...(current.terminal[threadId] ?? []),
+                      payload.chunk.replace(/\n$/, ""),
+                    ].slice(-400),
+                  },
+                }));
+                break;
+              case "error":
+                set((current) => ({
+                  threads: current.threads.map((t) =>
+                    t.id === threadId ? { ...t, status: "error" } : t
+                  ),
+                }));
+                break;
+            }
+          };
+
+          const sse = openNativeSSE(
+            `${baseUrl}/threads/${threadId}/stream`,
+            headers,
+            handleMessage,
+            (err) => console.warn("SSE error", err)
+          );
+
+          set((current) => ({
+            streams: { ...current.streams, [threadId]: sse },
+          }));
         },
 
         closeStream: (threadId: string) => {
-          const controller = get().streams[threadId];
-          controller?.abort();
+          get().streams[threadId]?.abort();
           set((current) => {
             const next = { ...current.streams };
             delete next[threadId];
