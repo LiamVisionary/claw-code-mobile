@@ -163,24 +163,6 @@ export default function ThreadScreen() {
           flex: 1,
         }}
       >
-        <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
-          <View
-            style={{
-              backgroundColor: statusColor,
-              paddingHorizontal: 10,
-              paddingVertical: 6,
-              borderRadius: 999,
-            }}
-          >
-            <Text style={{ color: AC.systemBackground, fontSize: 12 }}>
-              {threadStatus}
-            </Text>
-          </View>
-          <Text style={{ color: AC.systemGray, fontSize: 12 }}>
-            {thread.repoName}
-          </Text>
-        </View>
-
         <View
           style={{
             flex: 1,
@@ -327,7 +309,7 @@ export default function ThreadScreen() {
       >
         <View style={{ flex: 1, padding: 12, gap: 12 }}>
           <Text style={{ color: AC.label, fontWeight: "600" }}>
-            Terminal — {thread.repoName}
+            Terminal
           </Text>
           <View
             style={{

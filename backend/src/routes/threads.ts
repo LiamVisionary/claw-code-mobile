@@ -14,14 +14,13 @@ threadsRouter.post("/threads", (req, res, next) => {
   try {
     const body = z
       .object({
-        title: z.string().min(1),
-        repoName: z.string().min(1),
+        title: z.string().optional(),
       })
       .parse(req.body);
-    const thread = threadService.create({
-      title: body.title,
-      repoName: body.repoName,
-    });
+    const now = new Date();
+    const title = body.title?.trim() ||
+      now.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    const thread = threadService.create({ title });
     res.status(201).json({ thread });
   } catch (err) {
     next(err instanceof HttpError ? err : err);
