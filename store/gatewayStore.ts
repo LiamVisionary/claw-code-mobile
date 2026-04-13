@@ -12,47 +12,71 @@ function openNativeSSE(
   onMessage: (event: string, data: string) => void,
   onError: (err: Error) => void
 ): { abort: () => void } {
-  const xhr = new XMLHttpRequest();
-  let offset = 0;
-  let currentEvent = "";
-  let dataBuffer = "";
+  let aborted = false;
+  let currentXhr: XMLHttpRequest | null = null;
 
-  xhr.open("GET", url, true);
-  xhr.setRequestHeader("Accept", "text/event-stream");
-  xhr.setRequestHeader("Cache-Control", "no-cache");
-  for (const [k, v] of Object.entries(headers)) {
-    xhr.setRequestHeader(k, v);
-  }
+  function connect() {
+    if (aborted) return;
+    const xhr = new XMLHttpRequest();
+    currentXhr = xhr;
+    let offset = 0;
+    let currentEvent = "";
+    let dataBuffer = "";
 
-  xhr.onreadystatechange = () => {
-    if (xhr.readyState < 3) return;
-    if (xhr.status !== 0 && xhr.status !== 200) {
-      onError(new Error(`SSE status ${xhr.status}`));
-      return;
+    xhr.open("GET", url, true);
+    xhr.setRequestHeader("Accept", "text/event-stream");
+    xhr.setRequestHeader("Cache-Control", "no-cache");
+    for (const [k, v] of Object.entries(headers)) {
+      xhr.setRequestHeader(k, v);
     }
-    const newText = xhr.responseText.slice(offset);
-    offset = xhr.responseText.length;
 
-    for (const line of newText.split("\n")) {
-      if (line.startsWith("event: ")) {
-        currentEvent = line.slice(7).trim();
-      } else if (line.startsWith("data: ")) {
-        dataBuffer += (dataBuffer ? "\n" : "") + line.slice(6);
-      } else if (line.startsWith(":")) {
-        // keep-alive comment — ignore
-      } else if (line === "") {
-        if (dataBuffer !== "") {
-          onMessage(currentEvent, dataBuffer);
-          currentEvent = "";
-          dataBuffer = "";
+    xhr.onreadystatechange = () => {
+      if (xhr.readyState < 3) return;
+      if (xhr.status !== 0 && xhr.status !== 200) {
+        onError(new Error(`SSE status ${xhr.status}`));
+        scheduleReconnect();
+        return;
+      }
+      const newText = xhr.responseText.slice(offset);
+      offset = xhr.responseText.length;
+
+      for (const line of newText.split("\n")) {
+        if (line.startsWith("event: ")) {
+          currentEvent = line.slice(7).trim();
+        } else if (line.startsWith("data: ")) {
+          dataBuffer += (dataBuffer ? "\n" : "") + line.slice(6);
+        } else if (line.startsWith(":")) {
+          // keep-alive comment — ignore
+        } else if (line === "") {
+          if (dataBuffer !== "") {
+            onMessage(currentEvent, dataBuffer);
+            currentEvent = "";
+            dataBuffer = "";
+          }
         }
       }
-    }
-  };
 
-  xhr.onerror = () => onError(new Error("SSE connection failed"));
-  xhr.send();
-  return { abort: () => xhr.abort() };
+      // readyState 4 = DONE — connection closed, reconnect
+      if (xhr.readyState === 4) {
+        scheduleReconnect();
+      }
+    };
+
+    xhr.onerror = () => {
+      onError(new Error("SSE connection failed"));
+      scheduleReconnect();
+    };
+
+    xhr.send();
+  }
+
+  function scheduleReconnect() {
+    if (aborted) return;
+    setTimeout(connect, 2000);
+  }
+
+  connect();
+  return { abort: () => { aborted = true; currentXhr?.abort(); } };
 }
 
 const fileStorage = {
