@@ -5,7 +5,9 @@ import {
   ActivityIndicator,
   FlatList,
   KeyboardAvoidingView,
+  Modal,
   Platform,
+  Pressable,
   Text,
   TextInput,
   View,
@@ -19,8 +21,9 @@ import * as AC from "@bacons/apple-colors";
 import TouchableBounce from "@/components/ui/TouchableBounce";
 import { IconSymbol } from "@/components/ui/IconSymbol";
 import SlashCommandPicker from "@/components/SlashCommandPicker";
+import DirectoryBrowser from "@/components/DirectoryBrowser";
 import { useGatewayStore } from "@/store/gatewayStore";
-import type { Message, ToolStep, PermissionRequest, ThreadStatus } from "@/store/gatewayStore";
+import type { Message, ToolStep, PermissionRequest, ThreadStatus, ModelEntry } from "@/store/gatewayStore";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BORDER_RADIUS, SPACING, SHADOW, TYPOGRAPHY } from "@/constants/theme";
 
@@ -53,6 +56,9 @@ export default function ThreadScreen() {
   const [slashPickerVisible, setSlashPickerVisible] = useState(false);
   const [command, setCommand] = useState("");
   const [copiedConvo, setCopiedConvo] = useState(false);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [showDirBrowser, setShowDirBrowser] = useState(false);
+  const settings = useGatewayStore((s) => s.settings);
   const terminalRef = useRef<BottomSheetModal>(null);
   const { bottom } = useSafeAreaInsets();
   const colorScheme = useColorScheme();
@@ -252,25 +258,11 @@ export default function ThreadScreen() {
     >
       <Stack.Screen
         options={{
-          headerTitle: () => {
-            const dirName = thread.workDir
-              ? thread.workDir.split("/").filter(Boolean).pop()
-              : null;
-            return (
-              <View style={{ alignItems: "center" }}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                  <Text style={{ color: AC.label, fontSize: 15, fontWeight: "600" }} numberOfLines={1}>
-                    {thread.title}
-                  </Text>
-                </View>
-                {dirName ? (
-                  <Text style={{ color: AC.systemGray, fontSize: 11, fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", marginTop: 1 }} numberOfLines={1}>
-                    {dirName}
-                  </Text>
-                ) : null}
-              </View>
-            );
-          },
+          headerTitle: () => (
+            <Text style={{ color: AC.label, fontSize: 16, fontWeight: "600" }} numberOfLines={1}>
+              {thread.title}
+            </Text>
+          ),
           headerRight: () => headerRight,
         }}
       />
@@ -280,6 +272,13 @@ export default function ThreadScreen() {
           paddingBottom: bottom,
         }}
       >
+        {/* Model picker */}
+        <ModelPickerBar
+          open={modelPickerOpen}
+          onToggle={() => setModelPickerOpen((v) => !v)}
+          isDark={isDark}
+        />
+
         {/* Messages */}
         <FlatList
           ref={listRef}
@@ -290,6 +289,7 @@ export default function ThreadScreen() {
             gap: SPACING.sm,
             flexGrow: 1,
           }}
+          onScrollBeginDrag={() => setModelPickerOpen(false)}
           renderItem={({ item }) => <MessageBubble message={item} threadId={id ?? ""} />}
           ListFooterComponent={listFooterComponent}
           ListEmptyComponent={() => (
@@ -342,6 +342,50 @@ export default function ThreadScreen() {
             gap: SPACING.sm,
           }}
         >
+          {/* Directory badge — tappable on turn 0, read-only otherwise */}
+          {thread.workDir ? (
+            <TouchableBounce
+              sensory
+              disabled={messages.length > 0}
+              onPress={() => setShowDirBrowser(true)}
+            >
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  alignSelf: "flex-start",
+                  gap: 5,
+                  paddingHorizontal: 10,
+                  paddingVertical: 5,
+                  backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
+                  borderRadius: BORDER_RADIUS.full,
+                  borderWidth: 1,
+                  borderColor: isDark ? "rgba(255,255,255,0.09)" : "rgba(0,0,0,0.07)",
+                }}
+              >
+                <Text style={{ fontSize: 11 }}>📁</Text>
+                <Text
+                  style={{
+                    color: AC.secondaryLabel,
+                    fontSize: 12,
+                    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+                    maxWidth: 220,
+                  }}
+                  numberOfLines={1}
+                >
+                  {thread.workDir.split("/").filter(Boolean).pop() ?? thread.workDir}
+                </Text>
+                {messages.length === 0 && (
+                  <IconSymbol
+                    name="chevron.down"
+                    size={10}
+                    color={AC.secondaryLabel as any}
+                  />
+                )}
+              </View>
+            </TouchableBounce>
+          ) : null}
+
           <View
             style={{
               flexDirection: "row",
@@ -401,6 +445,16 @@ export default function ThreadScreen() {
           </View>
         </View>
       </View>
+
+      {/* Directory browser — only available on turn 0 */}
+      <DirectoryBrowser
+        visible={showDirBrowser}
+        onSelect={(path) => {
+          setShowDirBrowser(false);
+          if (id) actions.updateThreadWorkDir(id, path).catch(() => {});
+        }}
+        onCancel={() => setShowDirBrowser(false)}
+      />
 
       <BottomSheetModal
         ref={terminalRef}
@@ -790,6 +844,19 @@ function MessageBubble({ message, threadId }: { message: Message; threadId: stri
         )}
       </TouchableBounce>
 
+      {/* Timestamp */}
+      <Text
+        style={{
+          color: isDark ? "rgba(255,255,255,0.22)" : "rgba(0,0,0,0.20)",
+          fontSize: 10,
+          paddingHorizontal: SPACING.sm,
+          marginTop: -1,
+          alignSelf: isUser ? "flex-end" : "flex-start",
+        }}
+      >
+        {formatMsgTime(message.createdAt)}
+      </Text>
+
       {/* Subtle copy indicator */}
       {copied && (
         <View
@@ -805,6 +872,192 @@ function MessageBubble({ message, threadId }: { message: Message; threadId: stri
         </View>
       )}
     </View>
+  );
+}
+
+// ─── Message timestamp helper ─────────────────────────────────────────────────
+
+function formatMsgTime(dateStr: string): string {
+  const date = new Date(dateStr);
+  const now   = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const msgDay     = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const time = date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  if (msgDay === todayStart) return time;
+  if (todayStart - msgDay <= 86_400_000) return `Yesterday ${time}`;
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + ", " + time;
+}
+
+// ─── Model picker ─────────────────────────────────────────────────────────────
+
+const PROVIDER_COLOR: Record<string, string> = {
+  claude:      "#0066FF",
+  openrouter:  "#7B3FE4",
+  local:       "#16A34A",
+};
+
+function ModelPickerBar({
+  open,
+  onToggle,
+  isDark,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  isDark: boolean;
+}) {
+  const settings = useGatewayStore((s) => s.settings);
+  const actions  = useGatewayStore((s) => s.actions);
+  const queue    = settings.modelQueue.filter((m) => m.enabled);
+
+  if (queue.length === 0) return null;
+
+  const active  = queue[0];
+  const dotColor = PROVIDER_COLOR[active.provider] ?? "#6B7280";
+  const shortName = active.name.includes("/")
+    ? active.name.split("/").pop()!
+    : active.name;
+
+  const selectModel = (entry: ModelEntry) => {
+    const newQueue = [entry, ...settings.modelQueue.filter((m) => m.id !== entry.id)];
+    actions.setSettings({
+      serverUrl:       settings.serverUrl,
+      bearerToken:     settings.bearerToken,
+      model:           settings.model,
+      modelQueue:      newQueue,
+      autoCompact:     settings.autoCompact,
+      streamingEnabled: settings.streamingEnabled,
+    });
+    onToggle();
+  };
+
+  const pillBg     = isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.05)";
+  const pillBorder = isDark ? "rgba(255,255,255,0.10)" : "rgba(0,0,0,0.08)";
+  const dropBg     = isDark ? "#1c1c1e" : "#fff";
+  const dropBorder = isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)";
+
+  return (
+    <>
+      {/* Trigger pill */}
+      <View style={{ alignItems: "center", paddingVertical: 6 }}>
+        <TouchableBounce sensory onPress={onToggle}>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 6,
+              paddingHorizontal: 12,
+              paddingVertical: 5,
+              backgroundColor: pillBg,
+              borderRadius: BORDER_RADIUS.full,
+              borderWidth: 1,
+              borderColor: pillBorder,
+            }}
+          >
+            <View
+              style={{
+                width: 7,
+                height: 7,
+                borderRadius: 3.5,
+                backgroundColor: dotColor,
+              }}
+            />
+            <Text
+              style={{
+                color: AC.label,
+                fontSize: 12.5,
+                fontWeight: "500",
+                maxWidth: 220,
+              }}
+              numberOfLines={1}
+            >
+              {shortName}
+            </Text>
+            <IconSymbol
+              name={open ? "chevron.up" : "chevron.down"}
+              size={9}
+              color={isDark ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.35)"}
+            />
+          </View>
+        </TouchableBounce>
+      </View>
+
+      {/* Dropdown — rendered in a Modal so it's never clipped by parent overflow */}
+      <Modal
+        transparent
+        visible={open}
+        animationType="none"
+        onRequestClose={onToggle}
+      >
+        <Pressable
+          style={{ flex: 1 }}
+          onPress={onToggle}
+        >
+          {/* Position the card near the top-center of the screen */}
+          <View
+            style={{
+              paddingTop: 110,
+              alignItems: "center",
+            }}
+          >
+            <Pressable>
+              <View
+                style={{
+                  backgroundColor: dropBg,
+                  borderRadius: BORDER_RADIUS.lg,
+                  borderWidth: 1,
+                  borderColor: dropBorder,
+                  minWidth: 220,
+                  overflow: "hidden",
+                  ...SHADOW.md,
+                }}
+              >
+                {queue.map((entry, i) => {
+                  const isActive = i === 0;
+                  const color    = PROVIDER_COLOR[entry.provider] ?? "#6B7280";
+                  const name     = entry.name.includes("/") ? entry.name.split("/").pop()! : entry.name;
+                  return (
+                    <TouchableBounce key={entry.id} sensory onPress={() => selectModel(entry)}>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 9,
+                          paddingHorizontal: 14,
+                          paddingVertical: 11,
+                          borderBottomWidth: i < queue.length - 1 ? 1 : 0,
+                          borderBottomColor: dropBorder,
+                          backgroundColor: isActive
+                            ? isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.03)"
+                            : "transparent",
+                        }}
+                      >
+                        <View
+                          style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color }}
+                        />
+                        <Text
+                          style={{
+                            flex: 1,
+                            color: isDark ? "#fff" : "#000",
+                            fontSize: 13.5,
+                            fontWeight: isActive ? "600" : "400",
+                          }}
+                          numberOfLines={1}
+                        >
+                          {name}
+                        </Text>
+                        {isActive && (
+                          <IconSymbol name="checkmark" size={12} color={color} />
+                        )}
+                      </View>
+                    </TouchableBounce>
+                  );
+                })}
+              </View>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
+    </>
   );
 }
 
