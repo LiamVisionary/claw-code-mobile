@@ -85,6 +85,51 @@ function buildArgs(prompt: string, model?: ModelConfig): string[] {
   return args;
 }
 
+/**
+ * Args for a compact run.
+ * Uses `--resume <session-file> /compact`, NOT the `prompt` subcommand.
+ * We resolve the actual session .jsonl path so that CLAW_SESSION_DIR is
+ * honoured — `--resume latest` resolves from the default sessions dir,
+ * which ignores our per-thread CLAW_SESSION_DIR override.
+ */
+function buildCompactArgs(model?: ModelConfig, sessionDir?: string): string[] {
+  const args: string[] = [];
+  if (model?.name) args.push("--model", model.name);
+
+  // Resolve the most recently modified .jsonl file in our per-thread session dir.
+  // Claw uses a legacy layout: <sessionDir>/<hash>/session-*.jsonl (1 level deep)
+  // so we scan both the top level AND one level of subdirectories.
+  let sessionArg = "latest"; // safe fallback — claw resolves from CWD
+  if (sessionDir && fs.existsSync(sessionDir)) {
+    try {
+      const candidates: { file: string; mtime: number }[] = [];
+      const addIfJsonl = (p: string) => {
+        if (p.endsWith(".jsonl") || p.endsWith(".json")) {
+          try { candidates.push({ file: p, mtime: fs.statSync(p).mtimeMs }); } catch { /* skip */ }
+        }
+      };
+      for (const entry of fs.readdirSync(sessionDir)) {
+        const full = path.join(sessionDir, entry);
+        try {
+          const stat = fs.statSync(full);
+          if (stat.isDirectory()) {
+            for (const sub of fs.readdirSync(full)) addIfJsonl(path.join(full, sub));
+          } else {
+            addIfJsonl(full);
+          }
+        } catch { /* skip */ }
+      }
+      candidates.sort((a, b) => b.mtime - a.mtime);
+      if (candidates.length > 0) sessionArg = candidates[0].file;
+    } catch {
+      // ignore — fall back to "latest"
+    }
+  }
+
+  args.push("--resume", sessionArg, "/compact");
+  return args;
+}
+
 /** Stream the text of a completed response word-by-word for a nicer UX. */
 async function streamWords(
   threadId: string,
@@ -118,10 +163,11 @@ function spawnOnce(
   cwd: string,
   sessionDir: string,
   model: ModelConfig | undefined,
-  active: ActiveRun
+  active: ActiveRun,
+  isCompact = false
 ): Promise<SpawnResult> {
   return new Promise((resolve) => {
-    const args = buildArgs(content, model);
+    const args = isCompact ? buildCompactArgs(model, sessionDir) : buildArgs(content, model);
     const env = buildEnv(model, sessionDir);
     logger.info({ threadId, cwd, model: model?.name ?? model?.provider, args }, "Spawning claw");
 
@@ -339,7 +385,7 @@ export const clawRuntime = {
             compactAttempted = true;
             emitTerminal(threadId, "↻ Auto-compacting context…");
             const { succeeded: ok, stopped: cs } = await spawnOnce(
-              threadId, "/compact", cwd, sessionDir, model, active
+              threadId, "", cwd, sessionDir, model, active, true /* isCompact */
             );
             if (!cs && ok) {
               emitTerminal(threadId, "✓ Context compacted — retrying your message");
@@ -373,7 +419,7 @@ export const clawRuntime = {
         compactAttempted = true;
         emitTerminal(threadId, "↻ Auto-compacting context…");
         const { succeeded: ok, stopped: cs } = await spawnOnce(
-          threadId, "/compact", cwd, sessionDir, model, active
+          threadId, "", cwd, sessionDir, model, active, true /* isCompact */
         );
         if (cs) break;
         if (ok) {
