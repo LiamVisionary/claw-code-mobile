@@ -17,7 +17,7 @@ import TouchableBounce from "@/components/ui/TouchableBounce";
 import { IconSymbol } from "@/components/ui/IconSymbol";
 import SlashCommandPicker from "@/components/SlashCommandPicker";
 import { useGatewayStore } from "@/store/gatewayStore";
-import type { Message } from "@/store/gatewayStore";
+import type { Message, ToolStep, PermissionRequest, ThreadStatus } from "@/store/gatewayStore";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BORDER_RADIUS, SPACING, SHADOW, TYPOGRAPHY } from "@/constants/theme";
 
@@ -257,8 +257,8 @@ export default function ThreadScreen() {
             threadStatus === "running" || threadStatus === "waiting" ? (
               <ThinkingIndicator
                 status={threadStatus}
-                toolSteps={(useGatewayStore.getState().toolSteps[id ?? ""] ?? [])}
-                permissionRequests={(useGatewayStore.getState().permissionRequests[id ?? ""] ?? []).filter((r) => r.pending)}
+                toolSteps={toolSteps}
+                permissionRequests={permissionReqs}
                 onApprove={(permId) => actions.respondToPermission(id ?? "", permId, true)}
                 onDeny={(permId) => actions.respondToPermission(id ?? "", permId, false)}
                 isDark={isDark}
