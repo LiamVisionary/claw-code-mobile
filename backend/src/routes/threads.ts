@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { threadService } from "../services/threadService";
+import { streamService } from "../services/streamService";
 import { HttpError } from "../utils/errors";
 
 export const threadsRouter = Router();
@@ -52,6 +53,16 @@ threadsRouter.delete("/threads/:threadId", (req, res, next) => {
   } catch (err) {
     next(err);
   }
+});
+
+/** SSE stream — the mobile app connects here for realtime events. */
+threadsRouter.get("/threads/:threadId/stream", (req, res) => {
+  const thread = threadService.get(req.params.threadId);
+  if (!thread) {
+    res.status(404).json({ error: "Thread not found" });
+    return;
+  }
+  streamService.subscribe(req.params.threadId, res);
 });
 
 /** Duplicate a thread (copy messages, append "(copy)" to title). */
