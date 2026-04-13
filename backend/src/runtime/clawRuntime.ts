@@ -163,6 +163,69 @@ function spawnOnce(
   });
 }
 
+/**
+ * Extract a clean error message from claw's stdout/stderr.
+ * Claw sometimes writes structured JSON to stderr or stdout on error exit.
+ * Also detects context-window overflow and returns a user-friendly message.
+ */
+function extractClawError(stdoutBuf: string, stderrBuf: string): string {
+  // Try parsing stderr as JSON first (claw writes error JSON there)
+  for (const raw of [stderrBuf, stdoutBuf]) {
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+    // Sometimes there's leading non-JSON (e.g. progress lines) before the JSON blob
+    const jsonStart = trimmed.lastIndexOf("{");
+    if (jsonStart !== -1) {
+      try {
+        const parsed = JSON.parse(trimmed.slice(jsonStart)) as Record<string, unknown>;
+        const msg = (parsed["message"] ?? parsed["error"] ?? "") as string;
+        if (msg) {
+          if (isContextOverflow(msg)) return formatContextOverflow();
+          return msg.split("\n")[0].trim() || msg;
+        }
+      } catch {
+        // not JSON — continue
+      }
+    }
+    // Plain text — check for context overflow keywords
+    if (isContextOverflow(trimmed)) return formatContextOverflow();
+  }
+
+  // Fallback: first meaningful stderr line (avoids slicing mid-word)
+  const firstLine = stderrBuf
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.length > 0);
+  if (firstLine) {
+    if (isContextOverflow(firstLine)) return formatContextOverflow();
+    return firstLine;
+  }
+
+  return "claw exited with an error";
+}
+
+function isContextOverflow(text: string): boolean {
+  const lower = text.toLowerCase();
+  return (
+    text.includes("/compact") ||
+    text.includes("Compact") ||
+    (lower.includes("context") && lower.includes("compact")) ||
+    lower.includes("context window full") ||
+    lower.includes("context length")
+  );
+}
+
+function formatContextOverflow(): string {
+  return [
+    "⚠ Context window is full — the conversation is too long for the model to continue.",
+    "",
+    "Options:",
+    "  • Start a new thread for a fresh session",
+    "  • Type /compact in your next message to summarize and continue",
+    "  • Ask a shorter or more focused question to reduce token usage",
+  ].join("\n");
+}
+
 /** Parse claw's JSON stdout and emit tool/cost lines + stream the message. */
 async function processSuccess(
   threadId: string,
@@ -171,12 +234,21 @@ async function processSuccess(
   active: ActiveRun
 ): Promise<void> {
   const result = JSON.parse(stdoutBuf.trim()) as {
+    type?: string;
     message: string;
     tool_uses?: Array<{ tool_name: string; input: unknown }>;
     tool_results?: Array<{ content: string }>;
     usage?: { input_tokens: number; output_tokens: number };
     estimated_cost?: string;
   };
+
+  // Claw may exit 0 but output an error JSON — treat it as a failure
+  if (result.type === "error") {
+    const msg = result.message ?? "claw reported an error";
+    throw Object.assign(new Error(isContextOverflow(msg) ? formatContextOverflow() : msg), {
+      isClawError: true,
+    });
+  }
 
   for (const tu of result.tool_uses ?? []) {
     emitTerminal(threadId, `[${tu.tool_name}] ${JSON.stringify(tu.input).slice(0, 200)}`);
@@ -259,17 +331,25 @@ export const clawRuntime = {
           await processSuccess(threadId, messageId, stdoutBuf, active);
           finalSuccess = true;
         } catch (err: any) {
-          logger.error({ err, stdoutBuf }, "Failed to parse claw JSON output");
-          const errChunk = `Parse error: ${err.message}\nstdout: ${stdoutBuf.slice(0, 200)}`;
-          messageService.appendAssistantDelta(threadId, messageId, errChunk);
-          streamService.publish(threadId, { type: "delta", messageId, chunk: errChunk });
+          const isClawError = (err as any).isClawError === true;
+          if (isClawError) {
+            logger.warn({ model: label }, "claw exited ok but reported error");
+            const chunk = err.message;
+            messageService.appendAssistantDelta(threadId, messageId, chunk);
+            streamService.publish(threadId, { type: "delta", messageId, chunk });
+          } else {
+            logger.error({ err, stdoutBuf }, "Failed to parse claw JSON output");
+            const chunk = `Parse error: ${err.message}\nstdout: ${stdoutBuf.slice(0, 200)}`;
+            messageService.appendAssistantDelta(threadId, messageId, chunk);
+            streamService.publish(threadId, { type: "delta", messageId, chunk });
+          }
         }
         break;
       }
 
       // Failed — log and decide whether to retry
-      const errText = stderrBuf.slice(-300) || `claw exited with error`;
-      logger.error({ errText, model: label }, "claw attempt failed");
+      const errText = extractClawError(stdoutBuf, stderrBuf);
+      logger.error({ stderrBuf: stderrBuf.slice(-200), model: label }, "claw attempt failed");
 
       if (i < queue.length - 1) {
         emitTerminal(threadId, `⚠ ${label} failed — trying next model`);
@@ -277,7 +357,7 @@ export const clawRuntime = {
       }
 
       // Last model exhausted — surface error in the message bubble
-      const chunk = `Error: ${errText}`;
+      const chunk = errText;
       messageService.appendAssistantDelta(threadId, messageId, chunk);
       streamService.publish(threadId, { type: "delta", messageId, chunk });
     }
