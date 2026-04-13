@@ -1251,49 +1251,65 @@ const TOOL_META: Record<string, { icon: string; color: string }> = {
   unknown: { icon: "hammer",                     color: "#6B7280" },
 };
 
-/** iMessage-style three bouncing dots */
-function BouncingDots({ color }: { color: string }) {
-  const d1 = useRef(new Animated.Value(0)).current;
-  const d2 = useRef(new Animated.Value(0)).current;
-  const d3 = useRef(new Animated.Value(0)).current;
+const THINKING_PHRASES = [
+  "thinking",
+  "cooking",
+  "whipping that cream",
+  "making magic",
+  "galloping that horse",
+  "cleaning the kitchen",
+  "sweeping the floors",
+  "big braining",
+  "connecting the pieces",
+];
+
+/** Cycling text label with three pulsing dots */
+function CyclingLabel({ color }: { color: string }) {
+  const [phraseIdx, setPhraseIdx] = useState(0);
+  const op1 = useRef(new Animated.Value(1)).current;
+  const op2 = useRef(new Animated.Value(0.2)).current;
+  const op3 = useRef(new Animated.Value(0.2)).current;
 
   useEffect(() => {
-    // Animated.delay is NOT compatible with useNativeDriver:true — use setTimeout
-    // to stagger each dot's independent loop instead.
-    const makeBounce = (val: Animated.Value) =>
+    const makePulse = (val: Animated.Value) =>
       Animated.loop(
         Animated.sequence([
-          Animated.timing(val, { toValue: -5, duration: 260, useNativeDriver: true }),
-          Animated.timing(val, { toValue: 0,  duration: 260, useNativeDriver: true }),
+          Animated.timing(val, { toValue: 1,   duration: 320, useNativeDriver: true }),
+          Animated.timing(val, { toValue: 0.2, duration: 320, useNativeDriver: true }),
         ])
       );
 
-    const anim1 = makeBounce(d1);
-    anim1.start();
+    const a1 = makePulse(op1);
+    a1.start();
+    const animRefs: Animated.CompositeAnimation[] = [a1];
+    const t1 = setTimeout(() => { const a = makePulse(op2); a.start(); animRefs.push(a); }, 213);
+    const t2 = setTimeout(() => { const a = makePulse(op3); a.start(); animRefs.push(a); }, 426);
 
-    const animRefs: Animated.CompositeAnimation[] = [anim1];
-    const t1 = setTimeout(() => { const a = makeBounce(d2); a.start(); animRefs.push(a); }, 150);
-    const t2 = setTimeout(() => { const a = makeBounce(d3); a.start(); animRefs.push(a); }, 300);
+    const phraseTimer = setInterval(() => {
+      setPhraseIdx((i) => (i + 1) % THINKING_PHRASES.length);
+    }, 2800);
 
     return () => {
       animRefs.forEach((a) => a.stop());
       clearTimeout(t1);
       clearTimeout(t2);
+      clearInterval(phraseTimer);
     };
   }, []);
 
-  const dot = (val: Animated.Value) => (
-    <Animated.View
-      style={{
-        width: 7, height: 7, borderRadius: 3.5,
-        backgroundColor: color,
-        transform: [{ translateY: val }],
-      }}
-    />
-  );
   return (
-    <View style={{ flexDirection: "row", gap: 5, alignItems: "center" }}>
-      {dot(d1)}{dot(d2)}{dot(d3)}
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+      <Text style={{ color, fontSize: 13, fontWeight: "500" }}>
+        {THINKING_PHRASES[phraseIdx]}
+      </Text>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+        {([op1, op2, op3] as Animated.Value[]).map((val, i) => (
+          <Animated.View
+            key={i}
+            style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: color, opacity: val }}
+          />
+        ))}
+      </View>
     </View>
   );
 }
@@ -1349,8 +1365,13 @@ function ThinkingIndicator({
             ...SHADOW.sm,
           }}
         >
-          {/* No steps yet — show bouncing dots */}
-          {!hasBadges && <BouncingDots color={dotColor} />}
+          {/* Cycling phrase + animated dots — always visible */}
+          <CyclingLabel color={dotColor} />
+
+          {/* Divider between label and badges */}
+          {hasBadges && (
+            <View style={{ width: 1, height: 14, backgroundColor: dotColor, opacity: 0.25, marginHorizontal: 1 }} />
+          )}
 
           {/* One icon badge per completed/running step */}
           {visibleBadges.map((step) => {
