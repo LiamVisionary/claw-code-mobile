@@ -1,5 +1,6 @@
 import { StyleProp, View, ViewStyle } from "react-native";
-// Media queries for web layout.
+import { theme } from "@/theme";
+import { SHADOW } from "@/theme";
 
 export function ChatContainer({
   children,
@@ -14,9 +15,12 @@ export function ChatContainer({
         {
           flex: 1,
           alignItems: "stretch",
+          backgroundColor: "#0f0f0f",
+          ...SHADOW.lg,
         },
         // @ts-expect-error
         process.env.EXPO_OS === "web" && { maxHeight: "100vh" },
+        style,
       ]}
     >
       <View style={[{ flex: 1, flexGrow: 1 }, style]}>{children}</View>

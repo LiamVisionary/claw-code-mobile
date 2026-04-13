@@ -452,8 +452,6 @@ export default function ThreadScreen() {
 
 function MessageBubble({ message }: { message: Message }) {
   const isUser = message.role === "user";
-  const bubbleColor = isUser ? AC.label : AC.systemGray5;
-  const textColor = isUser ? AC.systemBackground : AC.label;
   const [copied, setCopied] = useState(false);
 
   const onCopy = useCallback(async () => {
@@ -467,21 +465,22 @@ function MessageBubble({ message }: { message: Message }) {
       style={{
         flexDirection: "column",
         alignItems: isUser ? "flex-end" : "flex-start",
-        gap: 4,
+        gap: 6,
       }}
     >
       <View
         style={{
           maxWidth: "82%",
-          backgroundColor: bubbleColor,
-          borderRadius: 18,
-          paddingHorizontal: 14,
-          paddingVertical: 10,
-          borderBottomLeftRadius: isUser ? 18 : 6,
-          borderBottomRightRadius: isUser ? 6 : 18,
+          backgroundColor: isUser ? AC.systemGray6 : AC.systemGroupedBackground,
+          borderRadius: BORDER_RADIUS.lg,
+          paddingHorizontal: SPACING.lg,
+          paddingVertical: SPACING.md,
+          borderWidth: isUser ? 0 : 1,
+          borderColor: isUser ? AC.label : AC.separator,
+          ...(isUser ? SHADOW.md : {}),
         }}
       >
-        <Text style={{ color: textColor, fontSize: 15, lineHeight: 20 }}>
+        <Text style={{ color: isUser ? AC.systemBackground : AC.label, fontSize: TYPOGRAPHY.fontSizes.md, lineHeight: TYPOGRAPHY.lineHeights.md }}>
           {message.content}
         </Text>
       </View>
@@ -491,10 +490,10 @@ function MessageBubble({ message }: { message: Message }) {
           style={{
             flexDirection: "row",
             alignItems: "center",
-            gap: 4,
-            paddingHorizontal: 8,
-            paddingVertical: 4,
-            borderRadius: 8,
+            gap: SPACING.sm,
+            paddingHorizontal: SPACING.sm,
+            paddingVertical: SPACING.xs,
+            borderRadius: BORDER_RADIUS.sm,
             backgroundColor: copied
               ? AC.systemGreen
               : AC.tertiarySystemGroupedBackground,
@@ -502,12 +501,12 @@ function MessageBubble({ message }: { message: Message }) {
         >
           <IconSymbol
             name={copied ? "checkmark" : "doc.on.doc"}
-            size={11}
+            size={TYPOGRAPHY.fontSizes.xs}
             color={copied ? AC.systemBackground : AC.systemGray}
           />
           <Text
             style={{
-              fontSize: 11,
+              fontSize: TYPOGRAPHY.fontSizes.xs,
               color: copied ? AC.systemBackground : AC.systemGray,
             }}
           >

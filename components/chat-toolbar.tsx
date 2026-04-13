@@ -14,16 +14,14 @@ import {
   useColorScheme,
   View,
 } from "react-native";
-import Animated, {
-  useAnimatedKeyboard,
-  useAnimatedStyle,
-} from "react-native-reanimated";
+import Animated, { useAnimatedKeyboard, useAnimatedStyle } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { AI } from "./ai-context";
 import { FirstSuggestions } from "./first-suggestions";
 import { IconSymbol } from "./ui/IconSymbol";
 import TouchableBounce from "./ui/TouchableBounce";
 import { UserMessage } from "./user-message";
+import { SIZES, SPACING, TYPOGRAPHY } from "@/theme";
 
 const AnimatedBlurView = Animated.createAnimatedComponent(BlurView);
 
@@ -117,7 +115,7 @@ export function ChatToolbarInner({
           left: 0,
           right: 0,
           backgroundColor: "transparent",
-          gap: 8,
+          gap: SPACING.sm,
           pointerEvents: "box-none",
         },
         translateStyle,
@@ -135,9 +133,9 @@ export function ChatToolbarInner({
         }
         style={[
           {
-            paddingTop: 8,
-            paddingBottom: 8,
-            paddingHorizontal: 16,
+            paddingTop: SPACING.sm,
+            paddingBottom: SPACING.sm,
+            paddingHorizontal: SPACING.lg,
             alignItems: "stretch",
           },
           blurStyle,
@@ -147,8 +145,7 @@ export function ChatToolbarInner({
           style={[
             {
               flexDirection: "row",
-              gap: 8,
-
+              gap: SPACING.sm,
               alignItems: "stretch",
             },
             tw`md:w-[768px] max-w-[768px] md:mx-auto`,
@@ -166,17 +163,17 @@ export function ChatToolbarInner({
             style={{
               pointerEvents: disabled ? "none" : "auto",
               color: AC.label,
-              padding: 16,
+              paddingHorizontal: SPACING.lg,
+              paddingVertical: SPACING.sm,
               borderColor: AC.separator,
-              backgroundColor: AC.secondarySystemGroupedBackground,
+              backgroundColor: "#1a1a1a",
               borderWidth: 1,
-              borderRadius: 999,
-              paddingVertical: 8,
-              fontSize: 16,
+              borderRadius: BORDER_RADIUS.full,
+              fontSize: TYPOGRAPHY.fontSizes.md,
               outline: "none",
               flex: 1,
             }}
-            placeholder="Ask anything"
+            placeholder="Ask anything…"
             autoCapitalize="sentences"
             autoCorrect
             placeholderTextColor={AC.systemGray2}
@@ -200,38 +197,45 @@ function SendButton({
   enabled?: boolean;
   onPress: () => void;
 }) {
+  const backgroundColor = enabled ? AC.label : "#333333";
+  
   return (
     <TouchableBounce
       disabled={!enabled}
       sensory
-      // @ts-expect-error
-      style={
+      style={[
         process.env.EXPO_OS === "web"
           ? {
               display: "grid",
-              marginRight: 8,
+              marginRight: SPACING.sm,
             }
-          : {}
-      }
+          : {},
+      ]}
       onPress={onPress}
     >
       <View
         style={[
           {
-            flex: 1,
             justifyContent: "center",
             alignItems: "center",
             borderColor: AC.separator,
             borderWidth: 1,
-            aspectRatio: 1,
-            backgroundColor: AC.label,
-            borderRadius: 999,
+            backgroundColor: backgroundColor,
+            borderRadius: BORDER_RADIUS.full,
           },
           !enabled && { opacity: 0.5 },
           tw`transition-transform hover:scale-95`,
+          {
+            width: SIZES.touchable,
+            height: SIZES.touchable,
+          },
         ]}
       >
-        <IconSymbol name="arrow.up" size={20} color={AC.systemBackground} />
+        <IconSymbol
+          name="arrow.up"
+          size={SIZES.icon.sm}
+          color={enabled ? AC.systemBackground : AC.systemGray}
+        />
       </View>
     </TouchableBounce>
   );
