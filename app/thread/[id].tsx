@@ -10,6 +10,7 @@ import {
   View,
   useColorScheme,
 } from "react-native";
+import Markdown from "react-native-markdown-display";
 import * as Clipboard from "expo-clipboard";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { BottomSheetModal } from "@gorhom/bottom-sheet";
@@ -490,12 +491,85 @@ export default function ThreadScreen() {
 
 const EMPTY_BUBBLE_STEPS: ToolStep[] = [];
 
+/** Theme-aware styles for react-native-markdown-display inside assistant bubbles */
+function useMarkdownStyles(isDark: boolean) {
+  return useMemo(() => {
+    const fg       = isDark ? "#ECEDEE" : "#1C1C1E";
+    const muted    = isDark ? "rgba(255,255,255,0.45)" : "rgba(0,0,0,0.4)";
+    const codeBg   = isDark ? "rgba(255,255,255,0.09)" : "rgba(0,0,0,0.055)";
+    const codeBorder = isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.1)";
+    const mono     = Platform.OS === "ios" ? "Menlo" : "monospace";
+    const base     = 15;
+    const lh       = 22;
+    return {
+      body:      { color: fg, fontSize: base, lineHeight: lh },
+      paragraph: { color: fg, fontSize: base, lineHeight: lh, marginTop: 0, marginBottom: 5 },
+      heading1:  { color: fg, fontSize: 20, fontWeight: "700" as const, marginTop: 12, marginBottom: 6 },
+      heading2:  { color: fg, fontSize: 17, fontWeight: "700" as const, marginTop: 10, marginBottom: 4 },
+      heading3:  { color: fg, fontSize: 15, fontWeight: "600" as const, marginTop: 8, marginBottom: 2 },
+      strong:    { fontWeight: "700" as const },
+      em:        { fontStyle: "italic" as const },
+      s:         { textDecorationLine: "line-through" as const },
+      link:      { color: "#0A84FF", textDecorationLine: "none" as const },
+      blockquote: {
+        backgroundColor: codeBg,
+        borderLeftWidth: 3,
+        borderLeftColor: muted,
+        paddingLeft: 10,
+        paddingVertical: 4,
+        marginVertical: 6,
+        borderRadius: 4,
+      },
+      code_inline: {
+        backgroundColor: codeBg,
+        fontFamily: mono,
+        fontSize: 13,
+        borderRadius: 4,
+        paddingHorizontal: 4,
+        paddingVertical: 1,
+        color: isDark ? "#E879F9" : "#7C3AED",
+      },
+      fence: {
+        backgroundColor: codeBg,
+        fontFamily: mono,
+        fontSize: 12.5,
+        lineHeight: 19,
+        borderRadius: 8,
+        padding: 12,
+        marginVertical: 6,
+        borderWidth: 1,
+        borderColor: codeBorder,
+        color: fg,
+      },
+      code_block: {
+        backgroundColor: codeBg,
+        fontFamily: mono,
+        fontSize: 12.5,
+        lineHeight: 19,
+        borderRadius: 8,
+        padding: 12,
+        marginVertical: 6,
+        borderWidth: 1,
+        borderColor: codeBorder,
+        color: fg,
+      },
+      hr:           { backgroundColor: codeBorder, height: 1, marginVertical: 12 },
+      bullet_list:  { marginVertical: 3 },
+      ordered_list: { marginVertical: 3 },
+      list_item:    { marginBottom: 3 },
+      bullet_list_icon: { color: muted, fontSize: 14, marginRight: 6, marginTop: 2 },
+      ordered_list_icon:{ color: muted, fontSize: 14, marginRight: 6, marginTop: 2 },
+    };
+  }, [isDark]);
+}
+
 function MessageBubble({ message, threadId }: { message: Message; threadId: string }) {
   const isUser = message.role === "user";
   const [copied, setCopied] = useState(false);
   const [stepsExpanded, setStepsExpanded] = useState(false);
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
+  const mdStyles = useMarkdownStyles(isDark);
 
   // Tool steps for THIS message — only populated for assistant messages after a run.
   // Separate selector + useMemo avoids creating new arrays on every store update.
@@ -555,7 +629,7 @@ function MessageBubble({ message, threadId }: { message: Message; threadId: stri
                       justifyContent: "center", alignItems: "center",
                     }}
                   >
-                    <IconSymbol name={meta.icon} size={9} color={meta.color} />
+                    <IconSymbol name={meta.icon as any} size={9} color={meta.color} />
                   </View>
                 );
               })}
@@ -600,7 +674,7 @@ function MessageBubble({ message, threadId }: { message: Message; threadId: stri
                         justifyContent: "center", alignItems: "center",
                       }}
                     >
-                      <IconSymbol name={meta.icon} size={10} color={meta.color} />
+                      <IconSymbol name={meta.icon as any} size={10} color={meta.color} />
                     </View>
                     <Text
                       style={{
@@ -625,7 +699,7 @@ function MessageBubble({ message, threadId }: { message: Message; threadId: stri
       <TouchableBounce sensory onPress={onCopy}>
         <View
           style={{
-            maxWidth: "80%",
+            maxWidth: isUser ? "80%" : "92%",
             backgroundColor: isUser
               ? AC.systemBlue
               : isDark
@@ -641,15 +715,21 @@ function MessageBubble({ message, threadId }: { message: Message; threadId: stri
             ...(isUser ? SHADOW.md : SHADOW.sm),
           }}
         >
-          <Text
-            style={{
-              color: isUser ? "#fff" : AC.label,
-              fontSize: TYPOGRAPHY.fontSizes.md,
-              lineHeight: TYPOGRAPHY.lineHeights.md,
-            }}
-          >
-            {message.content}
-          </Text>
+          {isUser ? (
+            <Text
+              style={{
+                color: "#fff",
+                fontSize: TYPOGRAPHY.fontSizes.md,
+                lineHeight: TYPOGRAPHY.lineHeights.md,
+              }}
+            >
+              {message.content}
+            </Text>
+          ) : (
+            <Markdown style={mdStyles}>
+              {message.content}
+            </Markdown>
+          )}
         </View>
       </TouchableBounce>
 
@@ -812,7 +892,7 @@ function ThinkingIndicator({
                   justifyContent: "center", alignItems: "center",
                 }}
               >
-                <IconSymbol name={meta.icon} size={11} color={isRunning ? meta.color : rowColor} />
+                <IconSymbol name={meta.icon as any} size={11} color={isRunning ? meta.color : rowColor} />
               </View>
 
               {/* Label */}
@@ -871,7 +951,7 @@ function ThinkingIndicator({
                   justifyContent: "center", alignItems: "center",
                 }}
               >
-                <IconSymbol name={meta.icon} size={13} color={AC.systemOrange} />
+                <IconSymbol name={meta.icon as any} size={13} color={AC.systemOrange} />
               </View>
               <Text style={{ color: AC.systemOrange, fontSize: 13, fontWeight: "700", flex: 1 }}>
                 Permission Required
