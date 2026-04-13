@@ -93,10 +93,35 @@ async function sendTwilioSms(text) {
   return { skipped: false };
 }
 
-async function notify(expoUrl) {
-  const html = `🚀 <b>Expo dev server ready</b>\n\n<a href="${expoUrl}">Open in Expo Go</a>\n\n<code>${expoUrl}</code>`;
+async function registerWithBackend(expoUrl) {
+  try {
+    const res = await fetch("http://localhost:5000/open-app", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: expoUrl }),
+    });
+    if (!res.ok) {
+      console.log(`[share] Backend register failed (${res.status})`);
+    }
+  } catch {
+    console.log("[share] Backend not reachable, skipping /open-app registration");
+  }
+}
 
-  console.log(`\n[share] Expo URL: ${expoUrl}\n`);
+async function notify(expoUrl) {
+  await registerWithBackend(expoUrl);
+
+  const devDomain = process.env.REPLIT_DEV_DOMAIN;
+  const redirectUrl = devDomain ? `https://${devDomain}/open-app` : null;
+
+  const linkLine = redirectUrl
+    ? `<a href="${redirectUrl}">Open in Expo Go</a>`
+    : `<a href="${expoUrl}">Open in Expo Go</a>`;
+
+  const html = `🚀 <b>Expo dev server ready</b>\n\n${linkLine}\n\n<code>${expoUrl}</code>`;
+
+  console.log(`\n[share] Expo URL: ${expoUrl}`);
+  if (redirectUrl) console.log(`[share] Redirect: ${redirectUrl}\n`);
 
   const results = await Promise.allSettled([sendTelegram(html), sendTwilioSms(expoUrl)]);
 
