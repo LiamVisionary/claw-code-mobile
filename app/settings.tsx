@@ -306,6 +306,7 @@ export default function SettingsScreen() {
   const [connStatus, setConnStatus] = useState<"idle" | "ok" | "error">("idle");
   const [connMessage, setConnMessage] = useState<string | null>(null);
   const [autoCompact, setAutoCompact] = useState(settings.autoCompact ?? true);
+  const [streamingEnabled, setStreamingEnabled] = useState(settings.streamingEnabled ?? true);
   const [saved, setSaved] = useState(false);
 
   // Build initial queue: use stored queue, or migrate from legacy single model
@@ -339,6 +340,7 @@ export default function SettingsScreen() {
       bearerToken,
       modelQueue: queue,
       autoCompact,
+      streamingEnabled,
     });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
@@ -487,6 +489,36 @@ export default function SettingsScreen() {
             value={autoCompact}
             onValueChange={setAutoCompact}
             trackColor={{ true: AC.systemGreen as string, false: AC.systemGray4 as string }}
+            thumbColor="#fff"
+          />
+        </View>
+
+        {/* Stream responses toggle */}
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            backgroundColor: AC.systemBackground,
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: AC.separator,
+            paddingHorizontal: 14,
+            paddingVertical: 12,
+            gap: 12,
+          }}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: AC.label, fontSize: 15, fontWeight: "600" }}>
+              Stream responses
+            </Text>
+            <Text style={{ color: AC.secondaryLabel, fontSize: 13, marginTop: 2 }}>
+              Show words appearing as they arrive — turn off to display the full reply instantly
+            </Text>
+          </View>
+          <Switch
+            value={streamingEnabled}
+            onValueChange={setStreamingEnabled}
+            trackColor={{ true: AC.systemBlue as string, false: AC.systemGray4 as string }}
             thumbColor="#fff"
           />
         </View>

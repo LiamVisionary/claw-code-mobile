@@ -130,13 +130,32 @@ function buildCompactArgs(model?: ModelConfig, sessionDir?: string): string[] {
   return args;
 }
 
-/** Stream the text of a completed response word-by-word for a nicer UX. */
+/**
+ * Deliver the completed response text to the client.
+ *
+ * When `streamingEnabled = true` (default) the text is sent word-by-word with
+ * a short delay so the user sees it appear gradually — similar to how a
+ * real-time model would stream.
+ *
+ * When `streamingEnabled = false` the entire text is delivered in a single
+ * delta so the bubble appears instantly.
+ */
 async function streamWords(
   threadId: string,
   messageId: string,
   text: string,
-  stopped: () => boolean
+  stopped: () => boolean,
+  streamingEnabled = true
 ): Promise<void> {
+  if (!streamingEnabled || !text) {
+    // Instant mode — one delta for the full text
+    if (text) {
+      messageService.appendAssistantDelta(threadId, messageId, text);
+      streamService.publish(threadId, { type: "delta", messageId, chunk: text });
+    }
+    return;
+  }
+
   const words = text.split(/(\s+)/);
   for (const word of words) {
     if (stopped()) break;
@@ -332,7 +351,8 @@ async function processSuccess(
   threadId: string,
   messageId: string,
   stdoutBuf: string,
-  active: ActiveRun
+  active: ActiveRun,
+  streamingEnabled = true
 ): Promise<void> {
   const result = JSON.parse(stdoutBuf.trim()) as {
     type?: string;
@@ -385,7 +405,7 @@ async function processSuccess(
     );
   }
 
-  await streamWords(threadId, messageId, result.message ?? "", () => active.stopped);
+  await streamWords(threadId, messageId, result.message ?? "", () => active.stopped, streamingEnabled);
 }
 
 export const clawRuntime = {
@@ -394,7 +414,8 @@ export const clawRuntime = {
     content: string,
     messageId: string,
     models: ModelConfig[],
-    autoCompact = true
+    autoCompact = true,
+    streamingEnabled = true
   ): Promise<string> {
     const thread = threadService.get(threadId);
     if (!thread) return "";
@@ -453,7 +474,7 @@ export const clawRuntime = {
       // ── Success path ───────────────────────────────────────────
       if (succeeded) {
         try {
-          await processSuccess(threadId, messageId, stdoutBuf, active);
+          await processSuccess(threadId, messageId, stdoutBuf, active, streamingEnabled);
           finalSuccess = true;
         } catch (err: any) {
           if (err.isContextOverflow && autoCompact && !compactAttempted && !active.stopped) {

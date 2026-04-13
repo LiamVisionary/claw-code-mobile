@@ -190,6 +190,7 @@ type Settings = {
   model?: ModelSettings;      // legacy — kept for migration only
   modelQueue: ModelEntry[];   // ordered fallback list (source of truth)
   autoCompact: boolean;       // auto-compact context when window is full
+  streamingEnabled: boolean;  // stream response word-by-word (vs. show all at once)
 };
 
 type GatewayState = {
@@ -205,7 +206,7 @@ type GatewayState = {
   loadingThreads: boolean;
   activeThreadId?: string;
   actions: {
-    setSettings: (input: Omit<Settings, "modelQueue" | "autoCompact"> & { modelQueue?: ModelEntry[]; autoCompact?: boolean }) => void;
+    setSettings: (input: Omit<Settings, "modelQueue" | "autoCompact" | "streamingEnabled"> & { modelQueue?: ModelEntry[]; autoCompact?: boolean; streamingEnabled?: boolean }) => void;
     loadThreads: () => Promise<void>;
     createThread: (workDir?: string) => Promise<Thread>;
     browseFsDirectory: (path?: string) => Promise<FsListing>;
@@ -263,6 +264,7 @@ export const useGatewayStore = create<GatewayState>()(
         bearerToken: process.env.EXPO_PUBLIC_GATEWAY_TOKEN ?? "",
         modelQueue: [],
         autoCompact: true,
+        streamingEnabled: true,
       },
       threads: [],
       messages: {},
@@ -282,6 +284,7 @@ export const useGatewayStore = create<GatewayState>()(
               model: input.model,
               modelQueue: input.modelQueue ?? state.settings.modelQueue ?? [],
               autoCompact: input.autoCompact ?? state.settings.autoCompact ?? true,
+              streamingEnabled: input.streamingEnabled ?? state.settings.streamingEnabled ?? true,
             },
           })),
 
@@ -369,6 +372,7 @@ export const useGatewayStore = create<GatewayState>()(
               body: JSON.stringify({
                 content,
                 autoCompact: state.settings.autoCompact ?? true,
+                streamingEnabled: state.settings.streamingEnabled ?? true,
                 modelQueue: (() => {
                   const q = (state.settings.modelQueue ?? []).filter((m) => m.enabled);
                   if (q.length > 0) return q.map(({ provider, name, apiKey }) => ({ provider, name, apiKey }));
