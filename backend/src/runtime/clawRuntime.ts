@@ -53,7 +53,10 @@ function hasExistingSession(threadId: string): boolean {
   return false;
 }
 
-function buildEnv(model?: ModelConfig): Record<string, string> {
+function buildEnv(
+  model?: ModelConfig,
+  sessionDir?: string
+): Record<string, string> {
   const env: Record<string, string> = { ...process.env } as Record<
     string,
     string
@@ -75,6 +78,13 @@ function buildEnv(model?: ModelConfig): Record<string, string> {
   // Pass model name via env if provided
   if (model?.name) {
     env["CLAW_MODEL"] = model.name;
+  }
+
+  // Override where claw stores sessions so that threads sharing the same
+  // workDir don't bleed into each other's conversation history.
+  if (sessionDir) {
+    env["CLAW_SESSION_DIR"] = sessionDir;
+    fs.mkdirSync(sessionDir, { recursive: true });
   }
 
   return env;
@@ -140,9 +150,16 @@ export const clawRuntime = {
     streamService.publish(threadId, { type: "status", status: "running" });
     messageService.ensureAssistantMessage(threadId, messageId);
 
-    const cwd = workspaceDir(threadId);
+    // Use the thread's configured working directory so claw can access the
+    // actual project files.  Always keep session files in the isolated
+    // per-thread workspace so different threads never share history.
+    const sessionDir = path.join(workspaceDir(threadId), ".claw", "sessions");
+    const cwd =
+      thread.workDir && fs.existsSync(thread.workDir)
+        ? thread.workDir
+        : workspaceDir(threadId);
     const args = buildArgs(content, model);
-    const env = buildEnv(model);
+    const env = buildEnv(model, sessionDir);
 
     logger.info({ threadId, cwd, args }, "Spawning claw");
 

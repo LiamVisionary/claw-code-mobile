@@ -162,7 +162,23 @@ export default function ThreadScreen() {
     >
       <Stack.Screen
         options={{
-          title: thread.title,
+          headerTitle: () => {
+            const dirName = thread.workDir
+              ? thread.workDir.split("/").filter(Boolean).pop()
+              : null;
+            return (
+              <View style={{ alignItems: "center" }}>
+                <Text style={{ color: AC.label, fontSize: 16, fontWeight: "600" }} numberOfLines={1}>
+                  {thread.title}
+                </Text>
+                {dirName ? (
+                  <Text style={{ color: AC.systemGray, fontSize: 11, fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace" }} numberOfLines={1}>
+                    📁 {dirName}
+                  </Text>
+                ) : null}
+              </View>
+            );
+          },
           headerRight: () => headerRight,
         }}
       />

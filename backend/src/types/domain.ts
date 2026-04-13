@@ -8,6 +8,7 @@ export interface Thread {
   updatedAt: string;
   lastMessagePreview: string;
   remoteSessionId?: string;
+  workDir: string;
   createdAt: string;
 }
 

@@ -110,7 +110,20 @@ export type Thread = {
   updatedAt: string;
   lastMessagePreview: string;
   remoteSessionId?: string;
+  workDir: string;
   createdAt: string;
+};
+
+export type FsEntry = {
+  name: string;
+  path: string;
+  isDir: boolean;
+};
+
+export type FsListing = {
+  path: string;
+  parent: string | null;
+  entries: FsEntry[];
 };
 
 export type MessageRole = "user" | "assistant" | "system";
@@ -146,7 +159,8 @@ type GatewayState = {
   actions: {
     setSettings: (input: Settings) => void;
     loadThreads: () => Promise<void>;
-    createThread: () => Promise<Thread>;
+    createThread: (workDir?: string) => Promise<Thread>;
+    browseFsDirectory: (path?: string) => Promise<FsListing>;
     loadMessages: (threadId: string) => Promise<void>;
     sendMessage: (threadId: string, content: string) => Promise<void>;
     stopRun: (threadId: string) => Promise<void>;
@@ -229,13 +243,13 @@ export const useGatewayStore = create<GatewayState>()(
           }
         },
 
-        createThread: async () => {
+        createThread: async (workDir?: string) => {
           const state = get();
           const { baseUrl, headers } = getClientConfig(state);
           const res = await fetch(`${baseUrl}/threads`, {
             method: "POST",
             headers,
-            body: JSON.stringify({}),
+            body: JSON.stringify({ workDir }),
           });
           if (!res.ok) throw new Error("Failed to create thread");
           const data = await res.json();
@@ -243,6 +257,20 @@ export const useGatewayStore = create<GatewayState>()(
             threads: [data.thread, ...current.threads],
           }));
           return data.thread as Thread;
+        },
+
+        browseFsDirectory: async (dirPath?: string) => {
+          const state = get();
+          const { baseUrl, headers } = getClientConfig(state);
+          const url = dirPath
+            ? `${baseUrl}/fs/browse?path=${encodeURIComponent(dirPath)}`
+            : `${baseUrl}/fs/browse`;
+          const res = await fetch(url, { headers });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error((err as any).error ?? "Failed to browse directory");
+          }
+          return (await res.json()) as FsListing;
         },
 
         loadMessages: async (threadId: string) => {

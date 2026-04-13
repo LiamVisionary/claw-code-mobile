@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, FlatList, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, Platform, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import * as AC from "@bacons/apple-colors";
 import TouchableBounce from "@/components/ui/TouchableBounce";
@@ -8,6 +8,7 @@ import type { Thread } from "@/store/gatewayStore";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { IconSymbol } from "@/components/ui/IconSymbol";
 import { Stack } from "expo-router";
+import DirectoryBrowser from "@/components/DirectoryBrowser";
 
 export default function ChatListScreen() {
   const router = useRouter();
@@ -15,6 +16,7 @@ export default function ChatListScreen() {
   const actions = useGatewayStore((s) => s.actions);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showBrowser, setShowBrowser] = useState(false);
   const { bottom } = useSafeAreaInsets();
 
   useEffect(() => {
@@ -25,11 +27,16 @@ export default function ChatListScreen() {
     (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
   );
 
-  const handleNewChat = async () => {
+  const handleNewChat = () => {
+    setShowBrowser(true);
+  };
+
+  const handleDirectorySelected = async (selectedPath: string) => {
+    setShowBrowser(false);
     setCreating(true);
     setError(null);
     try {
-      const thread = await actions.createThread();
+      const thread = await actions.createThread(selectedPath);
       actions.setActiveThread(thread.id);
       router.push(`/thread/${thread.id}`);
     } catch (err: any) {
@@ -131,6 +138,12 @@ export default function ChatListScreen() {
           />
         )}
       </View>
+
+      <DirectoryBrowser
+        visible={showBrowser}
+        onSelect={handleDirectorySelected}
+        onCancel={() => setShowBrowser(false)}
+      />
     </>
   );
 }
@@ -147,6 +160,7 @@ function timeAgo(dateStr: string) {
 
 function ChatRow({ thread, onPress }: { thread: Thread; onPress: () => void }) {
   const isRunning = thread.status === "running";
+  const dirName = thread.workDir ? thread.workDir.split("/").filter(Boolean).pop() : null;
   return (
     <TouchableBounce onPress={onPress} sensory>
       <View
@@ -172,6 +186,14 @@ function ChatRow({ thread, onPress }: { thread: Thread; onPress: () => void }) {
             </Text>
           </View>
         </View>
+        {dirName && (
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+            <Text style={{ fontSize: 11 }}>📁</Text>
+            <Text style={{ color: AC.systemGray, fontSize: 12, fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace" }} numberOfLines={1}>
+              {dirName}
+            </Text>
+          </View>
+        )}
         {thread.lastMessagePreview ? (
           <Text style={{ color: AC.systemGray, fontSize: 14 }} numberOfLines={2}>
             {thread.lastMessagePreview}

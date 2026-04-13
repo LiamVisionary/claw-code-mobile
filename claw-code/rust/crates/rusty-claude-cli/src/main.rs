@@ -4679,7 +4679,15 @@ fn new_cli_session() -> Result<Session, Box<dyn std::error::Error>> {
     // Auto-resume: if a prior session exists in this workspace, continue from it.
     // Sessions live in  .claw/sessions/<hash>/<session>.jsonl  (legacy layout)
     // or .claw/sessions/<session_id>.jsonl (managed layout from a previous auto-resume).
-    let sessions_dir = workspace_root.join(".claw").join("sessions");
+    //
+    // CLAW_SESSION_DIR can override the sessions directory so the gateway can
+    // store per-thread sessions in isolated directories even when multiple
+    // threads share the same project working directory.
+    let sessions_dir = if let Ok(dir) = std::env::var("CLAW_SESSION_DIR") {
+        std::path::PathBuf::from(dir)
+    } else {
+        workspace_root.join(".claw").join("sessions")
+    };
     if sessions_dir.exists() {
         let mut latest_mtime: Option<std::time::SystemTime> = None;
         let mut latest_path: Option<std::path::PathBuf> = None;
