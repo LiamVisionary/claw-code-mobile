@@ -168,6 +168,8 @@ export type Message = {
   createdAt: string;
   /** Set to true when the backend reports a run error for this message */
   error?: boolean;
+  /** Chain-of-thought content parsed from <thinking>...</thinking> blocks */
+  thinking?: string;
 };
 
 type ModelSettings = {
@@ -501,6 +503,24 @@ export const useGatewayStore = create<GatewayState>()(
                 }));
                 break;
               // --- Tool step events (graceful: if backend doesn't send them, nothing breaks) ---
+              case "thinking_content":
+                set((current) => {
+                  const msgs = current.messages[threadId] ?? [];
+                  const existing = msgs.find((m) => m.id === payload.messageId) ?? {
+                    id: payload.messageId,
+                    threadId,
+                    role: "assistant" as const,
+                    content: "",
+                    createdAt: new Date().toISOString(),
+                  };
+                  return {
+                    messages: upsertMessage(current.messages, {
+                      ...existing,
+                      thinking: payload.content,
+                    }),
+                  };
+                });
+                break;
               case "tool_start":
                 set((current) => {
                   const steps = current.toolSteps[threadId] ?? [];

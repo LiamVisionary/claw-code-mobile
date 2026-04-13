@@ -733,6 +733,7 @@ function MessageBubble({ message, threadId }: { message: Message; threadId: stri
   const isUser = message.role === "user";
   const [copied, setCopied] = useState(false);
   const [stepsExpanded, setStepsExpanded] = useState(false);
+  const [thinkingExpanded, setThinkingExpanded] = useState(false);
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
   const mdStyles = useMarkdownStyles(isDark);
@@ -765,6 +766,62 @@ function MessageBubble({ message, threadId }: { message: Message; threadId: stri
         gap: 4,
       }}
     >
+      {/* ── Thinking block (collapsible, assistant only) ─────────── */}
+      {!isUser && message.thinking && (
+        <View style={{ maxWidth: "88%", gap: 3 }}>
+          <TouchableBounce sensory onPress={() => setThinkingExpanded((v) => !v)}>
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 5,
+                alignSelf: "flex-start",
+                paddingHorizontal: 9,
+                paddingVertical: 4,
+                backgroundColor: isDark ? "rgba(20,184,166,0.12)" : "rgba(20,184,166,0.08)",
+                borderRadius: BORDER_RADIUS.full,
+                borderWidth: 1,
+                borderColor: isDark ? "rgba(20,184,166,0.25)" : "rgba(20,184,166,0.18)",
+              }}
+            >
+              <IconSymbol name="brain.head.profile" size={10} color="#14B8A6" />
+              <Text style={{ color: "#14B8A6", fontSize: 11, fontWeight: "600" }}>
+                Thinking
+              </Text>
+              <IconSymbol
+                name={thinkingExpanded ? "chevron.up" : "chevron.down"}
+                size={9}
+                color="#14B8A6"
+              />
+            </View>
+          </TouchableBounce>
+          {thinkingExpanded && (
+            <View
+              style={{
+                backgroundColor: isDark ? "rgba(20,184,166,0.06)" : "rgba(20,184,166,0.04)",
+                borderRadius: BORDER_RADIUS.lg,
+                borderWidth: 1,
+                borderColor: isDark ? "rgba(20,184,166,0.18)" : "rgba(20,184,166,0.12)",
+                paddingHorizontal: 12,
+                paddingVertical: 10,
+                maxWidth: "100%",
+              }}
+            >
+              <Text
+                style={{
+                  color: isDark ? "rgba(255,255,255,0.50)" : "rgba(0,0,0,0.45)",
+                  fontSize: 12,
+                  lineHeight: 18,
+                  fontStyle: "italic",
+                }}
+              >
+                {message.thinking}
+              </Text>
+            </View>
+          )}
+        </View>
+      )}
+
       {/* ── Tool steps strip (assistant only, when steps exist) ─── */}
       {!isUser && msgSteps.length > 0 && (
         <View style={{ maxWidth: "88%", gap: 4 }}>
@@ -1268,7 +1325,7 @@ const THINKING_PHRASES = [
   "connecting the pieces",
 ];
 
-/** Cycling text label with three pulsing dots */
+/** Cycling text label with three pulsing period dots at text baseline */
 function CyclingLabel({ color }: { color: string }) {
   const [phraseIdx, setPhraseIdx] = useState(0);
   const op1 = useRef(new Animated.Value(1)).current;
@@ -1303,19 +1360,12 @@ function CyclingLabel({ color }: { color: string }) {
   }, []);
 
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-      <Text style={{ color, fontSize: 13, fontWeight: "500" }}>
-        {THINKING_PHRASES[phraseIdx]}
-      </Text>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
-        {([op1, op2, op3] as Animated.Value[]).map((val, i) => (
-          <Animated.View
-            key={i}
-            style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: color, opacity: val }}
-          />
-        ))}
-      </View>
-    </View>
+    <Text style={{ color, fontSize: 13, fontWeight: "500" }}>
+      {THINKING_PHRASES[phraseIdx]}
+      <Animated.Text style={{ opacity: op1 }}>.</Animated.Text>
+      <Animated.Text style={{ opacity: op2 }}>.</Animated.Text>
+      <Animated.Text style={{ opacity: op3 }}>.</Animated.Text>
+    </Text>
   );
 }
 
@@ -1351,7 +1401,7 @@ function ThinkingIndicator({
   return (
     <View style={{ gap: 6, paddingTop: SPACING.xs }}>
 
-      {/* ── Compact badge bubble ──────────────────────────── */}
+      {/* ── Compact inline label + badges ────────────────── */}
       <TouchableBounce sensory onPress={hasBadges ? () => setExpanded((v) => !v) : undefined}>
         <View
           style={{
@@ -1359,15 +1409,7 @@ function ThinkingIndicator({
             flexDirection: "row",
             alignItems: "center",
             gap: 5,
-            backgroundColor: bubbleBg,
-            borderRadius: BORDER_RADIUS.xl,
-            borderBottomLeftRadius: SPACING.xs,
-            borderWidth: 1,
-            borderColor: bubbleBorder,
-            paddingHorizontal: 12,
-            paddingVertical: 9,
-            minWidth: 72,
-            ...SHADOW.sm,
+            paddingVertical: 4,
           }}
         >
           {/* Cycling phrase + animated dots — always visible */}
