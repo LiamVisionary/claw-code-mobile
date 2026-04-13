@@ -747,11 +747,10 @@ function MessageBubble({ message, threadId }: { message: Message; threadId: stri
     setTimeout(() => setCopied(false), 1800);
   }, [message.content]);
 
-  // Unique tools used, for the collapsed icon strip
-  const uniqueTools = useMemo(
-    () => [...new Set(msgSteps.map((s) => s.tool))].slice(0, 5),
-    [msgSteps]
-  );
+  // One badge per call (capped at 8 visible), for the collapsed icon strip
+  const MAX_BADGE = 8;
+  const visibleStepBadges = useMemo(() => msgSteps.slice(0, MAX_BADGE), [msgSteps]);
+  const stepOverflow = Math.max(0, msgSteps.length - MAX_BADGE);
 
   return (
     <View
@@ -778,15 +777,15 @@ function MessageBubble({ message, threadId }: { message: Message; threadId: stri
                 alignSelf: "flex-start",
               }}
             >
-              {/* Colored tool icon dots */}
-              {uniqueTools.map((tool) => {
-                const meta = TOOL_META[tool] ?? TOOL_META.unknown;
+              {/* One icon badge per call */}
+              {visibleStepBadges.map((step) => {
+                const meta = TOOL_META[step.tool] ?? TOOL_META.unknown;
                 return (
                   <View
-                    key={tool}
+                    key={step.id}
                     style={{
                       width: 16, height: 16, borderRadius: 4,
-                      backgroundColor: `${meta.color}25`,
+                      backgroundColor: isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.05)",
                       justifyContent: "center", alignItems: "center",
                     }}
                   >
@@ -794,6 +793,11 @@ function MessageBubble({ message, threadId }: { message: Message; threadId: stri
                   </View>
                 );
               })}
+              {stepOverflow > 0 && (
+                <Text style={{ color: isDark ? "rgba(255,255,255,0.35)" : "rgba(0,0,0,0.32)", fontSize: 10, fontWeight: "600" }}>
+                  +{stepOverflow}
+                </Text>
+              )}
               <Text style={{ color: isDark ? "rgba(255,255,255,0.45)" : "rgba(0,0,0,0.4)", fontSize: 11, fontWeight: "500" }}>
                 {msgSteps.length} {msgSteps.length === 1 ? "step" : "steps"}
               </Text>
@@ -1309,87 +1313,148 @@ function ThinkingIndicator({
   onDeny: (id: string) => void;
   isDark: boolean;
 }) {
-  // Show the most recent steps (last 6), newest at the bottom
-  const visibleSteps = toolSteps.slice(-6);
-  const hasRunningStep = visibleSteps.some((s) => s.status === "running");
-  const dotColor = isDark ? "rgba(255,255,255,0.45)" : "rgba(0,0,0,0.35)";
+  const [expanded, setExpanded] = useState(false);
 
-  const bubbleBg  = isDark ? "#1c1c1e" : "#fff";
+  const runningStep  = toolSteps.find((s) => s.status === "running") ?? null;
+  const finishedSteps = toolSteps.filter((s) => s.status !== "running");
+  // Compact badge row: all finished steps + the running one at the end
+  const badgeSteps   = runningStep ? [...finishedSteps, runningStep] : finishedSteps;
+  const MAX_VISIBLE  = 8;
+  const visibleBadges = badgeSteps.slice(-MAX_VISIBLE);
+  const hiddenCount   = Math.max(0, badgeSteps.length - MAX_VISIBLE);
+  const hasBadges    = badgeSteps.length > 0;
+  const dotColor     = isDark ? "rgba(255,255,255,0.45)" : "rgba(0,0,0,0.35)";
+  const bubbleBg     = isDark ? "#1c1c1e" : "#fff";
   const bubbleBorder = isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.08)";
 
   return (
-    <View style={{ gap: 10, paddingTop: SPACING.xs }}>
+    <View style={{ gap: 6, paddingTop: SPACING.xs }}>
 
-      {/* ── Unified acting bubble ─────────────────────────── */}
-      <View
-        style={{
-          alignSelf: "flex-start",
-          backgroundColor: bubbleBg,
-          borderRadius: BORDER_RADIUS.xl,
-          borderBottomLeftRadius: SPACING.xs,
-          borderWidth: 1,
-          borderColor: bubbleBorder,
-          paddingHorizontal: 14,
-          paddingVertical: 11,
-          gap: 7,
-          minWidth: 72,
-          ...SHADOW.sm,
-        }}
-      >
-        {/* Tool step rows */}
-        {visibleSteps.map((step) => {
-          const meta = TOOL_META[step.tool] ?? TOOL_META.unknown;
-          const isRunning = step.status === "running";
-          const isError   = step.status === "error";
-          const rowColor  = isRunning ? meta.color : isError ? "#EF4444" : (isDark ? "rgba(255,255,255,0.28)" : "rgba(0,0,0,0.28)");
+      {/* ── Compact badge bubble ──────────────────────────── */}
+      <TouchableBounce sensory onPress={hasBadges ? () => setExpanded((v) => !v) : undefined}>
+        <View
+          style={{
+            alignSelf: "flex-start",
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 5,
+            backgroundColor: bubbleBg,
+            borderRadius: BORDER_RADIUS.xl,
+            borderBottomLeftRadius: SPACING.xs,
+            borderWidth: 1,
+            borderColor: bubbleBorder,
+            paddingHorizontal: 12,
+            paddingVertical: 9,
+            minWidth: 72,
+            ...SHADOW.sm,
+          }}
+        >
+          {/* No steps yet — show bouncing dots */}
+          {!hasBadges && <BouncingDots color={dotColor} />}
 
-          return (
-            <View
-              key={step.id}
-              style={{ flexDirection: "row", alignItems: "center", gap: 7 }}
-            >
-              {/* Status badge */}
-              {isRunning ? (
-                <ActivityIndicator size="small" color={meta.color} style={{ width: 14, height: 14 }} />
-              ) : isError ? (
-                <IconSymbol name="xmark.circle.fill" size={13} color="#EF4444" />
-              ) : (
-                <IconSymbol name="checkmark.circle.fill" size={13} color="#22C55E" />
-              )}
-
-              {/* Tool icon */}
+          {/* One icon badge per completed/running step */}
+          {visibleBadges.map((step) => {
+            const meta      = TOOL_META[step.tool] ?? TOOL_META.unknown;
+            const isRunning = step.status === "running";
+            return (
               <View
+                key={step.id}
                 style={{
-                  width: 20, height: 20, borderRadius: 5,
-                  backgroundColor: isRunning ? `${meta.color}20` : (isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)"),
+                  width: 22, height: 22, borderRadius: 6,
+                  backgroundColor: isRunning
+                    ? `${meta.color}22`
+                    : isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.05)",
                   justifyContent: "center", alignItems: "center",
                 }}
               >
-                <IconSymbol name={meta.icon as any} size={11} color={isRunning ? meta.color : rowColor} />
+                {isRunning
+                  ? <ActivityIndicator size="small" color={meta.color} style={{ width: 14, height: 14 }} />
+                  : <IconSymbol name={meta.icon as any} size={10} color={meta.color} />
+                }
               </View>
+            );
+          })}
 
-              {/* Label */}
-              <Text
-                style={{
-                  color: isRunning ? AC.label : (isDark ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.38)"),
-                  fontSize: 12.5,
-                  fontWeight: isRunning ? "500" : "400",
-                  fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
-                  flexShrink: 1,
-                }}
-                numberOfLines={1}
-              >
-                {step.label}
+          {/* Overflow count badge */}
+          {hiddenCount > 0 && (
+            <View
+              style={{
+                paddingHorizontal: 5, paddingVertical: 2,
+                backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)",
+                borderRadius: 6,
+              }}
+            >
+              <Text style={{ color: dotColor, fontSize: 10, fontWeight: "600" }}>
+                +{hiddenCount}
               </Text>
             </View>
-          );
-        })}
+          )}
 
-        {/* Bouncing dots — shown when there are no running steps (waiting for next action) */}
-        {!hasRunningStep && (
-          <BouncingDots color={dotColor} />
-        )}
-      </View>
+          {/* Expand toggle */}
+          {hasBadges && (
+            <IconSymbol
+              name={expanded ? "chevron.up" : "chevron.down"}
+              size={9}
+              color={dotColor}
+            />
+          )}
+        </View>
+      </TouchableBounce>
+
+      {/* ── Expanded step list ────────────────────────────── */}
+      {expanded && hasBadges && (
+        <View
+          style={{
+            backgroundColor: bubbleBg,
+            borderRadius: BORDER_RADIUS.lg,
+            borderWidth: 1,
+            borderColor: bubbleBorder,
+            paddingHorizontal: 12,
+            paddingVertical: 8,
+            gap: 6,
+            ...SHADOW.sm,
+          }}
+        >
+          {toolSteps.map((step) => {
+            const meta      = TOOL_META[step.tool] ?? TOOL_META.unknown;
+            const isRunning = step.status === "running";
+            const isError   = step.status === "error";
+            const rowColor  = isRunning ? meta.color
+              : isError ? "#EF4444"
+              : isDark ? "rgba(255,255,255,0.28)" : "rgba(0,0,0,0.28)";
+            return (
+              <View key={step.id} style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
+                {isRunning
+                  ? <ActivityIndicator size="small" color={meta.color} style={{ width: 14, height: 14 }} />
+                  : isError
+                    ? <IconSymbol name="xmark.circle.fill" size={12} color="#EF4444" />
+                    : <IconSymbol name="checkmark.circle.fill" size={12} color="#22C55E" />
+                }
+                <View style={{
+                  width: 20, height: 20, borderRadius: 5,
+                  backgroundColor: isRunning ? `${meta.color}20` : (isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)"),
+                  justifyContent: "center", alignItems: "center",
+                }}>
+                  <IconSymbol name={meta.icon as any} size={11} color={isRunning ? meta.color : rowColor} />
+                </View>
+                <Text
+                  style={{
+                    color: isRunning ? AC.label : (isDark ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.38)"),
+                    fontSize: 12.5,
+                    fontWeight: isRunning ? "500" : "400",
+                    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+                    flexShrink: 1,
+                  }}
+                  numberOfLines={1}
+                >
+                  {step.label}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+      )}
+
 
       {/* ── Permission request cards ───────────────────────── */}
       {permissionRequests.map((req) => {
