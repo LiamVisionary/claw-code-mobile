@@ -15,6 +15,7 @@ import { BottomSheetModal } from "@gorhom/bottom-sheet";
 import * as AC from "@bacons/apple-colors";
 import TouchableBounce from "@/components/ui/TouchableBounce";
 import { IconSymbol } from "@/components/ui/IconSymbol";
+import SlashCommandPicker from "@/components/SlashCommandPicker";
 import { useGatewayStore } from "@/store/gatewayStore";
 import type { Message } from "@/store/gatewayStore";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -33,6 +34,7 @@ export default function ThreadScreen() {
   const listRef = useRef<FlatList<Message>>(null);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [slashPickerVisible, setSlashPickerVisible] = useState(false);
   const [command, setCommand] = useState("");
   const [copiedConvo, setCopiedConvo] = useState(false);
   const terminalRef = useRef<BottomSheetModal>(null);
@@ -59,8 +61,14 @@ export default function ThreadScreen() {
     listRef.current?.scrollToEnd({ animated: true });
   }, [messages.length]);
 
+  const handleInputChange = (text: string) => {
+    setInput(text);
+    setSlashPickerVisible(text.startsWith("/") && text.length > 0);
+  };
+
   const send = async () => {
     if (!id || !input.trim()) return;
+    setSlashPickerVisible(false);
     setSending(true);
     try {
       await actions.sendMessage(id, input.trim());
@@ -187,6 +195,9 @@ export default function ThreadScreen() {
     );
   }
 
+  const toolSteps = useGatewayStore((s) => s.toolSteps[id ?? ""] ?? []);
+  const permissionReqs = useGatewayStore((s) => (s.permissionRequests[id ?? ""] ?? []).filter((r) => r.pending));
+
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: AC.systemGroupedBackground }}
@@ -231,29 +242,6 @@ export default function ThreadScreen() {
           paddingBottom: bottom,
         }}
       >
-        {/* Status indicator - slim inline pill */}
-        {threadStatus === "running" && (
-          <View
-            style={{
-              marginHorizontal: SPACING.lg,
-              marginTop: SPACING.sm,
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 8,
-              paddingHorizontal: SPACING.md,
-              paddingVertical: SPACING.xs,
-              backgroundColor: isDark ? "rgba(10,132,255,0.12)" : "rgba(10,132,255,0.08)",
-              borderRadius: BORDER_RADIUS.full,
-              alignSelf: "flex-start",
-            }}
-          >
-            <ActivityIndicator size="small" color={AC.systemBlue} />
-            <Text style={{ color: AC.systemBlue, fontSize: 12, fontWeight: "500" }}>
-              Thinking…
-            </Text>
-          </View>
-        )}
-
         {/* Messages */}
         <FlatList
           ref={listRef}
@@ -265,6 +253,18 @@ export default function ThreadScreen() {
             flexGrow: 1,
           }}
           renderItem={({ item }) => <MessageBubble message={item} />}
+          ListFooterComponent={
+            threadStatus === "running" || threadStatus === "waiting" ? (
+              <ThinkingIndicator
+                status={threadStatus}
+                toolSteps={(useGatewayStore.getState().toolSteps[id ?? ""] ?? [])}
+                permissionRequests={(useGatewayStore.getState().permissionRequests[id ?? ""] ?? []).filter((r) => r.pending)}
+                onApprove={(permId) => actions.respondToPermission(id ?? "", permId, true)}
+                onDeny={(permId) => actions.respondToPermission(id ?? "", permId, false)}
+                isDark={isDark}
+              />
+            ) : null
+          }
           ListEmptyComponent={() => (
             <View
               style={{
@@ -296,6 +296,16 @@ export default function ThreadScreen() {
           )}
         />
 
+        {/* Slash command picker — floats above the input bar */}
+        <SlashCommandPicker
+          inputValue={input}
+          visible={slashPickerVisible}
+          onSelect={(cmd) => {
+            setInput(cmd);
+            setSlashPickerVisible(false);
+          }}
+        />
+
         {/* Input bar - clean, minimal */}
         <View
           style={{
@@ -323,7 +333,7 @@ export default function ThreadScreen() {
               placeholder="Message…"
               placeholderTextColor={AC.systemGray3}
               value={input}
-              onChangeText={setInput}
+              onChangeText={handleInputChange}
               multiline
               style={{
                 minHeight: 40,
