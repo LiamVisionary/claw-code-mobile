@@ -114,6 +114,7 @@ export const useGatewayStore = create<GatewayState>()(
               ...state.settings,
               serverUrl: input.serverUrl.trim(),
               bearerToken: input.bearerToken.trim(),
+              model: input.model,
             },
           })),
 
