@@ -10,6 +10,12 @@ import { createJSONStorage, persist } from "zustand/middleware";
  * the client will NOT auto-reconnect, which prevents duplicate delivery of
  * error/delta chunks when the underlying ngrok/proxy connection closes right
  * after a run finishes.
+ *
+ * Key invariant: only ONE XHR is ever open at a time. Before creating a new
+ * connection (initial connect or reconnect) we always abort the previous XHR
+ * so the server-side subscriber is removed before the new one is added.
+ * This prevents the "doubled words" bug where two subscribers both receive
+ * every delta event and the store ends up applying each chunk twice.
  */
 function openNativeSSE(
   url: string,
@@ -18,16 +24,37 @@ function openNativeSSE(
   onError: (err: Error) => void
 ): { abort: () => void } {
   let aborted = false;
-  let completed = false;          // set to true once a "done" event is processed
+  let completed = false;
   let currentXhr: XMLHttpRequest | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function cancelReconnect() {
+    if (reconnectTimer !== null) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+  }
 
   function connect() {
     if (aborted || completed) return;
+
+    // Always abort the previous XHR before creating a new one so the
+    // server-side subscriber is released first. Without this, a slow-closing
+    // connection leaves a stale subscriber active and every subsequent event
+    // is delivered twice.
+    cancelReconnect();
+    if (currentXhr) {
+      const old = currentXhr;
+      currentXhr = null;
+      old.abort();
+    }
+
     const xhr = new XMLHttpRequest();
     currentXhr = xhr;
     let offset = 0;
     let currentEvent = "";
     let dataBuffer = "";
+    let reconnectScheduled = false; // prevent double-scheduling within one XHR lifecycle
 
     xhr.open("GET", url, true);
     xhr.setRequestHeader("Accept", "text/event-stream");
@@ -38,11 +65,16 @@ function openNativeSSE(
 
     xhr.onreadystatechange = () => {
       if (xhr.readyState < 3) return;
+
       if (xhr.status !== 0 && xhr.status !== 200) {
         onError(new Error(`SSE status ${xhr.status}`));
-        scheduleReconnect();
+        if (!reconnectScheduled) {
+          reconnectScheduled = true;
+          scheduleReconnect();
+        }
         return;
       }
+
       const newText = xhr.responseText.slice(offset);
       offset = xhr.responseText.length;
 
@@ -64,14 +96,18 @@ function openNativeSSE(
       }
 
       // readyState 4 = DONE — connection closed by server or proxy
-      if (xhr.readyState === 4) {
+      if (xhr.readyState === 4 && !reconnectScheduled) {
+        reconnectScheduled = true;
         scheduleReconnect();
       }
     };
 
     xhr.onerror = () => {
       onError(new Error("SSE connection failed"));
-      scheduleReconnect();
+      if (!reconnectScheduled) {
+        reconnectScheduled = true;
+        scheduleReconnect();
+      }
     };
 
     xhr.send();
@@ -79,11 +115,21 @@ function openNativeSSE(
 
   function scheduleReconnect() {
     if (aborted || completed) return;
-    setTimeout(connect, 2000);
+    cancelReconnect();
+    reconnectTimer = setTimeout(connect, 2000);
   }
 
   connect();
-  return { abort: () => { aborted = true; currentXhr?.abort(); } };
+  return {
+    abort: () => {
+      aborted = true;
+      cancelReconnect();
+      if (currentXhr) {
+        currentXhr.abort();
+        currentXhr = null;
+      }
+    },
+  };
 }
 
 const fileStorage = {
