@@ -4,6 +4,7 @@ import { logger } from "../utils/logger";
 
 type Client = {
   res: Response;
+  threadId: string;
 };
 
 const subscribers = new Map<string, Set<Client>>();
@@ -19,7 +20,7 @@ export const streamService = {
     res.flushHeaders();
     res.write(":\n\n"); // initial comment for proxies
 
-    const client: Client = { res };
+    const client: Client = { res, threadId };
     const existing = subscribers.get(threadId) ?? new Set<Client>();
     existing.add(client);
     subscribers.set(threadId, existing);
@@ -42,12 +43,23 @@ export const streamService = {
     const clients = subscribers.get(threadId);
     if (!clients || clients.size === 0) return;
     const payload = format(event.type, event);
+    const dead: Client[] = [];
     for (const client of clients) {
       try {
-        client.res.write(payload);
+        const ok = client.res.write(payload);
+        // write() returns false when the buffer is full (back-pressure), but
+        // that's normal and doesn't mean the client is gone. A thrown error
+        // means the socket is actually dead — remove it immediately.
+        void ok;
       } catch (err) {
-        logger.warn({ err }, "Failed to write SSE event");
+        logger.warn({ err, threadId }, "SSE write failed — removing dead subscriber");
+        dead.push(client);
       }
+    }
+    // Prune dead clients outside the iteration loop
+    for (const client of dead) {
+      this.unsubscribe(threadId, client);
+      try { client.res.destroy(); } catch { /* already destroyed */ }
     }
   },
 };
