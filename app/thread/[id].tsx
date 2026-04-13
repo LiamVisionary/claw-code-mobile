@@ -450,6 +450,22 @@ export default function ThreadScreen() {
   );
 }
 
+const BORDER_RADIUS = { sm: 8, md: 12, lg: 18 };
+const SPACING = { xs: 4, sm: 8, md: 12, lg: 16 };
+const SHADOW = {
+  md: {
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+};
+const TYPOGRAPHY = {
+  fontSizes: { xs: 12, sm: 13, md: 15, lg: 17 },
+  lineHeights: { xs: 16, sm: 18, md: 22, lg: 26 },
+};
+
 function MessageBubble({ message }: { message: Message }) {
   const isUser = message.role === "user";
   const [copied, setCopied] = useState(false);
