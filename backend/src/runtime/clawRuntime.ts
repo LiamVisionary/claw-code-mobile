@@ -80,7 +80,7 @@ function buildEnv(model?: ModelConfig): Record<string, string> {
   return env;
 }
 
-function buildArgs(prompt: string, model?: ModelConfig, hasSession = false): string[] {
+function buildArgs(prompt: string, model?: ModelConfig): string[] {
   const args: string[] = ["--output-format", "json"];
 
   if (model?.name) {
@@ -88,11 +88,6 @@ function buildArgs(prompt: string, model?: ModelConfig, hasSession = false): str
   }
 
   args.push("--permission-mode", "danger-full-access");
-
-  if (hasSession) {
-    args.push("--resume", "latest");
-  }
-
   args.push("prompt", prompt);
   return args;
 }
@@ -146,11 +141,10 @@ export const clawRuntime = {
     messageService.ensureAssistantMessage(threadId, messageId);
 
     const cwd = workspaceDir(threadId);
-    const hasSession = hasExistingSession(threadId);
-    const args = buildArgs(content, model, hasSession);
+    const args = buildArgs(content, model);
     const env = buildEnv(model);
 
-    logger.info({ threadId, cwd, hasSession, args }, "Spawning claw");
+    logger.info({ threadId, cwd, args }, "Spawning claw");
 
     const child = spawn(CLAW_BINARY, args, {
       cwd,
