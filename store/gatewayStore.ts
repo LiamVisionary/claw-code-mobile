@@ -1,4 +1,4 @@
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import { fetchEventSource } from "@microsoft/fetch-event-source";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
