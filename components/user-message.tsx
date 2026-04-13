@@ -1,36 +1,38 @@
 "use client";
 import * as AC from "@bacons/apple-colors";
 import React from "react";
-import { Text, View } from "react-native";
+import { Text, View, useColorScheme } from "react-native";
 
 export function UserMessage({ children }: { children?: React.ReactNode }) {
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === "dark";
+
   return (
     <View
       style={{
-        alignItems: "center",
-        justifyContent: "flex-end",
         flexDirection: "row",
-        maxWidth: "100%",
+        justifyContent: "flex-end",
         paddingHorizontal: 16,
-        gap: 8,
       }}
     >
-      <View style={{ flex: 1, alignItems: "flex-end" }}>
+      <View
+        style={{
+          maxWidth: "80%",
+          backgroundColor: AC.systemBlue,
+          borderRadius: 18,
+          borderBottomRightRadius: 6,
+          paddingHorizontal: 14,
+          paddingVertical: 10,
+        }}
+      >
         <Text
           numberOfLines={100}
           style={{
-            borderCurve: "continuous",
-            backgroundColor: "white",
-            borderWidth: 1,
-            borderColor: AC.separator,
-            borderRadius: 20,
-            borderBottomRightRadius: 8,
+            color: "#fff",
+            fontSize: 15,
+            lineHeight: 20,
             flexWrap: "wrap",
             wordWrap: "break-word",
-            textAlign: "right",
-            color: "black",
-            padding: 12,
-            fontSize: 16,
           }}
           selectable
         >

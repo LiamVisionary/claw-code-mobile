@@ -21,7 +21,7 @@ import { FirstSuggestions } from "./first-suggestions";
 import { IconSymbol } from "./ui/IconSymbol";
 import TouchableBounce from "./ui/TouchableBounce";
 import { UserMessage } from "./user-message";
-import { SIZES, SPACING, TYPOGRAPHY } from "@/theme";
+import { BORDER_RADIUS, SPACING, TYPOGRAPHY } from "@/theme";
 
 const AnimatedBlurView = Animated.createAnimatedComponent(BlurView);
 
@@ -42,6 +42,8 @@ export function ChatToolbarInner({
   const textInput = useRef<TextInput>(null);
   const { bottom } = useSafeAreaInsets();
   const keyboard = useAnimatedKeyboard();
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === "dark";
 
   const translateStyle = useAnimatedStyle(
     () => ({
@@ -146,7 +148,7 @@ export function ChatToolbarInner({
             {
               flexDirection: "row",
               gap: SPACING.sm,
-              alignItems: "stretch",
+              alignItems: "flex-end",
             },
             tw`md:w-[768px] max-w-[768px] md:mx-auto`,
           ]}
@@ -159,30 +161,32 @@ export function ChatToolbarInner({
             returnKeyType="send"
             blurOnSubmit={false}
             selectionHandleColor={AC.label}
-            selectionColor={AC.label}
+            selectionColor={isDark ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.1)"}
             style={{
               pointerEvents: disabled ? "none" : "auto",
               color: AC.label,
               paddingHorizontal: SPACING.lg,
               paddingVertical: SPACING.sm,
-              borderColor: AC.separator,
-              backgroundColor: "#1a1a1a",
+              backgroundColor: isDark ? "#1c1c1e" : "rgba(0,0,0,0.04)",
               borderWidth: 1,
-              borderRadius: BORDER_RADIUS.full,
+              borderColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)",
+              borderRadius: 22,
               fontSize: TYPOGRAPHY.fontSizes.md,
               outline: "none",
               flex: 1,
+              minHeight: 44,
             }}
-            placeholder="Ask anything…"
+            placeholder="Message…"
             autoCapitalize="sentences"
             autoCorrect
-            placeholderTextColor={AC.systemGray2}
+            placeholderTextColor={AC.systemGray3}
             onSubmitEditing={onSubmitEditing}
           />
 
           <SendButton
             enabled={!!inputValue.length}
             onPress={() => onSubmitMessage(inputValue)}
+            isDark={isDark}
           />
         </View>
       </AnimatedBlurView>
@@ -193,48 +197,40 @@ export function ChatToolbarInner({
 function SendButton({
   enabled,
   onPress,
+  isDark,
 }: {
   enabled?: boolean;
   onPress: () => void;
+  isDark: boolean;
 }) {
-  const backgroundColor = enabled ? AC.label : "#333333";
-  
   return (
     <TouchableBounce
       disabled={!enabled}
       sensory
       style={[
+        // @ts-expect-error web only
         process.env.EXPO_OS === "web"
-          ? {
-              display: "grid",
-              marginRight: SPACING.sm,
-            }
+          ? { display: "grid" }
           : {},
       ]}
       onPress={onPress}
     >
       <View
-        style={[
-          {
-            justifyContent: "center",
-            alignItems: "center",
-            borderColor: AC.separator,
-            borderWidth: 1,
-            backgroundColor: backgroundColor,
-            borderRadius: BORDER_RADIUS.full,
-          },
-          !enabled && { opacity: 0.5 },
-          tw`transition-transform hover:scale-95`,
-          {
-            width: SIZES.touchable,
-            height: SIZES.touchable,
-          },
-        ]}
+        style={{
+          width: 36,
+          height: 36,
+          borderRadius: 18,
+          backgroundColor: enabled ? AC.label : (isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.06)"),
+          justifyContent: "center",
+          alignItems: "center",
+          opacity: enabled ? 1 : 0.5,
+          marginBottom: 4,
+        }}
       >
         <IconSymbol
           name="arrow.up"
-          size={SIZES.icon.sm}
-          color={enabled ? AC.systemBackground : AC.systemGray}
+          size={16}
+          color={enabled ? (isDark ? "#000" : "#fff") : AC.systemGray3}
         />
       </View>
     </TouchableBounce>
