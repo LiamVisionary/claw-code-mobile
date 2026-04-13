@@ -15,7 +15,7 @@ import {
 } from "react-native";
 import Markdown from "react-native-markdown-display";
 import * as Clipboard from "expo-clipboard";
-import { Stack, useLocalSearchParams } from "expo-router";
+import { Stack, useLocalSearchParams, useNavigation } from "expo-router";
 import { BottomSheetModal } from "@gorhom/bottom-sheet";
 import * as AC from "@bacons/apple-colors";
 import TouchableBounce from "@/components/ui/TouchableBounce";
@@ -36,6 +36,7 @@ const EMPTY_TERMINAL: string[] = [];
 
 export default function ThreadScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const navigation = useNavigation();
   const actions = useGatewayStore((s) => s.actions);
   const thread = useGatewayStore((s) =>
     s.threads.find((t) => t.id === id)
@@ -240,6 +241,59 @@ export default function ThreadScreen() {
     [threadStatus, id, actions, onStop, messages.length, copiedConvo, isDark]
   );
 
+  // Imperatively update the navigator header so it reacts to settings changes
+  // (zustand store updates don't always trigger a Stack.Screen options re-read).
+  useEffect(() => {
+    const queue = (settings.modelQueue ?? []).filter((m) => m.enabled);
+    const active = queue[0] ?? null;
+
+    navigation.setOptions({
+      headerTitle: () => {
+        if (!active) {
+          return (
+            <Text style={{ color: AC.label, fontSize: 16, fontWeight: "600" }} numberOfLines={1}>
+              {thread?.title ?? "Chat"}
+            </Text>
+          );
+        }
+        const dotColor = PROVIDER_COLOR[active.provider] ?? "#6B7280";
+        const shortName = active.name.includes("/")
+          ? active.name.split("/").pop()!
+          : active.name;
+        return (
+          <TouchableBounce sensory onPress={() => setModelPickerOpen((v) => !v)}>
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+                paddingHorizontal: 10,
+                paddingVertical: 5,
+                backgroundColor: isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.05)",
+                borderRadius: BORDER_RADIUS.full,
+                borderWidth: 1,
+                borderColor: isDark ? "rgba(255,255,255,0.10)" : "rgba(0,0,0,0.08)",
+              }}
+            >
+              <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: dotColor }} />
+              <Text
+                style={{ color: AC.label, fontSize: 13, fontWeight: "600", maxWidth: 180 }}
+                numberOfLines={1}
+              >
+                {shortName}
+              </Text>
+              <IconSymbol
+                name={modelPickerOpen ? "chevron.up" : "chevron.down"}
+                size={9}
+                color={isDark ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.35)"}
+              />
+            </View>
+          </TouchableBounce>
+        );
+      },
+      headerRight: () => headerRight,
+    });
+  }, [settings.modelQueue, thread?.title, modelPickerOpen, isDark, headerRight]);
 
   const listFooterElem = useMemo(() => {
     // Show the bouncing-dot bubble only while waiting for the first assistant
@@ -285,56 +339,7 @@ export default function ThreadScreen() {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       keyboardVerticalOffset={80}
     >
-      <Stack.Screen
-        options={{
-          headerTitle: () => {
-            const queue = (settings.modelQueue ?? []).filter((m) => m.enabled);
-            if (queue.length === 0) {
-              return (
-                <Text style={{ color: AC.label, fontSize: 16, fontWeight: "600" }} numberOfLines={1}>
-                  {thread?.title ?? "Chat"}
-                </Text>
-              );
-            }
-            const active    = queue[0];
-            const dotColor  = PROVIDER_COLOR[active.provider] ?? "#6B7280";
-            const shortName = active.name.includes("/")
-              ? active.name.split("/").pop()!
-              : active.name;
-            return (
-              <TouchableBounce sensory onPress={() => setModelPickerOpen((v) => !v)}>
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 6,
-                    paddingHorizontal: 10,
-                    paddingVertical: 5,
-                    backgroundColor: isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.05)",
-                    borderRadius: BORDER_RADIUS.full,
-                    borderWidth: 1,
-                    borderColor: isDark ? "rgba(255,255,255,0.10)" : "rgba(0,0,0,0.08)",
-                  }}
-                >
-                  <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: dotColor }} />
-                  <Text
-                    style={{ color: AC.label, fontSize: 13, fontWeight: "600", maxWidth: 180 }}
-                    numberOfLines={1}
-                  >
-                    {shortName}
-                  </Text>
-                  <IconSymbol
-                    name={modelPickerOpen ? "chevron.up" : "chevron.down"}
-                    size={9}
-                    color={isDark ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.35)"}
-                  />
-                </View>
-              </TouchableBounce>
-            );
-          },
-          headerRight: () => headerRight,
-        }}
-      />
+      <Stack.Screen />
       <View
         style={{
           flex: 1,
