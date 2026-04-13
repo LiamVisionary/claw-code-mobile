@@ -4,6 +4,7 @@ import {
   Alert,
   FlatList,
   Platform,
+  Pressable,
   Text,
   View,
 } from "react-native";
@@ -301,7 +302,7 @@ function ChatRow({ thread, onPress }: { thread: Thread; onPress: () => void }) {
   const isRunning = thread.status === "running";
   const dirName = thread.workDir ? thread.workDir.split("/").filter(Boolean).pop() : null;
   return (
-    <TouchableBounce onPress={onPress} sensory>
+    <Pressable onPress={onPress} style={({ pressed }) => ({ opacity: pressed ? 0.72 : 1 })}>
       <View
         style={{
           backgroundColor: AC.secondarySystemGroupedBackground,
@@ -350,6 +351,6 @@ function ChatRow({ thread, onPress }: { thread: Thread; onPress: () => void }) {
           </Text>
         )}
       </View>
-    </TouchableBounce>
+    </Pressable>
   );
 }
