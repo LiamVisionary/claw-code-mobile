@@ -34,7 +34,7 @@ export const threadService = {
     return mapRow(row);
   },
 
-  create(input: { title: string; repoName: string }): Thread {
+  create(input: { title: string }): Thread {
     const now = new Date().toISOString();
     const id = createId("thr");
     db.prepare(
@@ -43,7 +43,7 @@ export const threadService = {
     ).run({
       id,
       title: input.title,
-      repoName: input.repoName,
+      repoName: "",
       status: "idle",
       updatedAt: now,
       lastMessagePreview: "",

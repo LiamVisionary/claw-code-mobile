@@ -26,9 +26,16 @@ export type Message = {
   createdAt: string;
 };
 
+type ModelSettings = {
+  provider: "claude" | "openrouter" | "local";
+  name: string;
+  apiKey: string;
+};
+
 type Settings = {
   serverUrl: string;
   bearerToken: string;
+  model?: ModelSettings;
 };
 
 type GatewayState = {
@@ -42,7 +49,7 @@ type GatewayState = {
   actions: {
     setSettings: (input: Settings) => void;
     loadThreads: () => Promise<void>;
-    createThread: (input: { title: string; repoName: string }) => Promise<Thread>;
+    createThread: () => Promise<Thread>;
     loadMessages: (threadId: string) => Promise<void>;
     sendMessage: (threadId: string, content: string) => Promise<void>;
     stopRun: (threadId: string) => Promise<void>;
@@ -124,13 +131,13 @@ export const useGatewayStore = create<GatewayState>()(
           }
         },
 
-        createThread: async (input) => {
+        createThread: async () => {
           const state = get();
           const { baseUrl, headers } = getClientConfig(state);
           const res = await fetch(`${baseUrl}/threads`, {
             method: "POST",
             headers,
-            body: JSON.stringify(input),
+            body: JSON.stringify({}),
           });
           if (!res.ok) throw new Error("Failed to create thread");
           const data = await res.json();
