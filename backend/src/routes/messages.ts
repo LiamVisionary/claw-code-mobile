@@ -1,0 +1,49 @@
+import { Router } from "express";
+import { z } from "zod";
+import { clawRuntime } from "../runtime/clawRuntime";
+import { messageService } from "../services/messageService";
+import { threadService } from "../services/threadService";
+import { HttpError } from "../utils/errors";
+import { createId } from "../utils/ids";
+
+export const messagesRouter = Router();
+
+messagesRouter.get("/threads/:threadId/messages", (req, res, next) => {
+  try {
+    const thread = threadService.get(req.params.threadId);
+    if (!thread) {
+      throw new HttpError(404, "Thread not found");
+    }
+    const messages = messageService.list(thread.id);
+    res.json({ messages });
+  } catch (err) {
+    next(err);
+  }
+});
+
+messagesRouter.post("/threads/:threadId/messages", async (req, res, next) => {
+  try {
+    const thread = threadService.get(req.params.threadId);
+    if (!thread) {
+      throw new HttpError(404, "Thread not found");
+    }
+
+    const body = z
+      .object({
+        content: z.string().min(1),
+      })
+      .parse(req.body);
+
+    messageService.addUserMessage(thread.id, body.content);
+    const assistantMessageId = createId("msg");
+    const runId = await clawRuntime.sendMessage(
+      thread.id,
+      body.content,
+      assistantMessageId
+    );
+
+    res.status(202).json({ ok: true, runId });
+  } catch (err) {
+    next(err);
+  }
+});
