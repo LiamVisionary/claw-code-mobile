@@ -33,14 +33,12 @@ messagesRouter.post("/threads/:threadId/messages", async (req, res, next) => {
     const body = z
       .object({
         content: z.string().min(1),
-        // New: ordered fallback queue (preferred)
         modelQueue: z.array(modelEntrySchema).optional(),
-        // Legacy: single model (kept for backward compat)
         model: modelEntrySchema.optional(),
+        autoCompact: z.boolean().optional(),
       })
       .parse(req.body);
 
-    // Build the models list: prefer modelQueue, fall back to legacy single model
     const models = body.modelQueue?.length
       ? (body.modelQueue as any[])
       : body.model
@@ -53,7 +51,8 @@ messagesRouter.post("/threads/:threadId/messages", async (req, res, next) => {
       thread.id,
       body.content,
       assistantMessageId,
-      models
+      models,
+      body.autoCompact ?? true
     );
 
     res.status(202).json({ ok: true, runId });

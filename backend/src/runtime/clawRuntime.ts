@@ -245,8 +245,10 @@ async function processSuccess(
   // Claw may exit 0 but output an error JSON — treat it as a failure
   if (result.type === "error") {
     const msg = result.message ?? "claw reported an error";
-    throw Object.assign(new Error(isContextOverflow(msg) ? formatContextOverflow() : msg), {
+    const overflow = isContextOverflow(msg);
+    throw Object.assign(new Error(overflow ? formatContextOverflow() : msg.split("\n")[0].trim() || msg), {
       isClawError: true,
+      isContextOverflow: overflow,
     });
   }
 
@@ -271,7 +273,8 @@ export const clawRuntime = {
     threadId: string,
     content: string,
     messageId: string,
-    models: ModelConfig[]
+    models: ModelConfig[],
+    autoCompact = true
   ): Promise<string> {
     const thread = threadService.get(threadId);
     if (!thread) return "";
@@ -309,6 +312,7 @@ export const clawRuntime = {
     const queue: Array<ModelConfig | undefined> = models.length > 0 ? models : [undefined];
 
     let finalSuccess = false;
+    let compactAttempted = false; // only compact once per sendMessage call
 
     for (let i = 0; i < queue.length; i++) {
       if (active.stopped) break;
@@ -316,9 +320,7 @@ export const clawRuntime = {
       const model = queue[i];
       const label = model?.name ?? model?.provider ?? "default";
 
-      if (i > 0) {
-        emitTerminal(threadId, `↻ Trying fallback: ${label}`);
-      }
+      if (i > 0) emitTerminal(threadId, `↻ Trying fallback: ${label}`);
 
       const { succeeded, stdoutBuf, stderrBuf, stopped } = await spawnOnce(
         threadId, content, cwd, sessionDir, model, active
@@ -326,13 +328,28 @@ export const clawRuntime = {
 
       if (stopped) break;
 
+      // ── Success path ───────────────────────────────────────────
       if (succeeded) {
         try {
           await processSuccess(threadId, messageId, stdoutBuf, active);
           finalSuccess = true;
         } catch (err: any) {
-          const isClawError = (err as any).isClawError === true;
-          if (isClawError) {
+          if (err.isContextOverflow && autoCompact && !compactAttempted && !active.stopped) {
+            // Compact and retry this same model
+            compactAttempted = true;
+            emitTerminal(threadId, "↻ Auto-compacting context…");
+            const { succeeded: ok, stopped: cs } = await spawnOnce(
+              threadId, "/compact", cwd, sessionDir, model, active
+            );
+            if (!cs && ok) {
+              emitTerminal(threadId, "✓ Context compacted — retrying your message");
+              i--; // retry same model on next iteration
+              continue;
+            }
+            if (cs) break;
+            emitTerminal(threadId, "⚠ Compact failed");
+          }
+          if (err.isClawError) {
             logger.warn({ model: label }, "claw exited ok but reported error");
             const chunk = err.message;
             messageService.appendAssistantDelta(threadId, messageId, chunk);
@@ -347,19 +364,35 @@ export const clawRuntime = {
         break;
       }
 
-      // Failed — log and decide whether to retry
+      // ── Failure path ───────────────────────────────────────────
       const errText = extractClawError(stdoutBuf, stderrBuf);
       logger.error({ stderrBuf: stderrBuf.slice(-200), model: label }, "claw attempt failed");
+
+      // Auto-compact on context overflow (non-zero exit)
+      if (isContextOverflow(errText) && autoCompact && !compactAttempted && !active.stopped) {
+        compactAttempted = true;
+        emitTerminal(threadId, "↻ Auto-compacting context…");
+        const { succeeded: ok, stopped: cs } = await spawnOnce(
+          threadId, "/compact", cwd, sessionDir, model, active
+        );
+        if (cs) break;
+        if (ok) {
+          emitTerminal(threadId, "✓ Context compacted — retrying your message");
+          i--; // retry same model on next iteration
+          continue;
+        }
+        emitTerminal(threadId, "⚠ Compact failed — trying next model if available");
+      }
 
       if (i < queue.length - 1) {
         emitTerminal(threadId, `⚠ ${label} failed — trying next model`);
         continue;
       }
 
-      // Last model exhausted — surface error in the message bubble
-      const chunk = errText;
-      messageService.appendAssistantDelta(threadId, messageId, chunk);
-      streamService.publish(threadId, { type: "delta", messageId, chunk });
+      // Last model exhausted — surface error in message bubble
+      const finalMsg = isContextOverflow(errText) ? formatContextOverflow() : errText;
+      messageService.appendAssistantDelta(threadId, messageId, finalMsg);
+      streamService.publish(threadId, { type: "delta", messageId, chunk: finalMsg });
     }
 
     activeRuns.delete(threadId);

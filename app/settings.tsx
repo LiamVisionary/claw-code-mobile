@@ -305,6 +305,7 @@ export default function SettingsScreen() {
   const [bearerToken, setBearerToken] = useState(settings.bearerToken);
   const [connStatus, setConnStatus] = useState<"idle" | "ok" | "error">("idle");
   const [connMessage, setConnMessage] = useState<string | null>(null);
+  const [autoCompact, setAutoCompact] = useState(settings.autoCompact ?? true);
   const [saved, setSaved] = useState(false);
 
   // Build initial queue: use stored queue, or migrate from legacy single model
@@ -337,6 +338,7 @@ export default function SettingsScreen() {
       serverUrl,
       bearerToken,
       modelQueue: queue,
+      autoCompact,
     });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
@@ -458,6 +460,36 @@ export default function SettingsScreen() {
         <Text style={{ color: AC.secondaryLabel, fontSize: 13 }}>
           Models are tried top-to-bottom, automatically falling back if one fails.
         </Text>
+
+        {/* Auto-compact toggle */}
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            backgroundColor: AC.systemBackground,
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: AC.separator,
+            paddingHorizontal: 14,
+            paddingVertical: 12,
+            gap: 12,
+          }}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: AC.label, fontSize: 15, fontWeight: "600" }}>
+              Auto-compact
+            </Text>
+            <Text style={{ color: AC.secondaryLabel, fontSize: 13, marginTop: 2 }}>
+              Automatically summarise the conversation when the context window fills up and retry
+            </Text>
+          </View>
+          <Switch
+            value={autoCompact}
+            onValueChange={setAutoCompact}
+            trackColor={{ true: AC.systemGreen as string, false: AC.systemGray4 as string }}
+            thumbColor="#fff"
+          />
+        </View>
 
         {queue.length === 0 && (
           <View
