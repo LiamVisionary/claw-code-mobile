@@ -44,7 +44,7 @@ async function postForm(url, fields, basicAuth) {
   }
 }
 
-async function sendTelegram(text) {
+async function sendTelegram(html) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;
 
@@ -54,7 +54,12 @@ async function sendTelegram(text) {
 
   const url = `https://api.telegram.org/bot${token}/sendMessage`;
   console.log(`[share] Sending Telegram message to chat ${chatId}...`);
-  await postForm(url, { chat_id: chatId, text, disable_web_page_preview: "false" });
+  await postForm(url, {
+    chat_id: chatId,
+    text: html,
+    parse_mode: "HTML",
+    disable_web_page_preview: "true",
+  });
   return { skipped: false };
 }
 
@@ -89,17 +94,11 @@ async function sendTwilioSms(text) {
 }
 
 async function notify(expoUrl) {
-  const openLink = buildOpenLink(expoUrl);
-  const message = [
-    "Expo dev server is ready:",
-    openLink,
-    "",
-    `Raw URL: ${expoUrl}`,
-  ].join("\n");
+  const html = `🚀 <b>Expo dev server ready</b>\n\n<a href="${expoUrl}">Open in Expo Go</a>\n\n<code>${expoUrl}</code>`;
 
-  console.log(`\n[share] Expo link: ${openLink}\n`);
+  console.log(`\n[share] Expo URL: ${expoUrl}\n`);
 
-  const results = await Promise.allSettled([sendTelegram(message), sendTwilioSms(message)]);
+  const results = await Promise.allSettled([sendTelegram(html), sendTwilioSms(expoUrl)]);
 
   const labels = ["telegram", "twilio"];
   results.forEach((result, index) => {
