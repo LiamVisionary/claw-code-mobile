@@ -1,3 +1,4 @@
+import "react-native-gesture-handler";
 import Stack from "@/components/ui/Stack";
 import ThemeProvider from "@/components/ui/ThemeProvider";
 import "@/global.css";

@@ -13,6 +13,7 @@ import ReanimatedSwipeable from "react-native-gesture-handler/ReanimatedSwipeabl
 import Reanimated, {
   SharedValue,
   useAnimatedStyle,
+  interpolate,
 } from "react-native-reanimated";
 import TouchableBounce from "@/components/ui/TouchableBounce";
 import { useGatewayStore } from "@/store/gatewayStore";
@@ -37,10 +38,10 @@ function RightActions({
 }) {
   const TOTAL_WIDTH = 152; // 76 per button
 
-  const containerStyle = useAnimatedStyle(() => ({
-    width: Math.max(0, -drag.value),
-    overflow: "hidden",
-  }));
+  const containerStyle = useAnimatedStyle(() => {
+    const width = interpolate(prog.value, [0, 1], [0, TOTAL_WIDTH], "clamp");
+    return { width, overflow: "hidden" };
+  });
 
   return (
     <Reanimated.View style={[{ flexDirection: "row", alignItems: "stretch" }, containerStyle]}>
