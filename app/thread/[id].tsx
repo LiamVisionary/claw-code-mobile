@@ -22,6 +22,13 @@ import type { Message, ToolStep, PermissionRequest, ThreadStatus } from "@/store
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BORDER_RADIUS, SPACING, SHADOW, TYPOGRAPHY } from "@/constants/theme";
 
+// Stable empty arrays — prevents Zustand `?? []` from returning a new reference
+// on every store update and causing infinite re-renders.
+const EMPTY_STEPS: ToolStep[] = [];
+const EMPTY_REQS: PermissionRequest[] = [];
+const EMPTY_MESSAGES: Message[] = [];
+const EMPTY_TERMINAL: string[] = [];
+
 export default function ThreadScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const actions = useGatewayStore((s) => s.actions);
@@ -30,10 +37,14 @@ export default function ThreadScreen() {
   );
   const messageMap = useGatewayStore((s) => s.messages);
   const terminalMap = useGatewayStore((s) => s.terminal);
-  const toolSteps = useGatewayStore((s) => s.toolSteps[id ?? ""] ?? []);
-  const permissionReqs = useGatewayStore((s) => (s.permissionRequests[id ?? ""] ?? []).filter((r) => r.pending));
-  const messages = messageMap[id ?? ""] ?? [];
-  const terminalLines = terminalMap[id ?? ""] ?? [];
+  const toolSteps = useGatewayStore((s) => s.toolSteps[id ?? ""] ?? EMPTY_STEPS);
+  const rawPermReqs = useGatewayStore((s) => s.permissionRequests[id ?? ""] ?? EMPTY_REQS);
+  const permissionReqs = useMemo(
+    () => rawPermReqs.filter((r) => r.pending),
+    [rawPermReqs]
+  );
+  const messages = messageMap[id ?? ""] ?? EMPTY_MESSAGES;
+  const terminalLines = terminalMap[id ?? ""] ?? EMPTY_TERMINAL;
   const listRef = useRef<FlatList<Message>>(null);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -61,8 +72,9 @@ export default function ThreadScreen() {
   }, [id, thread, actions]);
 
   useEffect(() => {
+    // Scroll when a new message arrives or claw starts running (ThinkingIndicator appears)
     listRef.current?.scrollToEnd({ animated: true });
-  }, [messages.length, threadStatus]);
+  }, [messages.length]);
 
   const handleInputChange = (text: string) => {
     setInput(text);
@@ -173,6 +185,29 @@ export default function ThreadScreen() {
   );
 
 
+  const listFooterElem = useMemo(() => {
+    // Show the bouncing-dot bubble only while waiting for the first assistant
+    // delta. Once the last message is from the assistant, the streaming bubble
+    // is visible and we don't want the indicator stacking below it.
+    // Always show for "waiting" status so permission prompts render.
+    const lastMsg = messages[messages.length - 1];
+    const needsIndicator =
+      threadStatus === "waiting" ||
+      (threadStatus === "running" && (!lastMsg || lastMsg.role === "user"));
+    return needsIndicator ? (
+      <ThinkingIndicator
+        status={threadStatus}
+        toolSteps={toolSteps}
+        permissionRequests={permissionReqs}
+        onApprove={(permId) => actions.respondToPermission(id ?? "", permId, true)}
+        onDeny={(permId) => actions.respondToPermission(id ?? "", permId, false)}
+        isDark={isDark}
+      />
+    ) : null;
+  }, [threadStatus, messages, toolSteps, permissionReqs, actions, id, isDark]);
+
+  const listFooterComponent = useCallback(() => listFooterElem, [listFooterElem]);
+
   if (!thread) {
     return (
       <View
@@ -235,26 +270,7 @@ export default function ThreadScreen() {
             flexGrow: 1,
           }}
           renderItem={({ item }) => <MessageBubble message={item} />}
-          ListFooterComponent={(() => {
-            // Show bouncing dots only while waiting for the FIRST delta to arrive
-            // (last message is from user). Once the assistant bubble starts filling,
-            // hide the indicator so it doesn't stack above a streaming response.
-            // Always show for "waiting" so permission prompts are visible.
-            const lastMsg = messages[messages.length - 1];
-            const needsIndicator =
-              threadStatus === "waiting" ||
-              (threadStatus === "running" && (!lastMsg || lastMsg.role === "user"));
-            return needsIndicator ? (
-              <ThinkingIndicator
-                status={threadStatus}
-                toolSteps={toolSteps}
-                permissionRequests={permissionReqs}
-                onApprove={(permId) => actions.respondToPermission(id ?? "", permId, true)}
-                onDeny={(permId) => actions.respondToPermission(id ?? "", permId, false)}
-                isDark={isDark}
-              />
-            ) : null;
-          })()}
+          ListFooterComponent={listFooterComponent}
           ListEmptyComponent={() => (
             <View
               style={{
@@ -562,20 +578,28 @@ function BouncingDots({ color }: { color: string }) {
   const d3 = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    const bounce = (val: Animated.Value, delay: number) =>
+    // Animated.delay is NOT compatible with useNativeDriver:true — use setTimeout
+    // to stagger each dot's independent loop instead.
+    const makeBounce = (val: Animated.Value) =>
       Animated.loop(
         Animated.sequence([
-          Animated.delay(delay),
-          Animated.timing(val, { toValue: -5, duration: 280, useNativeDriver: true }),
-          Animated.timing(val, { toValue: 0, duration: 280, useNativeDriver: true }),
-          Animated.delay(Math.max(0, 840 - delay - 560)),
+          Animated.timing(val, { toValue: -5, duration: 260, useNativeDriver: true }),
+          Animated.timing(val, { toValue: 0,  duration: 260, useNativeDriver: true }),
         ])
       );
-    const a1 = bounce(d1, 0);
-    const a2 = bounce(d2, 140);
-    const a3 = bounce(d3, 280);
-    a1.start(); a2.start(); a3.start();
-    return () => { a1.stop(); a2.stop(); a3.stop(); };
+
+    const anim1 = makeBounce(d1);
+    anim1.start();
+
+    const animRefs: Animated.CompositeAnimation[] = [anim1];
+    const t1 = setTimeout(() => { const a = makeBounce(d2); a.start(); animRefs.push(a); }, 150);
+    const t2 = setTimeout(() => { const a = makeBounce(d3); a.start(); animRefs.push(a); }, 300);
+
+    return () => {
+      animRefs.forEach((a) => a.stop());
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
   }, []);
 
   const dot = (val: Animated.Value) => (
