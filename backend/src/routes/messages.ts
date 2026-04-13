@@ -11,9 +11,7 @@ export const messagesRouter = Router();
 messagesRouter.get("/threads/:threadId/messages", (req, res, next) => {
   try {
     const thread = threadService.get(req.params.threadId);
-    if (!thread) {
-      throw new HttpError(404, "Thread not found");
-    }
+    if (!thread) throw new HttpError(404, "Thread not found");
     const messages = messageService.list(thread.id);
     res.json({ messages });
   } catch (err) {
@@ -21,16 +19,23 @@ messagesRouter.get("/threads/:threadId/messages", (req, res, next) => {
   }
 });
 
+const modelSchema = z
+  .object({
+    provider: z.enum(["claude", "openrouter", "local"]).optional(),
+    name: z.string().optional(),
+    apiKey: z.string().optional(),
+  })
+  .optional();
+
 messagesRouter.post("/threads/:threadId/messages", async (req, res, next) => {
   try {
     const thread = threadService.get(req.params.threadId);
-    if (!thread) {
-      throw new HttpError(404, "Thread not found");
-    }
+    if (!thread) throw new HttpError(404, "Thread not found");
 
     const body = z
       .object({
         content: z.string().min(1),
+        model: modelSchema,
       })
       .parse(req.body);
 
@@ -39,7 +44,8 @@ messagesRouter.post("/threads/:threadId/messages", async (req, res, next) => {
     const runId = await clawRuntime.sendMessage(
       thread.id,
       body.content,
-      assistantMessageId
+      assistantMessageId,
+      body.model as any
     );
 
     res.status(202).json({ ok: true, runId });
