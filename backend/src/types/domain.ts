@@ -42,4 +42,6 @@ export type StreamEvent =
   | { type: "delta"; messageId: string; chunk: string }
   | { type: "terminal"; chunk: string }
   | { type: "done"; messageId: string }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | { type: "tool_start"; id: string; messageId: string; tool: string; label: string }
+  | { type: "tool_end"; id: string; messageId: string; error?: boolean };

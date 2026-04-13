@@ -272,6 +272,30 @@ function formatContextOverflow(): string {
   ].join("\n");
 }
 
+/** Derive a human-readable label from a tool_use input object. */
+function toolLabel(toolName: string, input: unknown): string {
+  const inp = input as Record<string, unknown>;
+  switch (toolName) {
+    case "bash":
+      return (inp["command"] as string ?? "").slice(0, 80);
+    case "read":
+    case "cat":
+      return (inp["file_path"] as string ?? inp["path"] as string ?? "").slice(0, 80);
+    case "edit":
+    case "write":
+    case "write_file":
+    case "str_replace_editor":
+      return (inp["file_path"] as string ?? inp["path"] as string ?? "").slice(0, 80);
+    case "grep":
+    case "search":
+      return (inp["pattern"] as string ?? inp["query"] as string ?? "").slice(0, 80);
+    case "glob":
+      return (inp["pattern"] as string ?? "").slice(0, 80);
+    default:
+      return JSON.stringify(input ?? {}).slice(0, 60);
+  }
+}
+
 /** Parse claw's JSON stdout and emit tool/cost lines + stream the message. */
 async function processSuccess(
   threadId: string,
@@ -298,7 +322,26 @@ async function processSuccess(
     });
   }
 
+  // Emit tool_start + tool_end events for every tool used in this run.
+  // These arrive before the delta so the ThinkingIndicator shows the steps
+  // just before the response appears. The messageId links steps to this
+  // specific assistant bubble so MessageBubble can display them permanently.
   for (const tu of result.tool_uses ?? []) {
+    const stepId = `step-${tu.tool_name}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const label = toolLabel(tu.tool_name, tu.input) || tu.tool_name;
+    streamService.publish(threadId, {
+      type: "tool_start",
+      id: stepId,
+      messageId,
+      tool: tu.tool_name,
+      label,
+    });
+    streamService.publish(threadId, {
+      type: "tool_end",
+      id: stepId,
+      messageId,
+    });
+    // Also emit to terminal for the debug view
     emitTerminal(threadId, `[${tu.tool_name}] ${JSON.stringify(tu.input).slice(0, 200)}`);
   }
   for (const tr of result.tool_results ?? []) {

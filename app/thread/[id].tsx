@@ -269,7 +269,7 @@ export default function ThreadScreen() {
             gap: SPACING.sm,
             flexGrow: 1,
           }}
-          renderItem={({ item }) => <MessageBubble message={item} />}
+          renderItem={({ item }) => <MessageBubble message={item} threadId={id ?? ""} />}
           ListFooterComponent={listFooterComponent}
           ListEmptyComponent={() => (
             <View
@@ -488,17 +488,35 @@ export default function ThreadScreen() {
   );
 }
 
-function MessageBubble({ message }: { message: Message }) {
+const EMPTY_BUBBLE_STEPS: ToolStep[] = [];
+
+function MessageBubble({ message, threadId }: { message: Message; threadId: string }) {
   const isUser = message.role === "user";
   const [copied, setCopied] = useState(false);
+  const [stepsExpanded, setStepsExpanded] = useState(false);
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
+
+  // Tool steps for THIS message — only populated for assistant messages after a run.
+  // Separate selector + useMemo avoids creating new arrays on every store update.
+  const allThreadSteps = useGatewayStore((s) => s.toolSteps[threadId] ?? EMPTY_BUBBLE_STEPS);
+  const msgSteps = useMemo(() => {
+    if (isUser) return EMPTY_BUBBLE_STEPS;
+    const filtered = allThreadSteps.filter((st) => st.messageId === message.id);
+    return filtered.length > 0 ? filtered : EMPTY_BUBBLE_STEPS;
+  }, [allThreadSteps, message.id, isUser]);
 
   const onCopy = useCallback(async () => {
     await Clipboard.setStringAsync(message.content);
     setCopied(true);
     setTimeout(() => setCopied(false), 1800);
   }, [message.content]);
+
+  // Unique tools used, for the collapsed icon strip
+  const uniqueTools = useMemo(
+    () => [...new Set(msgSteps.map((s) => s.tool))].slice(0, 5),
+    [msgSteps]
+  );
 
   return (
     <View
@@ -508,6 +526,102 @@ function MessageBubble({ message }: { message: Message }) {
         gap: 4,
       }}
     >
+      {/* ── Tool steps strip (assistant only, when steps exist) ─── */}
+      {!isUser && msgSteps.length > 0 && (
+        <View style={{ maxWidth: "88%", gap: 4 }}>
+          {/* Collapsed header — tap to expand */}
+          <TouchableBounce sensory onPress={() => setStepsExpanded((v) => !v)}>
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+                paddingHorizontal: 10,
+                paddingVertical: 5,
+                backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
+                borderRadius: BORDER_RADIUS.full,
+                alignSelf: "flex-start",
+              }}
+            >
+              {/* Colored tool icon dots */}
+              {uniqueTools.map((tool) => {
+                const meta = TOOL_META[tool] ?? TOOL_META.unknown;
+                return (
+                  <View
+                    key={tool}
+                    style={{
+                      width: 16, height: 16, borderRadius: 4,
+                      backgroundColor: `${meta.color}25`,
+                      justifyContent: "center", alignItems: "center",
+                    }}
+                  >
+                    <IconSymbol name={meta.icon} size={9} color={meta.color} />
+                  </View>
+                );
+              })}
+              <Text style={{ color: isDark ? "rgba(255,255,255,0.45)" : "rgba(0,0,0,0.4)", fontSize: 11, fontWeight: "500" }}>
+                {msgSteps.length} {msgSteps.length === 1 ? "step" : "steps"}
+              </Text>
+              <IconSymbol
+                name={stepsExpanded ? "chevron.up" : "chevron.down"}
+                size={10}
+                color={isDark ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.28)"}
+              />
+            </View>
+          </TouchableBounce>
+
+          {/* Expanded step list */}
+          {stepsExpanded && (
+            <View
+              style={{
+                backgroundColor: isDark ? "#1c1c1e" : "#fff",
+                borderRadius: BORDER_RADIUS.lg,
+                borderWidth: 1,
+                borderColor: isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.08)",
+                paddingHorizontal: 12,
+                paddingVertical: 8,
+                gap: 6,
+                ...SHADOW.sm,
+              }}
+            >
+              {msgSteps.map((step) => {
+                const meta = TOOL_META[step.tool] ?? TOOL_META.unknown;
+                const isErr = step.status === "error";
+                return (
+                  <View key={step.id} style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
+                    {isErr
+                      ? <IconSymbol name="xmark.circle.fill" size={12} color="#EF4444" />
+                      : <IconSymbol name="checkmark.circle.fill" size={12} color="#22C55E" />
+                    }
+                    <View
+                      style={{
+                        width: 18, height: 18, borderRadius: 4,
+                        backgroundColor: `${meta.color}20`,
+                        justifyContent: "center", alignItems: "center",
+                      }}
+                    >
+                      <IconSymbol name={meta.icon} size={10} color={meta.color} />
+                    </View>
+                    <Text
+                      style={{
+                        color: isDark ? "rgba(255,255,255,0.55)" : "rgba(0,0,0,0.5)",
+                        fontSize: 11.5,
+                        fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+                        flexShrink: 1,
+                      }}
+                      numberOfLines={1}
+                    >
+                      {step.label}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* ── Message bubble ─────────────────────────────────────── */}
       <TouchableBounce sensory onPress={onCopy}>
         <View
           style={{
@@ -524,9 +638,7 @@ function MessageBubble({ message }: { message: Message }) {
             paddingVertical: SPACING.sm + 2,
             borderWidth: isUser ? 0 : 1,
             borderColor: isDark ? "rgba(255,255,255,0.06)" : AC.separator,
-            ...(isUser
-              ? SHADOW.md
-              : SHADOW.sm),
+            ...(isUser ? SHADOW.md : SHADOW.sm),
           }}
         >
           <Text
@@ -541,7 +653,7 @@ function MessageBubble({ message }: { message: Message }) {
         </View>
       </TouchableBounce>
 
-      {/* Subtle copy indicator on long press — shown inline as tiny action */}
+      {/* Subtle copy indicator */}
       {copied && (
         <View
           style={{
@@ -559,16 +671,27 @@ function MessageBubble({ message }: { message: Message }) {
   );
 }
 
-/** Icon mapping for tool step types */
-const TOOL_ICONS: Record<string, string> = {
-  bash: "terminal",
-  edit: "pencil",
-  read: "doc.text",
-  write: "square.and.pencil",
-  search: "magnifyingglass",
-  think: "brain.head.profile",
-  grep: "magnifyingglass",
-  glob: "folder",
+/** SF Symbol name + accent color for each tool type */
+const TOOL_META: Record<string, { icon: string; color: string }> = {
+  bash:    { icon: "terminal",                   color: "#A855F7" },
+  edit:    { icon: "pencil",                     color: "#3B82F6" },
+  write:   { icon: "square.and.pencil",          color: "#3B82F6" },
+  read:    { icon: "doc.text",                   color: "#6B7280" },
+  cat:     { icon: "doc.text",                   color: "#6B7280" },
+  search:  { icon: "magnifyingglass",            color: "#F97316" },
+  grep:    { icon: "magnifyingglass",            color: "#F97316" },
+  glob:    { icon: "folder",                     color: "#F97316" },
+  ls:      { icon: "folder",                     color: "#6B7280" },
+  think:   { icon: "brain.head.profile",         color: "#14B8A6" },
+  diff:    { icon: "arrow.left.arrow.right",     color: "#8B5CF6" },
+  git:     { icon: "arrow.triangle.branch",      color: "#F59E0B" },
+  mv:      { icon: "arrow.right.doc.on.clipboard", color: "#6B7280" },
+  cp:      { icon: "doc.on.doc",                 color: "#6B7280" },
+  rm:      { icon: "trash",                      color: "#EF4444" },
+  mkdir:   { icon: "folder.badge.plus",          color: "#22C55E" },
+  write_file:         { icon: "square.and.pencil",          color: "#3B82F6" },
+  str_replace_editor: { icon: "pencil",                     color: "#3B82F6" },
+  unknown: { icon: "hammer",                     color: "#6B7280" },
 };
 
 /** iMessage-style three bouncing dots */
@@ -633,173 +756,171 @@ function ThinkingIndicator({
   onDeny: (id: string) => void;
   isDark: boolean;
 }) {
-  const latestRunning = toolSteps.filter((s) => s.status === "running");
-  const recentDone = toolSteps.filter((s) => s.status === "done").slice(-3);
-  const isWaiting = status === "waiting";
-  const dotColor = isWaiting
-    ? AC.systemOrange
-    : (isDark ? "rgba(255,255,255,0.45)" : "rgba(0,0,0,0.35)");
+  // Show the most recent steps (last 6), newest at the bottom
+  const visibleSteps = toolSteps.slice(-6);
+  const hasRunningStep = visibleSteps.some((s) => s.status === "running");
+  const dotColor = isDark ? "rgba(255,255,255,0.45)" : "rgba(0,0,0,0.35)";
+
+  const bubbleBg  = isDark ? "#1c1c1e" : "#fff";
+  const bubbleBorder = isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.08)";
 
   return (
-    <View style={{ gap: SPACING.sm, paddingTop: SPACING.xs }}>
-      {/* Main indicator: assistant bubble with bouncing dots */}
+    <View style={{ gap: 10, paddingTop: SPACING.xs }}>
+
+      {/* ── Unified acting bubble ─────────────────────────── */}
       <View
         style={{
           alignSelf: "flex-start",
-          backgroundColor: isDark ? "#1c1c1e" : "#fff",
+          backgroundColor: bubbleBg,
           borderRadius: BORDER_RADIUS.xl,
           borderBottomLeftRadius: SPACING.xs,
           borderWidth: 1,
-          borderColor: isWaiting
-            ? AC.systemOrange
-            : (isDark ? "rgba(255,255,255,0.06)" : AC.separator),
+          borderColor: bubbleBorder,
           paddingHorizontal: 14,
-          paddingVertical: 12,
+          paddingVertical: 11,
+          gap: 7,
+          minWidth: 72,
           ...SHADOW.sm,
         }}
       >
-        {isWaiting ? (
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-            <ActivityIndicator size="small" color={AC.systemOrange} />
-            <Text style={{ color: AC.systemOrange, fontSize: 13, fontWeight: "500" }}>
-              Waiting for approval…
-            </Text>
-          </View>
-        ) : (
+        {/* Tool step rows */}
+        {visibleSteps.map((step) => {
+          const meta = TOOL_META[step.tool] ?? TOOL_META.unknown;
+          const isRunning = step.status === "running";
+          const isError   = step.status === "error";
+          const rowColor  = isRunning ? meta.color : isError ? "#EF4444" : (isDark ? "rgba(255,255,255,0.28)" : "rgba(0,0,0,0.28)");
+
+          return (
+            <View
+              key={step.id}
+              style={{ flexDirection: "row", alignItems: "center", gap: 7 }}
+            >
+              {/* Status badge */}
+              {isRunning ? (
+                <ActivityIndicator size="small" color={meta.color} style={{ width: 14, height: 14 }} />
+              ) : isError ? (
+                <IconSymbol name="xmark.circle.fill" size={13} color="#EF4444" />
+              ) : (
+                <IconSymbol name="checkmark.circle.fill" size={13} color="#22C55E" />
+              )}
+
+              {/* Tool icon */}
+              <View
+                style={{
+                  width: 20, height: 20, borderRadius: 5,
+                  backgroundColor: isRunning ? `${meta.color}20` : (isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)"),
+                  justifyContent: "center", alignItems: "center",
+                }}
+              >
+                <IconSymbol name={meta.icon} size={11} color={isRunning ? meta.color : rowColor} />
+              </View>
+
+              {/* Label */}
+              <Text
+                style={{
+                  color: isRunning ? AC.label : (isDark ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.38)"),
+                  fontSize: 12.5,
+                  fontWeight: isRunning ? "500" : "400",
+                  fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+                  flexShrink: 1,
+                }}
+                numberOfLines={1}
+              >
+                {step.label}
+              </Text>
+            </View>
+          );
+        })}
+
+        {/* Bouncing dots — shown when there are no running steps (waiting for next action) */}
+        {!hasRunningStep && (
           <BouncingDots color={dotColor} />
         )}
       </View>
 
-      {/* Active tool steps */}
-      {latestRunning.length > 0 && (
-        <View style={{ gap: 4, paddingLeft: SPACING.xs }}>
-          {latestRunning.map((step) => (
+      {/* ── Permission request cards ───────────────────────── */}
+      {permissionRequests.map((req) => {
+        const meta = TOOL_META[req.tool] ?? TOOL_META.unknown;
+        return (
+          <View
+            key={req.id}
+            style={{
+              backgroundColor: bubbleBg,
+              borderRadius: BORDER_RADIUS.lg,
+              borderWidth: 1.5,
+              borderColor: AC.systemOrange,
+              overflow: "hidden",
+              ...SHADOW.sm,
+            }}
+          >
+            {/* Orange header strip */}
             <View
-              key={step.id}
-              style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
-            >
-              <ActivityIndicator size="small" color={AC.systemBlue} />
-              <IconSymbol
-                name={TOOL_ICONS[step.tool] ?? "hammer"}
-                size={11}
-                color={AC.systemGray}
-              />
-              <Text
-                style={{
-                  color: AC.systemGray,
-                  fontSize: 12,
-                  fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
-                }}
-                numberOfLines={1}
-              >
-                {step.label}
-              </Text>
-            </View>
-          ))}
-        </View>
-      )}
-
-      {/* Recently completed steps — subtle checkmarks */}
-      {recentDone.length > 0 && (
-        <View style={{ gap: 2, paddingLeft: SPACING.xs }}>
-          {recentDone.map((step) => (
-            <View
-              key={step.id}
-              style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
-            >
-              <IconSymbol name="checkmark" size={10} color={AC.systemGreen} />
-              <Text
-                style={{
-                  color: AC.systemGray3,
-                  fontSize: 11,
-                }}
-                numberOfLines={1}
-              >
-                {step.label}
-              </Text>
-            </View>
-          ))}
-        </View>
-      )}
-
-      {/* Permission prompts — inline approval cards */}
-      {permissionRequests.length > 0 && (
-        <View style={{ gap: SPACING.sm }}>
-          {permissionRequests.map((req) => (
-            <View
-              key={req.id}
               style={{
-                backgroundColor: isDark ? "#1c1c1e" : "#fff",
-                borderRadius: BORDER_RADIUS.lg,
-                borderWidth: 1,
-                borderColor: status === "waiting"
-                  ? AC.systemOrange
-                  : isDark
-                    ? "rgba(255,255,255,0.08)"
-                    : AC.separator,
-                padding: SPACING.md,
-                gap: SPACING.sm,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 7,
+                backgroundColor: isDark ? "rgba(255,149,0,0.15)" : "rgba(255,149,0,0.10)",
+                paddingHorizontal: 14,
+                paddingVertical: 9,
               }}
             >
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <IconSymbol
-                  name={TOOL_ICONS[req.tool] ?? "exclamationmark.shield"}
-                  size={14}
-                  color={AC.systemOrange}
-                />
-                <Text style={{ color: AC.label, fontSize: 13, fontWeight: "600" }}>
-                  Permission Required
-                </Text>
+              <View
+                style={{
+                  width: 24, height: 24, borderRadius: 7,
+                  backgroundColor: "rgba(255,149,0,0.20)",
+                  justifyContent: "center", alignItems: "center",
+                }}
+              >
+                <IconSymbol name={meta.icon} size={13} color={AC.systemOrange} />
               </View>
+              <Text style={{ color: AC.systemOrange, fontSize: 13, fontWeight: "700", flex: 1 }}>
+                Permission Required
+              </Text>
+              <IconSymbol name="exclamationmark.triangle.fill" size={13} color={AC.systemOrange} />
+            </View>
+
+            {/* Description + buttons */}
+            <View style={{ padding: 14, gap: 12 }}>
               <Text
                 style={{
-                  color: AC.secondaryLabel,
+                  color: AC.label,
                   fontSize: 13,
                   lineHeight: 18,
+                  fontFamily: req.tool === "bash" ? (Platform.OS === "ios" ? "Menlo" : "monospace") : undefined,
                 }}
               >
                 {req.description}
               </Text>
               <View style={{ flexDirection: "row", gap: SPACING.sm }}>
-                <TouchableBounce
-                  sensory
-                  onPress={() => onApprove(req.id)}
-                >
+                <TouchableBounce sensory onPress={() => onApprove(req.id)} style={{ flex: 1 }}>
                   <View
                     style={{
                       backgroundColor: AC.systemBlue,
                       borderRadius: BORDER_RADIUS.md,
-                      paddingHorizontal: SPACING.lg,
-                      paddingVertical: SPACING.sm,
+                      paddingVertical: 9,
+                      alignItems: "center",
                     }}
                   >
-                    <Text style={{ color: "#fff", fontSize: 13, fontWeight: "600" }}>
-                      Allow
-                    </Text>
+                    <Text style={{ color: "#fff", fontSize: 14, fontWeight: "600" }}>Allow</Text>
                   </View>
                 </TouchableBounce>
-                <TouchableBounce
-                  sensory
-                  onPress={() => onDeny(req.id)}
-                >
+                <TouchableBounce sensory onPress={() => onDeny(req.id)} style={{ flex: 1 }}>
                   <View
                     style={{
-                      backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.05)",
+                      backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)",
                       borderRadius: BORDER_RADIUS.md,
-                      paddingHorizontal: SPACING.lg,
-                      paddingVertical: SPACING.sm,
+                      paddingVertical: 9,
+                      alignItems: "center",
                     }}
                   >
-                    <Text style={{ color: AC.label, fontSize: 13, fontWeight: "600" }}>
-                      Deny
-                    </Text>
+                    <Text style={{ color: AC.label, fontSize: 14, fontWeight: "600" }}>Deny</Text>
                   </View>
                 </TouchableBounce>
               </View>
             </View>
-          ))}
-        </View>
-      )}
+          </View>
+        );
+      })}
     </View>
   );
 }
