@@ -1,7 +1,28 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as FileSystem from "expo-file-system";
 import { fetchEventSource } from "@microsoft/fetch-event-source";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+
+const fileStorage = {
+  getItem: async (key: string): Promise<string | null> => {
+    try {
+      const uri = FileSystem.documentDirectory + encodeURIComponent(key) + ".json";
+      const info = await FileSystem.getInfoAsync(uri);
+      if (!info.exists) return null;
+      return await FileSystem.readAsStringAsync(uri);
+    } catch {
+      return null;
+    }
+  },
+  setItem: async (key: string, value: string): Promise<void> => {
+    const uri = FileSystem.documentDirectory + encodeURIComponent(key) + ".json";
+    await FileSystem.writeAsStringAsync(uri, value);
+  },
+  removeItem: async (key: string): Promise<void> => {
+    const uri = FileSystem.documentDirectory + encodeURIComponent(key) + ".json";
+    await FileSystem.deleteAsync(uri, { idempotent: true });
+  },
+};
 
 export type ThreadStatus = "idle" | "running" | "waiting" | "error";
 
@@ -348,7 +369,7 @@ export const useGatewayStore = create<GatewayState>()(
     }),
     {
       name: "gateway-settings",
-      storage: createJSONStorage(() => AsyncStorage),
+      storage: createJSONStorage(() => fileStorage),
       partialize: (state) => ({ settings: state.settings }),
     }
   )
