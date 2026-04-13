@@ -19,13 +19,11 @@ messagesRouter.get("/threads/:threadId/messages", (req, res, next) => {
   }
 });
 
-const modelSchema = z
-  .object({
-    provider: z.enum(["claude", "openrouter", "local"]).optional(),
-    name: z.string().optional(),
-    apiKey: z.string().optional(),
-  })
-  .optional();
+const modelEntrySchema = z.object({
+  provider: z.enum(["claude", "openrouter", "local"]).optional(),
+  name: z.string().optional(),
+  apiKey: z.string().optional(),
+});
 
 messagesRouter.post("/threads/:threadId/messages", async (req, res, next) => {
   try {
@@ -35,9 +33,19 @@ messagesRouter.post("/threads/:threadId/messages", async (req, res, next) => {
     const body = z
       .object({
         content: z.string().min(1),
-        model: modelSchema,
+        // New: ordered fallback queue (preferred)
+        modelQueue: z.array(modelEntrySchema).optional(),
+        // Legacy: single model (kept for backward compat)
+        model: modelEntrySchema.optional(),
       })
       .parse(req.body);
+
+    // Build the models list: prefer modelQueue, fall back to legacy single model
+    const models = body.modelQueue?.length
+      ? (body.modelQueue as any[])
+      : body.model
+      ? [body.model as any]
+      : [];
 
     messageService.addUserMessage(thread.id, body.content);
     const assistantMessageId = createId("msg");
@@ -45,7 +53,7 @@ messagesRouter.post("/threads/:threadId/messages", async (req, res, next) => {
       thread.id,
       body.content,
       assistantMessageId,
-      body.model as any
+      models
     );
 
     res.status(202).json({ ok: true, runId });

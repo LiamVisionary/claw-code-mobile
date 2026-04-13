@@ -27,7 +27,14 @@ export type ModelConfig = {
 
 type ActiveRun = {
   runId: string;
-  child: ReturnType<typeof spawn>;
+  child: ReturnType<typeof spawn> | null;
+  stopped: boolean;
+};
+
+type SpawnResult = {
+  succeeded: boolean;
+  stdoutBuf: string;
+  stderrBuf: string;
   stopped: boolean;
 };
 
@@ -39,49 +46,29 @@ function workspaceDir(threadId: string): string {
   return dir;
 }
 
-function hasExistingSession(threadId: string): boolean {
-  const dir = path.join(workspaceDir(threadId), ".claw", "sessions");
-  if (!fs.existsSync(dir)) return false;
-  // claw stores sessions in sub-directories: .claw/sessions/<hash>/<session>.jsonl
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name.endsWith(".jsonl")) return true;
-    if (entry.isDirectory()) {
-      const sub = path.join(dir, entry.name);
-      if (fs.readdirSync(sub).some((f) => f.endsWith(".jsonl"))) return true;
-    }
-  }
-  return false;
-}
-
 function buildEnv(
   model?: ModelConfig,
   sessionDir?: string
 ): Record<string, string> {
-  const env: Record<string, string> = { ...process.env } as Record<
-    string,
-    string
-  >;
+  const env: Record<string, string> = { ...process.env } as Record<string, string>;
 
   if (model?.apiKey) {
     if (model.provider === "openrouter") {
-      // OpenRouter uses the OpenAI-compat env vars
       env["OPENAI_API_KEY"] = model.apiKey;
       env["OPENAI_BASE_URL"] = "https://openrouter.ai/api/v1";
-      // Clear anthropic keys so claw picks OpenRouter
       delete env["ANTHROPIC_API_KEY"];
       delete env["ANTHROPIC_AUTH_TOKEN"];
     } else {
       env["ANTHROPIC_API_KEY"] = model.apiKey;
+      delete env["OPENAI_API_KEY"];
+      delete env["OPENAI_BASE_URL"];
     }
   }
 
-  // Pass model name via env if provided
   if (model?.name) {
     env["CLAW_MODEL"] = model.name;
   }
 
-  // Override where claw stores sessions so that threads sharing the same
-  // workDir don't bleed into each other's conversation history.
   if (sessionDir) {
     env["CLAW_SESSION_DIR"] = sessionDir;
     fs.mkdirSync(sessionDir, { recursive: true });
@@ -92,11 +79,7 @@ function buildEnv(
 
 function buildArgs(prompt: string, model?: ModelConfig): string[] {
   const args: string[] = ["--output-format", "json"];
-
-  if (model?.name) {
-    args.push("--model", model.name);
-  }
-
+  if (model?.name) args.push("--model", model.name);
   args.push("--permission-mode", "danger-full-access");
   args.push("prompt", prompt);
   return args;
@@ -119,19 +102,110 @@ async function streamWords(
   }
 }
 
+/** Emit a line to both terminal service and the SSE stream. */
+function emitTerminal(threadId: string, line: string) {
+  terminalService.appendChunk(threadId, line);
+  streamService.publish(threadId, { type: "terminal", chunk: line + "\n" });
+}
+
+/**
+ * Spawn claw once with the given model config. Resolves with a SpawnResult
+ * so the caller can decide whether to retry with a fallback model.
+ */
+function spawnOnce(
+  threadId: string,
+  content: string,
+  cwd: string,
+  sessionDir: string,
+  model: ModelConfig | undefined,
+  active: ActiveRun
+): Promise<SpawnResult> {
+  return new Promise((resolve) => {
+    const args = buildArgs(content, model);
+    const env = buildEnv(model, sessionDir);
+    logger.info({ threadId, cwd, model: model?.name ?? model?.provider, args }, "Spawning claw");
+
+    const child = spawn(CLAW_BINARY, args, {
+      cwd,
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    active.child = child;
+
+    let stdoutBuf = "";
+    let stderrBuf = "";
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdoutBuf += chunk.toString();
+    });
+
+    child.stderr.on("data", (chunk: Buffer) => {
+      const text = chunk.toString();
+      stderrBuf += text;
+      for (const line of text.split("\n")) {
+        const trimmed = line.trim();
+        if (trimmed) emitTerminal(threadId, trimmed);
+      }
+    });
+
+    child.on("close", (code) => {
+      if (active.stopped) {
+        resolve({ succeeded: false, stdoutBuf, stderrBuf, stopped: true });
+        return;
+      }
+      resolve({ succeeded: code === 0, stdoutBuf, stderrBuf, stopped: false });
+    });
+
+    child.on("error", (err) => {
+      logger.error({ err }, "Failed to spawn claw");
+      resolve({ succeeded: false, stdoutBuf, stderrBuf: err.message, stopped: false });
+    });
+  });
+}
+
+/** Parse claw's JSON stdout and emit tool/cost lines + stream the message. */
+async function processSuccess(
+  threadId: string,
+  messageId: string,
+  stdoutBuf: string,
+  active: ActiveRun
+): Promise<void> {
+  const result = JSON.parse(stdoutBuf.trim()) as {
+    message: string;
+    tool_uses?: Array<{ tool_name: string; input: unknown }>;
+    tool_results?: Array<{ content: string }>;
+    usage?: { input_tokens: number; output_tokens: number };
+    estimated_cost?: string;
+  };
+
+  for (const tu of result.tool_uses ?? []) {
+    emitTerminal(threadId, `[${tu.tool_name}] ${JSON.stringify(tu.input).slice(0, 200)}`);
+  }
+  for (const tr of result.tool_results ?? []) {
+    if (tr.content) emitTerminal(threadId, tr.content.slice(0, 400));
+  }
+  if (result.estimated_cost) {
+    emitTerminal(
+      threadId,
+      `Cost: ${result.estimated_cost} | in: ${result.usage?.input_tokens ?? 0} out: ${result.usage?.output_tokens ?? 0}`
+    );
+  }
+
+  await streamWords(threadId, messageId, result.message ?? "", () => active.stopped);
+}
+
 export const clawRuntime = {
   async sendMessage(
     threadId: string,
     content: string,
     messageId: string,
-    model?: ModelConfig
+    models: ModelConfig[]
   ): Promise<string> {
     const thread = threadService.get(threadId);
     if (!thread) return "";
 
     if (!fs.existsSync(CLAW_BINARY)) {
-      const errMsg =
-        "claw binary not found. Run `bash scripts/build-claw.sh` first.";
+      const errMsg = "claw binary not found. Run `bash scripts/build-claw.sh` first.";
       logger.error(errMsg);
       messageService.ensureAssistantMessage(threadId, messageId);
       messageService.appendAssistantDelta(threadId, messageId, errMsg);
@@ -150,137 +224,83 @@ export const clawRuntime = {
     streamService.publish(threadId, { type: "status", status: "running" });
     messageService.ensureAssistantMessage(threadId, messageId);
 
-    // Use the thread's configured working directory so claw can access the
-    // actual project files.  Always keep session files in the isolated
-    // per-thread workspace so different threads never share history.
     const sessionDir = path.join(workspaceDir(threadId), ".claw", "sessions");
     const cwd =
       thread.workDir && fs.existsSync(thread.workDir)
         ? thread.workDir
         : workspaceDir(threadId);
-    const args = buildArgs(content, model);
-    const env = buildEnv(model, sessionDir);
 
-    logger.info({ threadId, cwd, args }, "Spawning claw");
-
-    const child = spawn(CLAW_BINARY, args, {
-      cwd,
-      env,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
-    const active: ActiveRun = { runId: run.id, child, stopped: false };
+    const active: ActiveRun = { runId: run.id, child: null, stopped: false };
     activeRuns.set(threadId, active);
 
-    let stdoutBuf = "";
-    let stderrBuf = "";
+    // Ensure at least one entry to try (no-model mode)
+    const queue: Array<ModelConfig | undefined> = models.length > 0 ? models : [undefined];
 
-    child.stdout.on("data", (chunk: Buffer) => {
-      stdoutBuf += chunk.toString();
-    });
+    let finalSuccess = false;
 
-    child.stderr.on("data", (chunk: Buffer) => {
-      const text = chunk.toString();
-      stderrBuf += text;
-      // Forward stderr lines as terminal output in real-time
-      for (const line of text.split("\n")) {
-        const trimmed = line.trim();
-        if (trimmed) {
-          terminalService.appendChunk(threadId, trimmed);
-          streamService.publish(threadId, {
-            type: "terminal",
-            chunk: trimmed + "\n",
-          });
-        }
-      }
-    });
+    for (let i = 0; i < queue.length; i++) {
+      if (active.stopped) break;
 
-    child.on("close", async (code) => {
-      activeRuns.delete(threadId);
+      const model = queue[i];
+      const label = model?.name ?? model?.provider ?? "default";
 
-      if (active.stopped) {
-        runService.markStatus(run.id, "stopped");
-        return;
+      if (i > 0) {
+        emitTerminal(threadId, `↻ Trying fallback: ${label}`);
       }
 
-      if (code !== 0) {
-        const errText = stderrBuf.slice(-300) || `claw exited with code ${code}`;
-        logger.error({ code, errText }, "claw exited with error");
-        messageService.appendAssistantDelta(threadId, messageId, `Error: ${errText}`);
-        messageService.finalizeAssistant(threadId, messageId);
-        streamService.publish(threadId, { type: "delta", messageId, chunk: `Error: ${errText}` });
-        streamService.publish(threadId, { type: "done", messageId });
-        threadService.setStatus(threadId, "error");
-        runService.markStatus(run.id, "error");
-        streamService.publish(threadId, { type: "status", status: "error" });
-        return;
+      const { succeeded, stdoutBuf, stderrBuf, stopped } = await spawnOnce(
+        threadId, content, cwd, sessionDir, model, active
+      );
+
+      if (stopped) break;
+
+      if (succeeded) {
+        try {
+          await processSuccess(threadId, messageId, stdoutBuf, active);
+          finalSuccess = true;
+        } catch (err: any) {
+          logger.error({ err, stdoutBuf }, "Failed to parse claw JSON output");
+          const errChunk = `Parse error: ${err.message}\nstdout: ${stdoutBuf.slice(0, 200)}`;
+          messageService.appendAssistantDelta(threadId, messageId, errChunk);
+          streamService.publish(threadId, { type: "delta", messageId, chunk: errChunk });
+        }
+        break;
       }
 
-      try {
-        const result = JSON.parse(stdoutBuf.trim()) as {
-          message: string;
-          tool_uses?: Array<{ tool_name: string; input: unknown }>;
-          tool_results?: Array<{ content: string }>;
-          usage?: { input_tokens: number; output_tokens: number };
-          estimated_cost?: string;
-        };
+      // Failed — log and decide whether to retry
+      const errText = stderrBuf.slice(-300) || `claw exited with error`;
+      logger.error({ errText, model: label }, "claw attempt failed");
 
-        // Emit tool uses as terminal lines
-        for (const tu of result.tool_uses ?? []) {
-          const line = `[${tu.tool_name}] ${JSON.stringify(tu.input).slice(0, 200)}`;
-          terminalService.appendChunk(threadId, line);
-          streamService.publish(threadId, { type: "terminal", chunk: line + "\n" });
-        }
-
-        // Tool results
-        for (const tr of result.tool_results ?? []) {
-          if (tr.content) {
-            const preview = tr.content.slice(0, 400);
-            terminalService.appendChunk(threadId, preview);
-            streamService.publish(threadId, { type: "terminal", chunk: preview + "\n" });
-          }
-        }
-
-        // Emit cost info as a terminal line
-        if (result.estimated_cost) {
-          const costLine = `Cost: ${result.estimated_cost} | in: ${result.usage?.input_tokens ?? 0} out: ${result.usage?.output_tokens ?? 0}`;
-          terminalService.appendChunk(threadId, costLine);
-          streamService.publish(threadId, { type: "terminal", chunk: costLine + "\n" });
-        }
-
-        // Stream the response text word-by-word
-        const msg = result.message ?? "";
-        await streamWords(threadId, messageId, msg, () => active.stopped);
-
-        messageService.finalizeAssistant(threadId, messageId);
-        streamService.publish(threadId, { type: "done", messageId });
-        threadService.setStatus(threadId, "idle");
-        runService.markStatus(run.id, "done");
-        streamService.publish(threadId, { type: "status", status: "idle" });
-      } catch (err: any) {
-        logger.error({ err, stdoutBuf }, "Failed to parse claw JSON output");
-        const errChunk = `Parse error: ${err.message}\nstdout: ${stdoutBuf.slice(0, 200)}`;
-        messageService.appendAssistantDelta(threadId, messageId, errChunk);
-        messageService.finalizeAssistant(threadId, messageId);
-        streamService.publish(threadId, { type: "delta", messageId, chunk: errChunk });
-        streamService.publish(threadId, { type: "done", messageId });
-        threadService.setStatus(threadId, "error");
-        runService.markStatus(run.id, "error");
-        streamService.publish(threadId, { type: "status", status: "error" });
+      if (i < queue.length - 1) {
+        emitTerminal(threadId, `⚠ ${label} failed — trying next model`);
+        continue;
       }
-    });
 
-    child.on("error", (err) => {
-      logger.error({ err }, "Failed to spawn claw");
-      streamService.publish(threadId, {
-        type: "error",
-        message: `Failed to start claw: ${err.message}`,
-      });
+      // Last model exhausted — surface error in the message bubble
+      const chunk = `Error: ${errText}`;
+      messageService.appendAssistantDelta(threadId, messageId, chunk);
+      streamService.publish(threadId, { type: "delta", messageId, chunk });
+    }
+
+    activeRuns.delete(threadId);
+
+    if (active.stopped) {
+      runService.markStatus(run.id, "stopped");
+      return run.id;
+    }
+
+    messageService.finalizeAssistant(threadId, messageId);
+    streamService.publish(threadId, { type: "done", messageId });
+
+    if (finalSuccess) {
+      threadService.setStatus(threadId, "idle");
+      runService.markStatus(run.id, "done");
+      streamService.publish(threadId, { type: "status", status: "idle" });
+    } else {
       threadService.setStatus(threadId, "error");
       runService.markStatus(run.id, "error");
       streamService.publish(threadId, { type: "status", status: "error" });
-      activeRuns.delete(threadId);
-    });
+    }
 
     return run.id;
   },
@@ -292,10 +312,12 @@ export const clawRuntime = {
       return;
     }
     active.stopped = true;
-    active.child.kill("SIGTERM");
-    setTimeout(() => {
-      if (!active.child.killed) active.child.kill("SIGKILL");
-    }, 2000);
+    if (active.child && !active.child.killed) {
+      active.child.kill("SIGTERM");
+      setTimeout(() => {
+        if (active.child && !active.child.killed) active.child.kill("SIGKILL");
+      }, 2000);
+    }
     activeRuns.delete(threadId);
     runService.markStatus(active.runId, "stopped");
     threadService.setStatus(threadId, "idle");

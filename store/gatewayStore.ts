@@ -126,6 +126,29 @@ export type FsListing = {
   entries: FsEntry[];
 };
 
+export type ToolStepStatus = "running" | "done" | "error";
+
+export type ToolStep = {
+  id: string;
+  /** e.g. "bash", "edit", "read", "write", "search", "think" */
+  tool: string;
+  /** Human-readable description, e.g. "Editing app/theme.ts" */
+  label: string;
+  status: ToolStepStatus;
+  /** Timestamp when the step started */
+  startedAt: number;
+};
+
+export type PermissionRequest = {
+  id: string;
+  /** e.g. "bash", "edit", "write" */
+  tool: string;
+  /** What the agent wants to do, e.g. "Run command: rm -rf node_modules" */
+  description: string;
+  /** Whether we're still waiting for user response */
+  pending: boolean;
+};
+
 export type MessageRole = "user" | "assistant" | "system";
 
 export type Message = {
@@ -142,10 +165,19 @@ type ModelSettings = {
   apiKey: string;
 };
 
+export type ModelEntry = {
+  id: string;
+  provider: "claude" | "openrouter" | "local";
+  name: string;
+  apiKey: string;
+  enabled: boolean;
+};
+
 type Settings = {
   serverUrl: string;
   bearerToken: string;
-  model?: ModelSettings;
+  model?: ModelSettings;      // legacy — kept for migration only
+  modelQueue: ModelEntry[];   // ordered fallback list (source of truth)
 };
 
 type GatewayState = {
@@ -153,11 +185,15 @@ type GatewayState = {
   threads: Thread[];
   messages: Record<string, Message[]>;
   terminal: Record<string, string[]>;
+  /** Per-thread tool steps (activity stream) */
+  toolSteps: Record<string, ToolStep[]>;
+  /** Per-thread pending permission requests */
+  permissionRequests: Record<string, PermissionRequest[]>;
   streams: Record<string, { abort: () => void } | undefined>;
   loadingThreads: boolean;
   activeThreadId?: string;
   actions: {
-    setSettings: (input: Settings) => void;
+    setSettings: (input: Omit<Settings, "modelQueue"> & { modelQueue?: ModelEntry[] }) => void;
     loadThreads: () => Promise<void>;
     createThread: (workDir?: string) => Promise<Thread>;
     browseFsDirectory: (path?: string) => Promise<FsListing>;
@@ -169,6 +205,8 @@ type GatewayState = {
     loadTerminal: (threadId: string) => Promise<void>;
     sendTerminalCommand: (threadId: string, command: string) => Promise<void>;
     setActiveThread: (threadId: string) => void;
+    /** Respond to a permission request (approve/deny) */
+    respondToPermission: (threadId: string, permissionId: string, approved: boolean) => Promise<void>;
   };
 };
 
@@ -211,10 +249,13 @@ export const useGatewayStore = create<GatewayState>()(
       settings: {
         serverUrl: process.env.EXPO_PUBLIC_GATEWAY_URL ?? "",
         bearerToken: process.env.EXPO_PUBLIC_GATEWAY_TOKEN ?? "",
+        modelQueue: [],
       },
       threads: [],
       messages: {},
       terminal: {},
+      toolSteps: {},
+      permissionRequests: {},
       streams: {},
       loadingThreads: false,
       activeThreadId: undefined,
@@ -226,6 +267,7 @@ export const useGatewayStore = create<GatewayState>()(
               serverUrl: input.serverUrl.trim(),
               bearerToken: input.bearerToken.trim(),
               model: input.model,
+              modelQueue: input.modelQueue ?? state.settings.modelQueue ?? [],
             },
           })),
 
@@ -310,7 +352,18 @@ export const useGatewayStore = create<GatewayState>()(
             const res = await fetch(`${baseUrl}/threads/${threadId}/messages`, {
               method: "POST",
               headers,
-              body: JSON.stringify({ content, model: state.settings.model }),
+              body: JSON.stringify({
+                content,
+                modelQueue: (() => {
+                  const q = (state.settings.modelQueue ?? []).filter((m) => m.enabled);
+                  if (q.length > 0) return q.map(({ provider, name, apiKey }) => ({ provider, name, apiKey }));
+                  if (state.settings.model) {
+                    const { provider, name, apiKey } = state.settings.model;
+                    return [{ provider, name, apiKey }];
+                  }
+                  return [];
+                })(),
+              }),
             });
             if (!res.ok) throw new Error("Failed to send message");
           } catch (err) {
@@ -405,6 +458,61 @@ export const useGatewayStore = create<GatewayState>()(
                     t.id === threadId ? { ...t, status: "error" } : t
                   ),
                 }));
+                break;
+              // --- Tool step events (graceful: if backend doesn't send them, nothing breaks) ---
+              case "tool_start":
+                set((current) => {
+                  const steps = current.toolSteps[threadId] ?? [];
+                  const newStep: ToolStep = {
+                    id: payload.id ?? `step-${Date.now()}`,
+                    tool: payload.tool ?? "unknown",
+                    label: payload.label ?? payload.tool ?? "Working…",
+                    status: "running",
+                    startedAt: Date.now(),
+                  };
+                  return {
+                    toolSteps: {
+                      ...current.toolSteps,
+                      [threadId]: [...steps, newStep],
+                    },
+                  };
+                });
+                break;
+              case "tool_end":
+                set((current) => {
+                  const steps = current.toolSteps[threadId] ?? [];
+                  return {
+                    toolSteps: {
+                      ...current.toolSteps,
+                      [threadId]: steps.map((s) =>
+                        s.id === (payload.id ?? payload.stepId)
+                          ? { ...s, status: (payload.error ? "error" : "done") as ToolStepStatus }
+                          : s
+                      ),
+                    },
+                  };
+                });
+                break;
+              case "permission_request":
+                set((current) => {
+                  const reqs = current.permissionRequests[threadId] ?? [];
+                  const newReq: PermissionRequest = {
+                    id: payload.id ?? `perm-${Date.now()}`,
+                    tool: payload.tool ?? "unknown",
+                    description: payload.description ?? payload.message ?? "Agent requests permission",
+                    pending: true,
+                  };
+                  return {
+                    permissionRequests: {
+                      ...current.permissionRequests,
+                      [threadId]: [...reqs, newReq],
+                    },
+                    // Also set thread status to "waiting"
+                    threads: current.threads.map((t) =>
+                      t.id === threadId ? { ...t, status: "waiting" } : t
+                    ),
+                  };
+                });
                 break;
             }
           };
