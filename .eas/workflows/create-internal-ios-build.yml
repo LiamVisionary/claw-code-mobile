@@ -1,0 +1,8 @@
+name: Create Internal iOS Build
+
+jobs:
+  build_ios_internal:
+    type: build # This job type creates an internal iOS build for device installs
+    params:
+      platform: ios
+      profile: preview

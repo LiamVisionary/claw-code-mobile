@@ -37,16 +37,20 @@ outputType = "webview"
 name = "Expo Tunnel"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "yarn install && yarn start:tunnel:share"
-
 [workflows.workflow.metadata]
 outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "yarn install --ignore-scripts && npx --yes patch-package && (ls node_modules/react-native-screens/package.json 2>/dev/null || (curl -sLo /tmp/rns.tgz https://registry.npmjs.org/react-native-screens/-/react-native-screens-4.16.0.tgz && tar -xzf /tmp/rns.tgz -C /tmp && cp -r /tmp/package node_modules/react-native-screens)) && node scripts/start-tunnel-share.mjs"
 
 [[ports]]
 localPort = 5000
 externalPort = 80
+
+[[ports]]
+localPort = 8081
+externalPort = 8081
 
 [deployment]
 deploymentTarget = "autoscale"

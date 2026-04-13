@@ -1,0 +1,27 @@
+name: EAS Internal iOS Builds
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+
+jobs:
+  trigger_eas_workflow:
+    name: Trigger EAS internal iOS workflow
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Trigger EAS internal iOS workflow
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: npx eas-cli@latest workflow:run create-internal-ios-build.yml --non-interactive
