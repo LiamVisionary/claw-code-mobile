@@ -4675,7 +4675,49 @@ fn current_session_store() -> Result<runtime::SessionStore, Box<dyn std::error::
 }
 
 fn new_cli_session() -> Result<Session, Box<dyn std::error::Error>> {
-    Ok(Session::new().with_workspace_root(env::current_dir()?))
+    let workspace_root = env::current_dir()?;
+    // Auto-resume: if a prior session exists in this workspace, continue from it.
+    // Sessions live in  .claw/sessions/<hash>/<session>.jsonl  (legacy layout)
+    // or .claw/sessions/<session_id>.jsonl (managed layout from a previous auto-resume).
+    let sessions_dir = workspace_root.join(".claw").join("sessions");
+    if sessions_dir.exists() {
+        let mut latest_mtime: Option<std::time::SystemTime> = None;
+        let mut latest_path: Option<std::path::PathBuf> = None;
+        let scan = |path: std::path::PathBuf,
+                    latest_mtime: &mut Option<std::time::SystemTime>,
+                    latest_path: &mut Option<std::path::PathBuf>| {
+            if path.extension().map_or(false, |e| e == "jsonl") {
+                if let Ok(meta) = std::fs::metadata(&path) {
+                    if let Ok(mtime) = meta.modified() {
+                        if latest_mtime.map_or(true, |t| mtime > t) {
+                            *latest_mtime = Some(mtime);
+                            *latest_path = Some(path);
+                        }
+                    }
+                }
+            }
+        };
+        if let Ok(top) = std::fs::read_dir(&sessions_dir) {
+            for entry in top.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    if let Ok(sub) = std::fs::read_dir(&path) {
+                        for sub_entry in sub.flatten() {
+                            scan(sub_entry.path(), &mut latest_mtime, &mut latest_path);
+                        }
+                    }
+                } else {
+                    scan(path, &mut latest_mtime, &mut latest_path);
+                }
+            }
+        }
+        if let Some(path) = latest_path {
+            if let Ok(session) = Session::load_from_path(&path) {
+                return Ok(session.with_workspace_root(workspace_root));
+            }
+        }
+    }
+    Ok(Session::new().with_workspace_root(workspace_root))
 }
 
 fn create_managed_session_handle(
