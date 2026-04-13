@@ -12,7 +12,7 @@ const parsed = schema.parse(process.env);
 
 const dataDir = parsed.DATA_DIR
   ? path.resolve(parsed.DATA_DIR)
-  : path.resolve(process.cwd(), "backend", "data");
+  : path.resolve(process.cwd(), "data");
 
 export const env = {
   port: Number(parsed.PORT ?? 5000),
