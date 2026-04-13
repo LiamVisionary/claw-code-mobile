@@ -38,3 +38,6 @@
 {"message":{"blocks":[{"text":"fix this error: Error: y\\n  Compact          /compact\\n  Resume compact   claw --resume session-1776114084341-0 /compact\\n  Fresh session    /clear --confirm\\n  Reduce scope     remove large pasted context/files or ask for a smaller slice\\n  Retry            rerun after compacting or reducing the request\",\"type\":\"error\"}","type":"text"}],"role":"user"},"type":"message"}
 {"message":{"blocks":[{"text":"continue","type":"text"}],"role":"user"},"type":"message"}
 {"message":{"blocks":[{"text":"continue","type":"text"}],"role":"user"},"type":"message"}
+{"message":{"blocks":[{"text":"/compact","type":"text"}],"role":"user"},"type":"message"}
+{"message":{"blocks":[{"text":"/compact","type":"text"}],"role":"user"},"type":"message"}
+{"message":{"blocks":[{"text":"comtinue","type":"text"}],"role":"user"},"type":"message"}
