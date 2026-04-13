@@ -8,6 +8,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import * as Clipboard from "expo-clipboard";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { BottomSheetModal } from "@gorhom/bottom-sheet";
 import * as AC from "@bacons/apple-colors";
@@ -31,6 +32,7 @@ export default function ThreadScreen() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [command, setCommand] = useState("");
+  const [copiedConvo, setCopiedConvo] = useState(false);
   const terminalRef = useRef<BottomSheetModal>(null);
   const { bottom } = useSafeAreaInsets();
 
@@ -71,6 +73,16 @@ export default function ThreadScreen() {
       actions.stopRun(id);
     }
   }, [id, actions]);
+
+  const copyConversation = useCallback(async () => {
+    if (!messages.length) return;
+    const text = messages
+      .map((m) => `${m.role === "user" ? "You" : "Assistant"}: ${m.content}`)
+      .join("\n\n");
+    await Clipboard.setStringAsync(text);
+    setCopiedConvo(true);
+    setTimeout(() => setCopiedConvo(false), 2000);
+  }, [messages]);
 
   const threadStatus = thread?.status ?? "idle";
 
@@ -247,30 +259,69 @@ export default function ThreadScreen() {
               flexDirection: "row",
               justifyContent: "space-between",
               alignItems: "center",
-              gap: 12,
+              gap: 8,
             }}
           >
-            <TouchableBounce
-              sensory
-              onPress={() => terminalRef.current?.present()}
-            >
-              <View
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 6,
-                  paddingHorizontal: 12,
-                  paddingVertical: 10,
-                  backgroundColor: AC.systemGroupedBackground,
-                  borderRadius: 12,
-                  borderWidth: 1,
-                  borderColor: AC.separator,
-                }}
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              <TouchableBounce
+                sensory
+                onPress={() => terminalRef.current?.present()}
               >
-                <IconSymbol name="chevron.up" color={AC.label} />
-                <Text style={{ color: AC.label }}>Terminal</Text>
-              </View>
-            </TouchableBounce>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 6,
+                    paddingHorizontal: 12,
+                    paddingVertical: 10,
+                    backgroundColor: AC.systemGroupedBackground,
+                    borderRadius: 12,
+                    borderWidth: 1,
+                    borderColor: AC.separator,
+                  }}
+                >
+                  <IconSymbol name="chevron.up" color={AC.label} />
+                  <Text style={{ color: AC.label }}>Terminal</Text>
+                </View>
+              </TouchableBounce>
+
+              <TouchableBounce
+                sensory
+                disabled={!messages.length}
+                onPress={copyConversation}
+                style={{ opacity: messages.length ? 1 : 0.4 }}
+              >
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 6,
+                    paddingHorizontal: 12,
+                    paddingVertical: 10,
+                    backgroundColor: copiedConvo
+                      ? AC.systemGreen
+                      : AC.systemGroupedBackground,
+                    borderRadius: 12,
+                    borderWidth: 1,
+                    borderColor: copiedConvo ? AC.systemGreen : AC.separator,
+                  }}
+                >
+                  <IconSymbol
+                    name={copiedConvo ? "checkmark" : "doc.on.doc"}
+                    color={copiedConvo ? AC.systemBackground : AC.label}
+                    size={14}
+                  />
+                  <Text
+                    style={{
+                      color: copiedConvo ? AC.systemBackground : AC.label,
+                      fontSize: 14,
+                    }}
+                  >
+                    {copiedConvo ? "Copied!" : "Copy"}
+                  </Text>
+                </View>
+              </TouchableBounce>
+            </View>
 
             <TouchableBounce
               sensory
@@ -387,11 +438,20 @@ function MessageBubble({ message }: { message: Message }) {
   const isUser = message.role === "user";
   const bubbleColor = isUser ? AC.label : AC.systemGray5;
   const textColor = isUser ? AC.systemBackground : AC.label;
+  const [copied, setCopied] = useState(false);
+
+  const onCopy = useCallback(async () => {
+    await Clipboard.setStringAsync(message.content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1800);
+  }, [message.content]);
+
   return (
     <View
       style={{
-        flexDirection: "row",
-        justifyContent: isUser ? "flex-end" : "flex-start",
+        flexDirection: "column",
+        alignItems: isUser ? "flex-end" : "flex-start",
+        gap: 4,
       }}
     >
       <View
@@ -409,6 +469,36 @@ function MessageBubble({ message }: { message: Message }) {
           {message.content}
         </Text>
       </View>
+
+      <TouchableBounce sensory onPress={onCopy}>
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 4,
+            paddingHorizontal: 8,
+            paddingVertical: 4,
+            borderRadius: 8,
+            backgroundColor: copied
+              ? AC.systemGreen
+              : AC.tertiarySystemGroupedBackground,
+          }}
+        >
+          <IconSymbol
+            name={copied ? "checkmark" : "doc.on.doc"}
+            size={11}
+            color={copied ? AC.systemBackground : AC.systemGray}
+          />
+          <Text
+            style={{
+              fontSize: 11,
+              color: copied ? AC.systemBackground : AC.systemGray,
+            }}
+          >
+            {copied ? "Copied" : "Copy"}
+          </Text>
+        </View>
+      </TouchableBounce>
     </View>
   );
 }
