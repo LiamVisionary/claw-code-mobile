@@ -3,7 +3,7 @@ import type { Thread, ThreadStatus } from "../types/domain";
 import { createId } from "../utils/ids";
 
 const threadColumns =
-  "id, title, repoName, status, updatedAt, lastMessagePreview, remoteSessionId, createdAt";
+  "id, title, repoName, status, updatedAt, lastMessagePreview, remoteSessionId, workDir, createdAt";
 
 const mapRow = (row: any): Thread => ({
   id: row.id,
@@ -13,6 +13,7 @@ const mapRow = (row: any): Thread => ({
   updatedAt: row.updatedAt,
   lastMessagePreview: row.lastMessagePreview,
   remoteSessionId: row.remoteSessionId ?? undefined,
+  workDir: row.workDir ?? "",
   createdAt: row.createdAt,
 });
 
@@ -34,12 +35,12 @@ export const threadService = {
     return mapRow(row);
   },
 
-  create(input: { title: string }): Thread {
+  create(input: { title: string; workDir?: string }): Thread {
     const now = new Date().toISOString();
     const id = createId("thr");
     db.prepare(
-      `INSERT INTO threads (id, title, repoName, status, updatedAt, lastMessagePreview, createdAt)
-       VALUES (@id, @title, @repoName, @status, @updatedAt, @lastMessagePreview, @createdAt)`
+      `INSERT INTO threads (id, title, repoName, status, updatedAt, lastMessagePreview, workDir, createdAt)
+       VALUES (@id, @title, @repoName, @status, @updatedAt, @lastMessagePreview, @workDir, @createdAt)`
     ).run({
       id,
       title: input.title,
@@ -47,6 +48,7 @@ export const threadService = {
       status: "idle",
       updatedAt: now,
       lastMessagePreview: "",
+      workDir: input.workDir ?? "",
       createdAt: now,
     });
     return this.get(id)!;

@@ -39,4 +39,7 @@ export const applyMigrations = () => {
     );
     CREATE INDEX IF NOT EXISTS terminal_thread_idx ON terminal_lines(threadId, id);
   `);
+
+  // Additive migrations — safe to re-run (errors ignored if column already exists)
+  try { db.exec(`ALTER TABLE threads ADD COLUMN workDir TEXT NOT NULL DEFAULT ''`); } catch {}
 };

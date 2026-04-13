@@ -24,7 +24,7 @@ iPhone-first Expo app paired with a thin Node.js gateway server for streaming ch
 │   │   ├── server.ts         # Entry point
 │   │   ├── config/env.ts     # Environment config (port: 5000)
 │   │   ├── db/               # SQLite schema & migrations
-│   │   ├── routes/           # health, threads, messages, stream, terminal
+│   │   ├── routes/           # health, threads, messages, stream, terminal, fs
 │   │   ├── middleware/auth.ts # Bearer token auth
 │   │   ├── runtime/clawRuntime.ts  # Spawns claw binary, streams JSON response word-by-word
 │   │   ├── services/         # Business logic
@@ -70,10 +70,21 @@ Clones `ultraworkers/claw-code` and runs `cargo build`. Takes ~5 min on first ru
 
 ## Key Notes
 
+### Per-Thread Working Directory
+- Each thread has a `workDir` column in the DB (default: `""`)
+- On new chat, a directory browser bottom sheet opens — user picks their project folder
+- `GET /fs/browse?path=` returns subdirectories (hidden dirs filtered out)
+- If `thread.workDir` is set and exists, claw runs from it (has access to project files)
+- Sessions are always stored in the isolated `backend/data/workspaces/<threadId>/.claw/sessions/`
+  via `CLAW_SESSION_DIR` env var (requires claw rebuild with the `CLAW_SESSION_DIR` patch in `main.rs`)
+- `components/DirectoryBrowser.tsx` — bottom sheet with breadcrumbs, folder list, "Open Here" button
+- ChatRow on index screen shows `📁 folderName`; thread header shows directory name as subtitle
+
 ### Claw Runtime
-- Per thread: isolated workspace at `backend/data/workspaces/<threadId>/`
-- First message: `claw --output-format json prompt "..."` (no session)
-- Follow-up: `claw --output-format json --resume latest prompt "..."` (continues session)
+- cwd: `thread.workDir` if set and exists, else `backend/data/workspaces/<threadId>/`
+- Sessions: always `backend/data/workspaces/<threadId>/.claw/sessions/` (CLAW_SESSION_DIR env var)
+- First message auto-detects prior session via `new_cli_session()` in `main.rs` (patched)
+- Command: `claw --output-format json --permission-mode danger-full-access prompt "..."`
 - JSON response streamed word-by-word for visual streaming effect
 - Stderr forwarded as terminal events in real-time
 - Tool uses / tool results appended to terminal after run completes
