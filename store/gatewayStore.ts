@@ -3,20 +3,26 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 /**
- * Native XHR-based SSE client — works in React Native (no `document` dependency).
- * Returns an object with an `abort()` method to close the connection.
+ * openNativeSSE — XHR-based SSE client for React Native.
+ *
+ * The `onMessage` callback may return `true` to signal that the stream has
+ * cleanly completed (i.e. the caller processed a `done` event). After that
+ * the client will NOT auto-reconnect, which prevents duplicate delivery of
+ * error/delta chunks when the underlying ngrok/proxy connection closes right
+ * after a run finishes.
  */
 function openNativeSSE(
   url: string,
   headers: Record<string, string>,
-  onMessage: (event: string, data: string) => void,
+  onMessage: (event: string, data: string) => boolean | void,
   onError: (err: Error) => void
 ): { abort: () => void } {
   let aborted = false;
+  let completed = false;          // set to true once a "done" event is processed
   let currentXhr: XMLHttpRequest | null = null;
 
   function connect() {
-    if (aborted) return;
+    if (aborted || completed) return;
     const xhr = new XMLHttpRequest();
     currentXhr = xhr;
     let offset = 0;
@@ -49,14 +55,15 @@ function openNativeSSE(
           // keep-alive comment — ignore
         } else if (line === "") {
           if (dataBuffer !== "") {
-            onMessage(currentEvent, dataBuffer);
+            const isDone = onMessage(currentEvent, dataBuffer);
+            if (isDone) completed = true;
             currentEvent = "";
             dataBuffer = "";
           }
         }
       }
 
-      // readyState 4 = DONE — connection closed, reconnect
+      // readyState 4 = DONE — connection closed by server or proxy
       if (xhr.readyState === 4) {
         scheduleReconnect();
       }
@@ -71,7 +78,7 @@ function openNativeSSE(
   }
 
   function scheduleReconnect() {
-    if (aborted) return;
+    if (aborted || completed) return;
     setTimeout(connect, 2000);
   }
 
@@ -159,6 +166,8 @@ export type Message = {
   role: MessageRole;
   content: string;
   createdAt: string;
+  /** Set to true when the backend reports a run error for this message */
+  error?: boolean;
 };
 
 type ModelSettings = {
@@ -440,13 +449,32 @@ export const useGatewayStore = create<GatewayState>()(
                   };
                 });
                 break;
+              case "message_error":
+                set((current) => {
+                  const msgs = current.messages[threadId] ?? [];
+                  const existing = msgs.find((m) => m.id === payload.messageId) ?? {
+                    id: payload.messageId,
+                    threadId,
+                    role: "assistant" as const,
+                    content: "",
+                    createdAt: new Date().toISOString(),
+                  };
+                  return {
+                    messages: upsertMessage(current.messages, {
+                      ...existing,
+                      content: payload.text,
+                      error: true,
+                    }),
+                  };
+                });
+                break;
               case "done":
                 set((current) => ({
                   threads: current.threads.map((t) =>
                     t.id === threadId ? { ...t, status: "idle" } : t
                   ),
                 }));
-                break;
+                return true; // signal openNativeSSE to stop reconnecting
               case "terminal":
                 set((current) => ({
                   terminal: {
