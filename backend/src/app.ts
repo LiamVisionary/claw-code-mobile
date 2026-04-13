@@ -3,6 +3,7 @@ import express from "express";
 import { applyMigrations } from "./db/schema";
 import { authMiddleware } from "./middleware/auth";
 import { healthRouter } from "./routes/health";
+import { openAppRouter } from "./routes/openApp";
 import { messagesRouter } from "./routes/messages";
 import { streamRouter } from "./routes/stream";
 import { terminalRouter } from "./routes/terminal";
@@ -19,6 +20,7 @@ app.use(express.json());
 app.use(authMiddleware);
 
 app.use(healthRouter);
+app.use(openAppRouter);
 app.use(threadsRouter);
 app.use(messagesRouter);
 app.use(streamRouter);

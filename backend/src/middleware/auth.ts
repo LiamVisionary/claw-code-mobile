@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { env } from "../config/env";
 
-const isPublic = (path: string) => path === "/health" || path === "/";
+const isPublic = (path: string) => path === "/health" || path === "/" || path === "/open-app";
 
 export function authMiddleware(req: Request, res: Response, next: NextFunction) {
   if (isPublic(req.path)) return next();
