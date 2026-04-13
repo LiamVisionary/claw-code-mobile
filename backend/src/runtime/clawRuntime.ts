@@ -42,7 +42,15 @@ function workspaceDir(threadId: string): string {
 function hasExistingSession(threadId: string): boolean {
   const dir = path.join(workspaceDir(threadId), ".claw", "sessions");
   if (!fs.existsSync(dir)) return false;
-  return fs.readdirSync(dir).some((f) => f.endsWith(".jsonl"));
+  // claw stores sessions in sub-directories: .claw/sessions/<hash>/<session>.jsonl
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name.endsWith(".jsonl")) return true;
+    if (entry.isDirectory()) {
+      const sub = path.join(dir, entry.name);
+      if (fs.readdirSync(sub).some((f) => f.endsWith(".jsonl"))) return true;
+    }
+  }
+  return false;
 }
 
 function buildEnv(model?: ModelConfig): Record<string, string> {
