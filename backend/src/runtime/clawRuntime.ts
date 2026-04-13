@@ -15,6 +15,8 @@ const CLAW_BINARY = path.resolve(
   __dirname,
   "../../../claw-code/rust/target/debug/claw"
 );
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const WORKSPACES_DIR = path.resolve(__dirname, "../../data/workspaces");
 
 fs.mkdirSync(WORKSPACES_DIR, { recursive: true });
@@ -373,11 +375,12 @@ async function processSuccess(
     });
   }
 
-  // Emit tool_start + tool_end events for every tool used in this run.
-  // These arrive before the delta so the ThinkingIndicator shows the steps
-  // just before the response appears. The messageId links steps to this
-  // specific assistant bubble so MessageBubble can display them permanently.
-  for (const tu of result.tool_uses ?? []) {
+  // Stagger tool_start / tool_end events so the UI can display each badge
+  // appearing one-by-one before the response message streams in.
+  // Each tool gets a brief "running" window (spinner visible) before done.
+  const toolUses = result.tool_uses ?? [];
+  for (const tu of toolUses) {
+    if (active.stopped) break;
     const stepId = `step-${tu.tool_name}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const label = toolLabel(tu.tool_name, tu.input) || tu.tool_name;
     streamService.publish(threadId, {
@@ -387,6 +390,8 @@ async function processSuccess(
       tool: tu.tool_name,
       label,
     });
+    // Brief pause so the badge renders as "running" before flipping to done
+    await sleep(90);
     streamService.publish(threadId, {
       type: "tool_end",
       id: stepId,
@@ -394,6 +399,12 @@ async function processSuccess(
     });
     // Also emit to terminal for the debug view
     emitTerminal(threadId, `[${tu.tool_name}] ${JSON.stringify(tu.input).slice(0, 200)}`);
+    // Short gap between steps for a natural appearance
+    await sleep(55);
+  }
+  // Pause briefly so user can see all steps before the text begins streaming
+  if (toolUses.length > 0 && !active.stopped) {
+    await sleep(220);
   }
   for (const tr of result.tool_results ?? []) {
     if (tr.content) emitTerminal(threadId, tr.content.slice(0, 400));
