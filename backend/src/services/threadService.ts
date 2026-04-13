@@ -75,4 +75,61 @@ export const threadService = {
       `UPDATE threads SET remoteSessionId = @remoteSessionId WHERE id = @threadId`
     ).run({ remoteSessionId, threadId });
   },
+
+  delete(threadId: string): boolean {
+    db.prepare("DELETE FROM messages WHERE threadId = ?").run(threadId);
+    const result = db.prepare("DELETE FROM threads WHERE id = ?").run(threadId);
+    return result.changes > 0;
+  },
+
+  /** Count messages belonging to a thread. */
+  messageCount(threadId: string): number {
+    const row = db
+      .prepare("SELECT COUNT(*) as n FROM messages WHERE threadId = ?")
+      .get(threadId) as { n: number };
+    return row?.n ?? 0;
+  },
+
+  duplicate(threadId: string): Thread | undefined {
+    const source = this.get(threadId);
+    if (!source) return undefined;
+
+    const now = new Date().toISOString();
+    const newId = createId("thr");
+
+    db.prepare(
+      `INSERT INTO threads (id, title, repoName, status, updatedAt, lastMessagePreview, workDir, createdAt)
+       VALUES (@id, @title, @repoName, @status, @updatedAt, @lastMessagePreview, @workDir, @createdAt)`
+    ).run({
+      id: newId,
+      title: source.title + " (copy)",
+      repoName: "",
+      status: "idle",
+      updatedAt: now,
+      lastMessagePreview: source.lastMessagePreview ?? "",
+      workDir: source.workDir ?? "",
+      createdAt: now,
+    });
+
+    // Copy all messages into the new thread
+    const messages = db
+      .prepare("SELECT * FROM messages WHERE threadId = ? ORDER BY datetime(createdAt) ASC")
+      .all(threadId) as any[];
+
+    const insertMsg = db.prepare(
+      `INSERT INTO messages (id, threadId, role, content, createdAt)
+       VALUES (@id, @threadId, @role, @content, @createdAt)`
+    );
+    for (const msg of messages) {
+      insertMsg.run({
+        id: createId("msg"),
+        threadId: newId,
+        role: msg.role,
+        content: msg.content,
+        createdAt: msg.createdAt,
+      });
+    }
+
+    return this.get(newId);
+  },
 };

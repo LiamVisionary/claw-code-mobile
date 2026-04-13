@@ -220,6 +220,8 @@ type GatewayState = {
     setActiveThread: (threadId: string) => void;
     /** Respond to a permission request (approve/deny) */
     respondToPermission: (threadId: string, permissionId: string, approved: boolean) => Promise<void>;
+    deleteThread: (threadId: string) => Promise<void>;
+    duplicateThread: (threadId: string) => Promise<Thread>;
   };
 };
 
@@ -601,6 +603,50 @@ export const useGatewayStore = create<GatewayState>()(
         },
 
         setActiveThread: (threadId: string) => set({ activeThreadId: threadId }),
+
+        respondToPermission: async (threadId: string, permissionId: string, approved: boolean) => {
+          const state = get();
+          const { baseUrl, headers } = getClientConfig(state);
+          await fetch(`${baseUrl}/threads/${threadId}/permissions/${permissionId}`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ approved }),
+          });
+        },
+
+        deleteThread: async (threadId: string) => {
+          const state = get();
+          const { baseUrl, headers } = getClientConfig(state);
+          const res = await fetch(`${baseUrl}/threads/${threadId}`, {
+            method: "DELETE",
+            headers,
+          });
+          if (!res.ok) throw new Error("Failed to delete thread");
+          set((current) => ({
+            threads: current.threads.filter((t) => t.id !== threadId),
+            messages: (() => {
+              const next = { ...current.messages };
+              delete next[threadId];
+              return next;
+            })(),
+          }));
+        },
+
+        duplicateThread: async (threadId: string) => {
+          const state = get();
+          const { baseUrl, headers } = getClientConfig(state);
+          const res = await fetch(`${baseUrl}/threads/${threadId}/duplicate`, {
+            method: "POST",
+            headers,
+          });
+          if (!res.ok) throw new Error("Failed to duplicate thread");
+          const data = await res.json();
+          const copy = data.thread as Thread;
+          set((current) => ({
+            threads: [copy, ...current.threads],
+          }));
+          return copy;
+        },
       },
     }),
     {

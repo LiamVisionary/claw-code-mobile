@@ -1,7 +1,19 @@
-import { useEffect, useState } from "react";
-import { ActivityIndicator, FlatList, Platform, Text, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Platform,
+  Text,
+  View,
+} from "react-native";
 import { useRouter } from "expo-router";
 import * as AC from "@bacons/apple-colors";
+import ReanimatedSwipeable from "react-native-gesture-handler/ReanimatedSwipeable";
+import Reanimated, {
+  SharedValue,
+  useAnimatedStyle,
+} from "react-native-reanimated";
 import TouchableBounce from "@/components/ui/TouchableBounce";
 import { useGatewayStore } from "@/store/gatewayStore";
 import type { Thread } from "@/store/gatewayStore";
@@ -9,6 +21,69 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { IconSymbol } from "@/components/ui/IconSymbol";
 import { Stack } from "expo-router";
 import DirectoryBrowser from "@/components/DirectoryBrowser";
+
+// ─── Right-side swipe actions (Delete + Duplicate) ───────────────────────────
+
+function RightActions({
+  prog,
+  drag,
+  onDelete,
+  onDuplicate,
+}: {
+  prog: SharedValue<number>;
+  drag: SharedValue<number>;
+  onDelete: () => void;
+  onDuplicate: () => void;
+}) {
+  const TOTAL_WIDTH = 152; // 76 per button
+
+  const containerStyle = useAnimatedStyle(() => ({
+    width: Math.max(0, -drag.value),
+    overflow: "hidden",
+  }));
+
+  return (
+    <Reanimated.View style={[{ flexDirection: "row", alignItems: "stretch" }, containerStyle]}>
+      {/* Duplicate */}
+      <TouchableBounce sensory onPress={onDuplicate}>
+        <View
+          style={{
+            width: 76,
+            flex: 1,
+            backgroundColor: AC.systemBlue as any,
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 4,
+          }}
+        >
+          <IconSymbol name="doc.on.doc" color="#fff" size={20} />
+          <Text style={{ color: "#fff", fontSize: 12, fontWeight: "600" }}>Duplicate</Text>
+        </View>
+      </TouchableBounce>
+
+      {/* Delete */}
+      <TouchableBounce sensory onPress={onDelete}>
+        <View
+          style={{
+            width: 76,
+            flex: 1,
+            backgroundColor: AC.systemRed as any,
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 4,
+            borderTopRightRadius: 16,
+            borderBottomRightRadius: 16,
+          }}
+        >
+          <IconSymbol name="trash" color="#fff" size={20} />
+          <Text style={{ color: "#fff", fontSize: 12, fontWeight: "600" }}>Delete</Text>
+        </View>
+      </TouchableBounce>
+    </Reanimated.View>
+  );
+}
+
+// ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function ChatListScreen() {
   const router = useRouter();
@@ -27,9 +102,7 @@ export default function ChatListScreen() {
     (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
   );
 
-  const handleNewChat = () => {
-    setShowBrowser(true);
-  };
+  const handleNewChat = () => setShowBrowser(true);
 
   const handleDirectorySelected = async (selectedPath: string) => {
     setShowBrowser(false);
@@ -43,6 +116,31 @@ export default function ChatListScreen() {
       setError(err.message);
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleDelete = (thread: Thread) => {
+    Alert.alert(
+      "Delete conversation",
+      `"${thread.title}" will be permanently deleted.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => actions.deleteThread(thread.id).catch(() => {}),
+        },
+      ]
+    );
+  };
+
+  const handleDuplicate = async (thread: Thread) => {
+    try {
+      const copy = await actions.duplicateThread(thread.id);
+      actions.setActiveThread(copy.id);
+      router.push(`/thread/${copy.id}`);
+    } catch {
+      setError("Failed to duplicate conversation.");
     }
   };
 
@@ -76,13 +174,12 @@ export default function ChatListScreen() {
         style={{
           flex: 1,
           backgroundColor: AC.systemGroupedBackground,
-          paddingHorizontal: 16,
           paddingTop: 12,
           paddingBottom: bottom + 16,
         }}
       >
         {error && (
-          <Text style={{ color: AC.systemRed, fontSize: 13, marginBottom: 12 }}>
+          <Text style={{ color: AC.systemRed, fontSize: 13, marginBottom: 12, paddingHorizontal: 16 }}>
             {error}
           </Text>
         )}
@@ -95,14 +192,16 @@ export default function ChatListScreen() {
           <FlatList
             data={sortedThreads}
             keyExtractor={(item) => item.id}
-            ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
+            contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
             renderItem={({ item }) => (
-              <ChatRow
+              <SwipeableChatRow
                 thread={item}
                 onPress={() => {
                   actions.setActiveThread(item.id);
                   router.push(`/thread/${item.id}`);
                 }}
+                onDelete={() => handleDelete(item)}
+                onDuplicate={() => handleDuplicate(item)}
               />
             )}
             ListEmptyComponent={() => (
@@ -148,6 +247,45 @@ export default function ChatListScreen() {
   );
 }
 
+// ─── Swipeable row ─────────────────────────────────────────────────────────────
+
+function SwipeableChatRow({
+  thread,
+  onPress,
+  onDelete,
+  onDuplicate,
+}: {
+  thread: Thread;
+  onPress: () => void;
+  onDelete: () => void;
+  onDuplicate: () => void;
+}) {
+  const swipeRef = useRef<any>(null);
+
+  const close = () => swipeRef.current?.close();
+
+  return (
+    <ReanimatedSwipeable
+      ref={swipeRef}
+      friction={2}
+      overshootRight={false}
+      rightThreshold={60}
+      renderRightActions={(prog, drag) => (
+        <RightActions
+          prog={prog}
+          drag={drag}
+          onDelete={() => { close(); onDelete(); }}
+          onDuplicate={() => { close(); onDuplicate(); }}
+        />
+      )}
+    >
+      <ChatRow thread={thread} onPress={onPress} />
+    </ReanimatedSwipeable>
+  );
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
 function timeAgo(dateStr: string) {
   const diff = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60000);
@@ -189,7 +327,14 @@ function ChatRow({ thread, onPress }: { thread: Thread; onPress: () => void }) {
         {dirName && (
           <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
             <Text style={{ fontSize: 11 }}>📁</Text>
-            <Text style={{ color: AC.systemGray, fontSize: 12, fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace" }} numberOfLines={1}>
+            <Text
+              style={{
+                color: AC.systemGray,
+                fontSize: 12,
+                fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+              }}
+              numberOfLines={1}
+            >
               {dirName}
             </Text>
           </View>

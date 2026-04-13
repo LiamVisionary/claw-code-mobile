@@ -27,3 +27,27 @@ threadsRouter.post("/threads", (req, res, next) => {
     next(err instanceof HttpError ? err : err);
   }
 });
+
+threadsRouter.delete("/threads/:threadId", (req, res, next) => {
+  try {
+    const thread = threadService.get(req.params.threadId);
+    if (!thread) throw new HttpError(404, "Thread not found");
+    threadService.delete(req.params.threadId);
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Duplicate a thread (copy messages, append "(copy)" to title). */
+threadsRouter.post("/threads/:threadId/duplicate", (req, res, next) => {
+  try {
+    const source = threadService.get(req.params.threadId);
+    if (!source) throw new HttpError(404, "Thread not found");
+    const copy = threadService.duplicate(req.params.threadId);
+    if (!copy) throw new HttpError(500, "Duplication failed");
+    res.status(201).json({ thread: copy });
+  } catch (err) {
+    next(err);
+  }
+});
