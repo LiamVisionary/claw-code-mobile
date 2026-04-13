@@ -697,40 +697,77 @@ function MessageBubble({ message, threadId }: { message: Message; threadId: stri
 
       {/* ── Message bubble ─────────────────────────────────────── */}
       <TouchableBounce sensory onPress={onCopy}>
-        <View
-          style={{
-            maxWidth: isUser ? "80%" : "92%",
-            backgroundColor: isUser
-              ? AC.systemBlue
-              : isDark
-                ? "#1c1c1e"
-                : "#fff",
-            borderRadius: BORDER_RADIUS.xl,
-            borderBottomRightRadius: isUser ? SPACING.xs : BORDER_RADIUS.xl,
-            borderBottomLeftRadius: isUser ? BORDER_RADIUS.xl : SPACING.xs,
-            paddingHorizontal: SPACING.md,
-            paddingVertical: SPACING.sm + 2,
-            borderWidth: isUser ? 0 : 1,
-            borderColor: isDark ? "rgba(255,255,255,0.06)" : AC.separator,
-            ...(isUser ? SHADOW.md : SHADOW.sm),
-          }}
-        >
-          {isUser ? (
+        {message.error ? (
+          /* ── Error bubble ── */
+          <View
+            style={{
+              maxWidth: "92%",
+              flexDirection: "row",
+              alignItems: "flex-start",
+              gap: 8,
+              backgroundColor: isDark ? "rgba(239,68,68,0.10)" : "rgba(239,68,68,0.07)",
+              borderRadius: BORDER_RADIUS.lg,
+              borderWidth: 1,
+              borderColor: isDark ? "rgba(239,68,68,0.25)" : "rgba(239,68,68,0.20)",
+              paddingHorizontal: SPACING.md,
+              paddingVertical: SPACING.sm + 2,
+              ...SHADOW.sm,
+            }}
+          >
+            <IconSymbol
+              name="exclamationmark.triangle.fill"
+              size={14}
+              color="#EF4444"
+              style={{ marginTop: 3 }}
+            />
             <Text
               style={{
-                color: "#fff",
-                fontSize: TYPOGRAPHY.fontSizes.md,
+                color: isDark ? "#FCA5A5" : "#B91C1C",
+                fontSize: TYPOGRAPHY.fontSizes.sm,
                 lineHeight: TYPOGRAPHY.lineHeights.md,
+                flex: 1,
               }}
             >
               {message.content}
             </Text>
-          ) : (
-            <Markdown style={mdStyles}>
-              {message.content}
-            </Markdown>
-          )}
-        </View>
+          </View>
+        ) : (
+          /* ── Normal bubble ── */
+          <View
+            style={{
+              maxWidth: isUser ? "80%" : "92%",
+              backgroundColor: isUser
+                ? AC.systemBlue
+                : isDark
+                  ? "#1c1c1e"
+                  : "#fff",
+              borderRadius: BORDER_RADIUS.xl,
+              borderBottomRightRadius: isUser ? SPACING.xs : BORDER_RADIUS.xl,
+              borderBottomLeftRadius: isUser ? BORDER_RADIUS.xl : SPACING.xs,
+              paddingHorizontal: SPACING.md,
+              paddingVertical: SPACING.sm + 2,
+              borderWidth: isUser ? 0 : 1,
+              borderColor: isDark ? "rgba(255,255,255,0.06)" : AC.separator,
+              ...(isUser ? SHADOW.md : SHADOW.sm),
+            }}
+          >
+            {isUser ? (
+              <Text
+                style={{
+                  color: "#fff",
+                  fontSize: TYPOGRAPHY.fontSizes.md,
+                  lineHeight: TYPOGRAPHY.lineHeights.md,
+                }}
+              >
+                {message.content}
+              </Text>
+            ) : (
+              <Markdown style={mdStyles}>
+                {message.content}
+              </Markdown>
+            )}
+          </View>
+        )}
       </TouchableBounce>
 
       {/* Subtle copy indicator */}

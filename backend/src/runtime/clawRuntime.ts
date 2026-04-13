@@ -272,6 +272,37 @@ function formatContextOverflow(): string {
   ].join("\n");
 }
 
+/**
+ * Map raw claw/model error strings to user-readable messages.
+ * Keeps technical noise out of the chat bubble.
+ */
+function friendlyError(raw: string): string {
+  const lower = raw.toLowerCase();
+  if (
+    lower.includes("no content") ||
+    lower.includes("stream produced no content") ||
+    lower.includes("empty response") ||
+    lower.includes("assistant stream")
+  ) {
+    return "The model returned an empty response. This can happen with some OpenRouter models — please try again or switch to a different model in Settings.";
+  }
+  if (lower.includes("rate limit") || lower.includes("ratelimit") || lower.includes("429")) {
+    return "Rate limit reached. Please wait a moment before sending another message.";
+  }
+  if (lower.includes("invalid api key") || lower.includes("unauthorized") || lower.includes("401")) {
+    return "Invalid API key. Please check your API key in Settings.";
+  }
+  if (lower.includes("context length") || lower.includes("context window")) {
+    return formatContextOverflow();
+  }
+  if (lower.includes("timeout") || lower.includes("timed out")) {
+    return "The request timed out. Please try again.";
+  }
+  // Pass through short plain-text messages; truncate long ones
+  if (raw.length <= 200) return raw;
+  return raw.slice(0, 200) + "…";
+}
+
 /** Derive a human-readable label from a tool_use input object. */
 function toolLabel(toolName: string, input: unknown): string {
   const inp = input as Record<string, unknown>;
@@ -442,14 +473,14 @@ export const clawRuntime = {
           }
           if (err.isClawError) {
             logger.warn({ model: label }, "claw exited ok but reported error");
-            const chunk = err.message;
-            messageService.appendAssistantDelta(threadId, messageId, chunk);
-            streamService.publish(threadId, { type: "delta", messageId, chunk });
+            const text = friendlyError(err.message);
+            messageService.appendAssistantDelta(threadId, messageId, text);
+            streamService.publish(threadId, { type: "message_error", messageId, text });
           } else {
             logger.error({ err, stdoutBuf }, "Failed to parse claw JSON output");
-            const chunk = `Parse error: ${err.message}\nstdout: ${stdoutBuf.slice(0, 200)}`;
-            messageService.appendAssistantDelta(threadId, messageId, chunk);
-            streamService.publish(threadId, { type: "delta", messageId, chunk });
+            const text = friendlyError(err.message);
+            messageService.appendAssistantDelta(threadId, messageId, text);
+            streamService.publish(threadId, { type: "message_error", messageId, text });
           }
         }
         break;
@@ -481,9 +512,9 @@ export const clawRuntime = {
       }
 
       // Last model exhausted — surface error in message bubble
-      const finalMsg = isContextOverflow(errText) ? formatContextOverflow() : errText;
-      messageService.appendAssistantDelta(threadId, messageId, finalMsg);
-      streamService.publish(threadId, { type: "delta", messageId, chunk: finalMsg });
+      const text = isContextOverflow(errText) ? formatContextOverflow() : friendlyError(errText);
+      messageService.appendAssistantDelta(threadId, messageId, text);
+      streamService.publish(threadId, { type: "message_error", messageId, text });
     }
 
     activeRuns.delete(threadId);
