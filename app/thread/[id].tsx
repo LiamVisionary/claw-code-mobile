@@ -58,7 +58,10 @@ export default function ThreadScreen() {
   const [copiedConvo, setCopiedConvo] = useState(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [showDirBrowser, setShowDirBrowser] = useState(false);
+  const [queuedMessage, setQueuedMessage] = useState<string | null>(null);
   const settings = useGatewayStore((s) => s.settings);
+  // Tracks the previous thread status so we can detect idle transitions
+  const prevStatusRef = useRef<ThreadStatus>("idle");
   const terminalRef = useRef<BottomSheetModal>(null);
   const { bottom } = useSafeAreaInsets();
   const colorScheme = useColorScheme();
@@ -108,21 +111,49 @@ export default function ThreadScreen() {
     setSlashPickerVisible(text.startsWith("/") && text.length > 0);
   };
 
-  const send = async () => {
-    if (!id || !input.trim()) return;
-    const msg = input.trim();
-    // Clear immediately — don't wait for claw to finish (HTTP POST blocks until done)
-    setInput("");
-    setSlashPickerVisible(false);
+  const threadStatus = thread?.status ?? "idle";
+
+  const sendNow = useCallback(async (msg: string) => {
+    if (!id || !msg.trim()) return;
     setSending(true);
     try {
-      await actions.sendMessage(id, msg);
+      await actions.sendMessage(id, msg.trim());
     } catch {
-      // error handled in store
+      // errors handled in store
     } finally {
       setSending(false);
     }
+  }, [id, actions]);
+
+  const send = async () => {
+    if (!id || !input.trim()) return;
+    const msg = input.trim();
+    setInput("");
+    setSlashPickerVisible(false);
+    // If AI is busy, park the message in the queue instead of sending
+    if (threadStatus === "running" || threadStatus === "waiting") {
+      setQueuedMessage(msg);
+      return;
+    }
+    await sendNow(msg);
   };
+
+  // Auto-send queued message when the AI becomes idle
+  const queuedRef = useRef<string | null>(null);
+  queuedRef.current = queuedMessage;
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = threadStatus;
+    if (
+      (prev === "running" || prev === "waiting") &&
+      threadStatus === "idle" &&
+      queuedRef.current
+    ) {
+      const msg = queuedRef.current;
+      setQueuedMessage(null);
+      sendNow(msg);
+    }
+  }, [threadStatus, sendNow]);
 
   const onStop = useCallback(() => {
     if (id) {
@@ -139,8 +170,6 @@ export default function ThreadScreen() {
     setCopiedConvo(true);
     setTimeout(() => setCopiedConvo(false), 2000);
   }, [messages]);
-
-  const threadStatus = thread?.status ?? "idle";
 
   const headerRight = useMemo(
     () => (
@@ -332,6 +361,24 @@ export default function ThreadScreen() {
             setSlashPickerVisible(false);
           }}
         />
+
+        {/* Queued message panel — shown when a message is waiting to be sent */}
+        {queuedMessage !== null && (
+          <QueuedMessagePanel
+            message={queuedMessage}
+            isDark={isDark}
+            onEdit={() => {
+              setInput(queuedMessage);
+              setQueuedMessage(null);
+            }}
+            onSendNow={() => {
+              const msg = queuedMessage;
+              setQueuedMessage(null);
+              sendNow(msg);
+            }}
+            onDelete={() => setQueuedMessage(null)}
+          />
+        )}
 
         {/* Input bar - clean, minimal */}
         <View
@@ -888,6 +935,134 @@ function formatMsgTime(dateStr: string): string {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + ", " + time;
 }
 
+// ─── Queued message panel ─────────────────────────────────────────────────────
+
+function QueuedMessagePanel({
+  message,
+  isDark,
+  onEdit,
+  onSendNow,
+  onDelete,
+}: {
+  message: string;
+  isDark: boolean;
+  onEdit: () => void;
+  onSendNow: () => void;
+  onDelete: () => void;
+}) {
+  const bg     = isDark ? "#2c2415" : "#fffbeb";
+  const border = isDark ? "rgba(245,158,11,0.30)" : "rgba(245,158,11,0.40)";
+  const amber  = "#f59e0b";
+  const subtle = isDark ? "rgba(255,255,255,0.45)" : "rgba(0,0,0,0.40)";
+
+  return (
+    <View
+      style={{
+        marginHorizontal: SPACING.lg,
+        marginBottom: SPACING.xs,
+        backgroundColor: bg,
+        borderRadius: BORDER_RADIUS.lg,
+        borderWidth: 1,
+        borderColor: border,
+        overflow: "hidden",
+        ...SHADOW.sm,
+      }}
+    >
+      {/* Header row */}
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          paddingHorizontal: 12,
+          paddingTop: 8,
+          paddingBottom: 4,
+          gap: 5,
+        }}
+      >
+        <IconSymbol name="clock.arrow.2.circlepath" size={11} color={amber} />
+        <Text style={{ color: amber, fontSize: 11, fontWeight: "600", flex: 1 }}>
+          Queued — will send when ready
+        </Text>
+      </View>
+
+      {/* Message preview */}
+      <Text
+        style={{
+          color: isDark ? "rgba(255,255,255,0.80)" : "rgba(0,0,0,0.75)",
+          fontSize: 13.5,
+          lineHeight: 19,
+          paddingHorizontal: 12,
+          paddingBottom: 10,
+        }}
+        numberOfLines={4}
+      >
+        {message}
+      </Text>
+
+      {/* Action row */}
+      <View
+        style={{
+          flexDirection: "row",
+          borderTopWidth: 1,
+          borderTopColor: border,
+        }}
+      >
+        {/* Edit */}
+        <TouchableBounce sensory onPress={onEdit} style={{ flex: 1 }}>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 5,
+              paddingVertical: 9,
+              borderRightWidth: 1,
+              borderRightColor: border,
+            }}
+          >
+            <IconSymbol name="pencil" size={12} color={subtle} />
+            <Text style={{ color: subtle, fontSize: 12, fontWeight: "500" }}>Edit</Text>
+          </View>
+        </TouchableBounce>
+
+        {/* Send now */}
+        <TouchableBounce sensory onPress={onSendNow} style={{ flex: 1 }}>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 5,
+              paddingVertical: 9,
+              borderRightWidth: 1,
+              borderRightColor: border,
+            }}
+          >
+            <IconSymbol name="arrow.up" size={12} color={amber} />
+            <Text style={{ color: amber, fontSize: 12, fontWeight: "600" }}>Send now</Text>
+          </View>
+        </TouchableBounce>
+
+        {/* Delete */}
+        <TouchableBounce sensory onPress={onDelete} style={{ flex: 1 }}>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 5,
+              paddingVertical: 9,
+            }}
+          >
+            <IconSymbol name="xmark" size={12} color={subtle} />
+            <Text style={{ color: subtle, fontSize: 12, fontWeight: "500" }}>Remove</Text>
+          </View>
+        </TouchableBounce>
+      </View>
+    </View>
+  );
+}
+
 // ─── Model picker ─────────────────────────────────────────────────────────────
 
 const PROVIDER_COLOR: Record<string, string> = {
@@ -907,7 +1082,7 @@ function ModelPickerBar({
 }) {
   const settings = useGatewayStore((s) => s.settings);
   const actions  = useGatewayStore((s) => s.actions);
-  const queue    = settings.modelQueue.filter((m) => m.enabled);
+  const queue    = (settings.modelQueue ?? []).filter((m) => m.enabled);
 
   if (queue.length === 0) return null;
 
