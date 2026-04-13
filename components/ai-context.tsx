@@ -5,7 +5,7 @@ import { createAI, getMutableAIState, streamUI } from "ai/rsc";
 import "server-only";
 import { z } from "zod";
 
-import { openai } from "@ai-sdk/openai";
+import { createOpenAI, openai } from "@ai-sdk/openai";
 import { WeatherCard } from "./weather";
 
 // Skeleton and display components
@@ -16,8 +16,36 @@ import MarkdownText from "./markdown-text";
 import { MoviesCard, MoviesSkeleton } from "./movies/movie-card";
 import { getWeatherAsync } from "./weather-data";
 
-if (!process.env.OPENAI_API_KEY) {
-  throw new Error("OPENAI_API_KEY is required");
+const llmProvider = (process.env.AI_PROVIDER ?? "openai").toLowerCase();
+const aiModel =
+  process.env.AI_MODEL ??
+  (llmProvider === "openrouter"
+    ? "openai/gpt-4o-mini"
+    : "gpt-4o-mini-2024-07-18");
+
+function getModel() {
+  if (llmProvider === "openrouter") {
+    if (!process.env.OPENROUTER_API_KEY) {
+      throw new Error("OPENROUTER_API_KEY is required when AI_PROVIDER=openrouter");
+    }
+
+    const openrouter = createOpenAI({
+      apiKey: process.env.OPENROUTER_API_KEY,
+      baseURL: "https://openrouter.ai/api/v1",
+      headers: {
+        "HTTP-Referer": process.env.OPENROUTER_SITE_URL ?? "https://expo.dev",
+        "X-Title": process.env.OPENROUTER_APP_NAME ?? "Claw Code Mobile",
+      },
+    });
+
+    return openrouter(aiModel);
+  }
+
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error("OPENAI_API_KEY is required when AI_PROVIDER=openai");
+  }
+
+  return openai(aiModel);
 }
 
 export async function onSubmit(message: string) {
@@ -69,7 +97,7 @@ export async function onSubmit(message: string) {
   }
 
   const result = await streamUI({
-    model: openai("gpt-4o-mini-2024-07-18"),
+    model: getModel(),
     messages: [
       {
         role: "system",
