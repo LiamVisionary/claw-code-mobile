@@ -1,4 +1,4 @@
-import { Thread } from "../types/domain";
+import { query, type SDKMessage } from "@anthropic-ai/claude-code";
 import { logger } from "../utils/logger";
 import { messageService } from "../services/messageService";
 import { streamService } from "../services/streamService";
@@ -6,42 +6,30 @@ import { threadService } from "../services/threadService";
 import { terminalService } from "../services/terminalService";
 import { runService } from "../services/runService";
 
+export type ModelConfig = {
+  provider: "claude" | "openrouter" | "local";
+  name?: string;
+  apiKey?: string;
+};
+
 type ActiveRun = {
   runId: string;
-  timers: NodeJS.Timeout[];
+  abortController: AbortController;
   stopped: boolean;
 };
 
 const activeRuns = new Map<string, ActiveRun>();
-
-const buildStubResponse = (content: string, thread: Thread) => {
-  const normalized = content.trim();
-  return [
-    `Working in ${thread.repoName}.`,
-    `You asked: ${normalized}.`,
-    "This gateway is connected to a stubbed Claw runtime. Replace the runtime adapter when wiring up RunPod.",
-    "I will keep the session warm so you can reconnect quickly.",
-  ];
-};
+const conversationHistory = new Map<string, SDKMessage[]>();
 
 export const clawRuntime = {
-  async ensureSession(threadId: string, repoName: string) {
-    // In the stub runtime we simply ensure metadata exists.
-    const thread = threadService.get(threadId);
-    if (!thread?.remoteSessionId) {
-      threadService.setRemoteSession(threadId, `sess-${repoName}-${threadId}`);
-    }
-  },
-
   async sendMessage(
     threadId: string,
     content: string,
-    messageId: string
+    messageId: string,
+    model?: ModelConfig
   ): Promise<string> {
     const thread = threadService.get(threadId);
-    if (!thread) return;
-
-    await this.ensureSession(threadId, thread.repoName);
+    if (!thread) return "";
 
     await this.stop(threadId);
 
@@ -50,54 +38,106 @@ export const clawRuntime = {
     streamService.publish(threadId, { type: "status", status: "running" });
     messageService.ensureAssistantMessage(threadId, messageId);
 
-    const lines = buildStubResponse(content, thread);
-    const terminalLines = [
-      `cd /workspace/${thread.repoName}`,
-      `# stub runtime processing "${content.slice(0, 48)}"`,
-      "echo \"Streaming partial output...\"",
-    ];
-
-    const active: ActiveRun = { runId: run.id, timers: [], stopped: false };
+    const abortController = new AbortController();
+    const active: ActiveRun = { runId: run.id, abortController, stopped: false };
     activeRuns.set(threadId, active);
 
-    const schedule = (
-      fn: () => void,
-      delay: number
-    ) => {
-      const timer = setTimeout(() => {
-        if (active.stopped) return;
-        fn();
-      }, delay);
-      active.timers.push(timer);
+    const prevMessages = conversationHistory.get(threadId) ?? [];
+
+    const options: Record<string, unknown> = {
+      maxTurns: 10,
     };
 
-    // Emit terminal lines gradually
-    terminalLines.forEach((chunk, index) => {
-      schedule(() => {
-        terminalService.appendChunk(threadId, chunk);
-        streamService.publish(threadId, { type: "terminal", chunk: chunk + "\n" });
-      }, 350 * (index + 1));
-    });
+    if (model?.name) {
+      options.model = model.name;
+    }
+    if (model?.apiKey) {
+      options.apiKey = model.apiKey;
+      if (model.provider === "openrouter") {
+        options.baseURL = "https://openrouter.ai/api/v1";
+      }
+    } else if (process.env.ANTHROPIC_API_KEY) {
+      options.apiKey = process.env.ANTHROPIC_API_KEY;
+    }
 
-    const assembled = lines.map((line, index) => ({
-      delay: 500 * (index + 1),
-      chunk: line + (index === lines.length - 1 ? "" : " "),
-    }));
+    (async () => {
+      try {
+        const newMessages: SDKMessage[] = [];
 
-    assembled.forEach(({ delay, chunk }, idx) => {
-      schedule(() => {
-        messageService.appendAssistantDelta(threadId, messageId, chunk);
-        streamService.publish(threadId, { type: "delta", messageId, chunk });
-        if (idx === assembled.length - 1) {
-          messageService.finalizeAssistant(threadId, messageId);
-          streamService.publish(threadId, { type: "done", messageId });
-          threadService.setStatus(threadId, "idle");
-          runService.markStatus(run.id, "done");
-          streamService.publish(threadId, { type: "status", status: "idle" });
-          activeRuns.delete(threadId);
+        for await (const msg of query({
+          prompt: content,
+          abortController,
+          options,
+          messages: prevMessages.length > 0 ? prevMessages : undefined,
+        })) {
+          if (active.stopped) break;
+          newMessages.push(msg);
+
+          if (msg.type === "assistant") {
+            const content = msg.message.content;
+
+            // Stream text blocks as deltas
+            for (const block of content) {
+              if (block.type === "text" && block.text) {
+                messageService.appendAssistantDelta(threadId, messageId, block.text);
+                streamService.publish(threadId, { type: "delta", messageId, chunk: block.text });
+              }
+            }
+
+            // Emit tool calls as terminal lines
+            for (const block of content) {
+              if (block.type === "tool_use") {
+                const inputStr = JSON.stringify(block.input ?? {});
+                const line = `[${block.name}] ${inputStr.slice(0, 200)}`;
+                terminalService.appendChunk(threadId, line);
+                streamService.publish(threadId, { type: "terminal", chunk: line + "\n" });
+              }
+            }
+          } else if (msg.type === "user") {
+            // Tool results
+            const contentArr = Array.isArray(msg.message.content)
+              ? msg.message.content
+              : [];
+            for (const block of contentArr) {
+              if ((block as any).type === "tool_result") {
+                const inner = (block as any).content;
+                const text = Array.isArray(inner)
+                  ? inner
+                      .filter((c: any) => c.type === "text")
+                      .map((c: any) => c.text)
+                      .join("")
+                  : String(inner ?? "");
+                if (text) {
+                  const trimmed = text.slice(0, 500);
+                  terminalService.appendChunk(threadId, trimmed);
+                  streamService.publish(threadId, { type: "terminal", chunk: trimmed + "\n" });
+                }
+              }
+            }
+          }
         }
-      }, delay);
-    });
+
+        // Persist conversation history for next turn
+        conversationHistory.set(threadId, [...prevMessages, ...newMessages]);
+
+        messageService.finalizeAssistant(threadId, messageId);
+        streamService.publish(threadId, { type: "done", messageId });
+        threadService.setStatus(threadId, "idle");
+        runService.markStatus(run.id, "done");
+        streamService.publish(threadId, { type: "status", status: "idle" });
+      } catch (err: any) {
+        if (!active.stopped) {
+          logger.error({ err, threadId }, "Claude Code runtime error");
+          streamService.publish(threadId, { type: "error", message: err.message ?? "Unknown error" });
+          threadService.setStatus(threadId, "error");
+          runService.markStatus(run.id, "error");
+          streamService.publish(threadId, { type: "status", status: "error" });
+        }
+      } finally {
+        activeRuns.delete(threadId);
+      }
+    })();
+
     return run.id;
   },
 
@@ -108,7 +148,7 @@ export const clawRuntime = {
       return;
     }
     active.stopped = true;
-    active.timers.forEach((timer) => clearTimeout(timer));
+    active.abortController.abort();
     activeRuns.delete(threadId);
     runService.markStatus(active.runId, "stopped");
     threadService.setStatus(threadId, "idle");
@@ -118,5 +158,9 @@ export const clawRuntime = {
 
   async getTerminalLines(threadId: string) {
     return terminalService.getHistory(threadId);
+  },
+
+  clearHistory(threadId: string) {
+    conversationHistory.delete(threadId);
   },
 };

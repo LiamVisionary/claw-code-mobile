@@ -1,7 +1,59 @@
 import * as FileSystem from "expo-file-system/legacy";
-import { fetchEventSource } from "@microsoft/fetch-event-source";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+
+/**
+ * Native XHR-based SSE client — works in React Native (no `document` dependency).
+ * Returns an object with an `abort()` method to close the connection.
+ */
+function openNativeSSE(
+  url: string,
+  headers: Record<string, string>,
+  onMessage: (event: string, data: string) => void,
+  onError: (err: Error) => void
+): { abort: () => void } {
+  const xhr = new XMLHttpRequest();
+  let offset = 0;
+  let currentEvent = "";
+  let dataBuffer = "";
+
+  xhr.open("GET", url, true);
+  xhr.setRequestHeader("Accept", "text/event-stream");
+  xhr.setRequestHeader("Cache-Control", "no-cache");
+  for (const [k, v] of Object.entries(headers)) {
+    xhr.setRequestHeader(k, v);
+  }
+
+  xhr.onreadystatechange = () => {
+    if (xhr.readyState < 3) return;
+    if (xhr.status !== 0 && xhr.status !== 200) {
+      onError(new Error(`SSE status ${xhr.status}`));
+      return;
+    }
+    const newText = xhr.responseText.slice(offset);
+    offset = xhr.responseText.length;
+
+    for (const line of newText.split("\n")) {
+      if (line.startsWith("event: ")) {
+        currentEvent = line.slice(7).trim();
+      } else if (line.startsWith("data: ")) {
+        dataBuffer += (dataBuffer ? "\n" : "") + line.slice(6);
+      } else if (line.startsWith(":")) {
+        // keep-alive comment — ignore
+      } else if (line === "") {
+        if (dataBuffer !== "") {
+          onMessage(currentEvent, dataBuffer);
+          currentEvent = "";
+          dataBuffer = "";
+        }
+      }
+    }
+  };
+
+  xhr.onerror = () => onError(new Error("SSE connection failed"));
+  xhr.send();
+  return { abort: () => xhr.abort() };
+}
 
 const fileStorage = {
   getItem: async (key: string): Promise<string | null> => {
