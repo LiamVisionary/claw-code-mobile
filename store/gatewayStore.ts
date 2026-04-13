@@ -137,6 +137,8 @@ export type ToolStep = {
   status: ToolStepStatus;
   /** Timestamp when the step started */
   startedAt: number;
+  /** The assistant message this step belongs to — used to show steps in the bubble */
+  messageId?: string;
 };
 
 export type PermissionRequest = {
@@ -473,6 +475,7 @@ export const useGatewayStore = create<GatewayState>()(
                     label: payload.label ?? payload.tool ?? "Working…",
                     status: "running",
                     startedAt: Date.now(),
+                    messageId: payload.messageId,
                   };
                   return {
                     toolSteps: {
