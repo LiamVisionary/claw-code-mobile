@@ -179,30 +179,15 @@ function ensureNgrokInstalled() {
 }
 
 function freeExpoPorts() {
+  // Use fuser (available on most Linux) to kill processes on Expo ports
   for (const port of expoPorts) {
-    const list = spawnSync("lsof", ["-ti", `tcp:${port}`], {
+    const result = spawnSync("fuser", ["-k", `${port}/tcp`], {
       env: process.env,
       encoding: "utf8",
     });
-
-    if (list.status !== 0 || !list.stdout.trim()) {
-      continue;
+    if (result.status === 0) {
+      console.log(`[share] Freed port ${port}`);
     }
-
-    const pids = list.stdout
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean);
-
-    if (pids.length === 0) {
-      continue;
-    }
-
-    console.log(`[share] Killing busy port ${port} PID(s): ${pids.join(", ")}`);
-    spawnSync("kill", ["-9", ...pids], {
-      env: process.env,
-      stdio: "inherit",
-    });
   }
 }
 

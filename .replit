@@ -25,13 +25,13 @@ args = "Expo Tunnel"
 name = "Start application"
 author = "agent"
 
+[workflows.workflow.metadata]
+outputType = "webview"
+
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "cd backend && yarn dev"
 waitForPort = 5000
-
-[workflows.workflow.metadata]
-outputType = "webview"
 
 [[workflows.workflow]]
 name = "Expo Tunnel"
@@ -42,7 +42,7 @@ outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "yarn install --ignore-scripts && npx --yes patch-package && (ls node_modules/react-native-screens/package.json 2>/dev/null || (curl -sLo /tmp/rns.tgz https://registry.npmjs.org/react-native-screens/-/react-native-screens-4.16.0.tgz && tar -xzf /tmp/rns.tgz -C /tmp && cp -r /tmp/package node_modules/react-native-screens)) && node_modules/@expo/ngrok/node_modules/.bin/ngrok authtoken $NGROK_AUTHTOKEN && node scripts/start-tunnel-share.mjs"
+args = "bash scripts/setup-and-run.sh"
 
 [[ports]]
 localPort = 5000
@@ -51,6 +51,10 @@ externalPort = 80
 [[ports]]
 localPort = 8081
 externalPort = 8081
+
+[[ports]]
+localPort = 8082
+externalPort = 3001
 
 [deployment]
 deploymentTarget = "autoscale"
