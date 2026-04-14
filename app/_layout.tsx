@@ -7,8 +7,10 @@ import * as AC from "@bacons/apple-colors";
 import { Link } from "expo-router";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import TouchableBounce from "@/components/ui/TouchableBounce";
-import { View } from "react-native";
+import { Appearance, View } from "react-native";
 import { IconSymbol } from "@/components/ui/IconSymbol";
+import { useEffect } from "react";
+import { useGatewayStore } from "@/store/gatewayStore";
 
 export const unstable_settings = {
   initialRouteName: "index",
@@ -17,6 +19,18 @@ export const unstable_settings = {
 export { ErrorBoundary } from "expo-router";
 
 export default function Layout() {
+  const darkMode = useGatewayStore((s) => s.settings.darkMode ?? "system");
+
+  useEffect(() => {
+    if (darkMode === "dark") {
+      Appearance.setColorScheme("dark");
+    } else if (darkMode === "light") {
+      Appearance.setColorScheme("light");
+    } else {
+      Appearance.setColorScheme(null);
+    }
+  }, [darkMode]);
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <BottomSheetModalProvider>
