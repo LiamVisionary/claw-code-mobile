@@ -2,6 +2,8 @@ import * as AC from "@bacons/apple-colors";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   Switch,
   Text,
@@ -395,11 +397,17 @@ export default function SettingsScreen() {
   const enabledCount = queue.filter((e) => e.enabled).length;
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: AC.systemGroupedBackground }}
-      contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 60 }}
-      keyboardShouldPersistTaps="handled"
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 88 : 0}
     >
+      <ScrollView
+        style={{ flex: 1, backgroundColor: AC.systemGroupedBackground }}
+        contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 60 }}
+        keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
+      >
       {/* ── Connection ────────────────────────────────────────── */}
       <View style={cardStyle}>
         <Text style={sectionTitle}>VPS Connection</Text>
@@ -564,7 +572,8 @@ export default function SettingsScreen() {
           </Text>
         </View>
       </TouchableBounce>
-    </ScrollView>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
