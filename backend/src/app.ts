@@ -1,5 +1,6 @@
 import cors from "cors";
 import express from "express";
+import { db } from "./db/sqlite";
 import { applyMigrations } from "./db/schema";
 import { authMiddleware } from "./middleware/auth";
 import { fsRouter } from "./routes/fs";
@@ -13,6 +14,13 @@ import { HttpError } from "./utils/errors";
 import { logger } from "./utils/logger";
 
 applyMigrations();
+
+const stuckCount = db
+  .prepare(`UPDATE threads SET status = 'error' WHERE status IN ('running', 'waiting')`)
+  .run().changes;
+if (stuckCount > 0) {
+  logger.info({ stuckCount }, "Reset stuck threads on startup");
+}
 
 export const app = express();
 
