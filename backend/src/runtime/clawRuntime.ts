@@ -253,7 +253,6 @@ function extractClawError(stdoutBuf: string, stderrBuf: string): string {
 function isContextOverflow(text: string): boolean {
   const lower = text.toLowerCase();
   return (
-    text.includes("/compact") ||
     lower.includes("context_window_blocked") ||
     lower.includes("context window") ||
     lower.includes("contextwindowexceeded") ||
@@ -263,7 +262,8 @@ function isContextOverflow(text: string): boolean {
     lower.includes("prompt is too long") ||
     lower.includes("input is too long") ||
     lower.includes("request is too large") ||
-    (lower.includes("context") && lower.includes("compact"))
+    lower.includes("exceeds the model") ||
+    lower.includes("token limit")
   );
 }
 
