@@ -1,27 +1,27 @@
 [
   {
-    "content": "Investigate current backend architecture and claw binary integration",
-    "activeForm": "Investigating current backend architecture and claw binary integration",
+    "content": "Implement run_prompt_stream_json in Rust CLI that emits NDJSON events in real-time",
+    "activeForm": "Implementing run_prompt_stream_json in Rust CLI",
     "status": "in_progress"
   },
   {
-    "content": "Check if claw has a native streaming/SSE API (Option C)",
-    "activeForm": "Checking if claw has a native streaming/SSE API",
+    "content": "Update run_turn_with_output to dispatch StreamJson to the new method",
+    "activeForm": "Updating run_turn_with_output to dispatch StreamJson",
     "status": "pending"
   },
   {
-    "content": "Check if claw supports NDJSON/streaming JSON output (Option B)",
-    "activeForm": "Checking if claw supports NDJSON streaming output",
+    "content": "Update Node backend to use stream-json format and parse NDJSON line-by-line",
+    "activeForm": "Updating Node backend to use stream-json and parse NDJSON",
     "status": "pending"
   },
   {
-    "content": "Implement real-time tool badges using the best available option",
-    "activeForm": "Implementing real-time tool badges",
+    "content": "Build and test the Rust binary",
+    "activeForm": "Building and testing the Rust binary",
     "status": "pending"
   },
   {
-    "content": "Test the implementation",
-    "activeForm": "Testing the implementation",
+    "content": "Test end-to-end streaming of tool badges and text",
+    "activeForm": "Testing end-to-end streaming",
     "status": "pending"
   }
 ]
