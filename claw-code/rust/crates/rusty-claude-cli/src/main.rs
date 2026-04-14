@@ -374,6 +374,7 @@ enum LocalHelpTopic {
 enum CliOutputFormat {
     Text,
     Json,
+    StreamJson,
 }
 
 impl CliOutputFormat {
@@ -381,8 +382,9 @@ impl CliOutputFormat {
         match value {
             "text" => Ok(Self::Text),
             "json" => Ok(Self::Json),
+            "stream-json" => Ok(Self::StreamJson),
             other => Err(format!(
-                "unsupported value for --output-format: {other} (expected text or json)"
+                "unsupported value for --output-format: {other} (expected text, json, or stream-json)"
             )),
         }
     }

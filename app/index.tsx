@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   FlatList,
   Platform,
   Pressable,
@@ -9,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { useRouter } from "expo-router";
+import { useFocusEffect } from "expo-router";
 import * as AC from "@bacons/apple-colors";
 import ReanimatedSwipeable from "react-native-gesture-handler/ReanimatedSwipeable";
 import Reanimated, {
@@ -99,6 +101,23 @@ export default function ChatListScreen() {
   useEffect(() => {
     if (!_hasHydrated) return;
     actions.loadThreads().catch((err) => setError(err.message));
+  }, [_hasHydrated, actions]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (_hasHydrated) {
+        actions.loadThreads().catch(() => {});
+      }
+    }, [_hasHydrated, actions])
+  );
+
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active" && _hasHydrated) {
+        actions.loadThreads().catch(() => {});
+      }
+    });
+    return () => sub.remove();
   }, [_hasHydrated, actions]);
 
   const sortedThreads = [...threads].sort(
