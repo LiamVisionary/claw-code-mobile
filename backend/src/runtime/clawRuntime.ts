@@ -275,10 +275,16 @@ function isContextOverflow(text: string): boolean {
   const lower = text.toLowerCase();
   return (
     text.includes("/compact") ||
-    text.includes("Compact") ||
-    (lower.includes("context") && lower.includes("compact")) ||
-    lower.includes("context window full") ||
-    lower.includes("context length")
+    lower.includes("context_window_blocked") ||
+    lower.includes("context window") ||
+    lower.includes("contextwindowexceeded") ||
+    lower.includes("context length") ||
+    lower.includes("maximum context length") ||
+    lower.includes("too many tokens") ||
+    lower.includes("prompt is too long") ||
+    lower.includes("input is too long") ||
+    lower.includes("request is too large") ||
+    (lower.includes("context") && lower.includes("compact"))
   );
 }
 
