@@ -95,9 +95,16 @@ Clones `ultraworkers/claw-code` and runs `cargo build`. Takes ~5 min on first ru
 - Claude: `ANTHROPIC_API_KEY`
 - OpenRouter: `OPENAI_API_KEY` + `OPENAI_BASE_URL=https://openrouter.ai/api/v1`
 
+### Auto-Compact
+- When context window is full, backend detects overflow via `isContextOverflow()` matching all Rust API error markers
+- Backend spawns `claw --output-format json --resume <session> /compact` and emits `compact_start` / `compact_end` SSE events
+- `compact_end` includes `removedMessages` and `keptMessages` parsed from claw's JSON output
+- Store tracks `compacting` state per thread; inserts a `role: "system"` message on compact_end
+- UI shows animated "compacting..." label (amber) in ThinkingIndicator; system messages render as subtle centered inline text with hairline dividers
+
 ### SSE Streaming
 - Mobile uses XHR-based SSE (not `@microsoft/fetch-event-source` which requires `document`)
-- Events: `status` | `delta` | `terminal` | `done` | `error`
+- Events: `status` | `delta` | `terminal` | `done` | `error` | `compact_start` | `compact_end`
 
 ### Persistence
 - Settings persisted via `expo-file-system/legacy` (replaces broken AsyncStorage v3)

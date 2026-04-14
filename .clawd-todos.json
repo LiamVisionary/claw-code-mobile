@@ -1,12 +1,17 @@
 [
   {
-    "content": "Understand what claw writes to stderr during --output-format json mode",
-    "activeForm": "Understanding stderr output patterns",
+    "content": "Add --output-format stream-json mode to claw that emits real-time NDJSON events (tool_start, tool_end, delta, done)",
+    "activeForm": "Adding --output-format stream-json to claw",
     "status": "in_progress"
   },
   {
-    "content": "Implement real-time stderr parsing in clawRuntime.ts to emit tool_start/tool_end events during the run",
-    "activeForm": "Implementing real-time stderr parsing",
+    "content": "Implement the streaming JSON renderer in main.rs that hooks into the tool executor and API stream events",
+    "activeForm": "Implementing streaming JSON renderer",
+    "status": "pending"
+  },
+  {
+    "content": "Update clawRuntime.ts to spawn claw with --output-format stream-json and parse the NDJSON events in real-time",
+    "activeForm": "Updating clawRuntime.ts to parse NDJSON",
     "status": "pending"
   },
   {
@@ -15,8 +20,8 @@
     "status": "pending"
   },
   {
-    "content": "Test that tool badges appear in real-time in the UI",
-    "activeForm": "Testing real-time step badges",
+    "content": "Build the claw binary and test end-to-end",
+    "activeForm": "Building and testing",
     "status": "pending"
   }
 ]

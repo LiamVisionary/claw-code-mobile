@@ -45,6 +45,7 @@ export default function ThreadScreen() {
   const terminalMap = useGatewayStore((s) => s.terminal);
   const toolSteps = useGatewayStore((s) => s.toolSteps[id ?? ""] ?? EMPTY_STEPS);
   const rawPermReqs = useGatewayStore((s) => s.permissionRequests[id ?? ""] ?? EMPTY_REQS);
+  const isCompacting = useGatewayStore((s) => s.compacting[id ?? ""] ?? false);
   const permissionReqs = useMemo(
     () => rawPermReqs.filter((r) => r.pending),
     [rawPermReqs]
@@ -296,12 +297,9 @@ export default function ThreadScreen() {
   }, [settings.modelQueue, thread?.title, modelPickerOpen, isDark, headerRight]);
 
   const listFooterElem = useMemo(() => {
-    // Show the bouncing-dot bubble only while waiting for the first assistant
-    // delta. Once the last message is from the assistant, the streaming bubble
-    // is visible and we don't want the indicator stacking below it.
-    // Always show for "waiting" status so permission prompts render.
     const lastMsg = messages[messages.length - 1];
     const needsIndicator =
+      isCompacting ||
       threadStatus === "waiting" ||
       (threadStatus === "running" && (!lastMsg || lastMsg.role === "user"));
     return needsIndicator ? (
@@ -312,9 +310,10 @@ export default function ThreadScreen() {
         onApprove={(permId) => actions.respondToPermission(id ?? "", permId, true)}
         onDeny={(permId) => actions.respondToPermission(id ?? "", permId, false)}
         isDark={isDark}
+        isCompacting={isCompacting}
       />
     ) : null;
-  }, [threadStatus, messages, toolSteps, permissionReqs, actions, id, isDark]);
+  }, [threadStatus, messages, toolSteps, permissionReqs, actions, id, isDark, isCompacting]);
 
   const listFooterComponent = useCallback(() => listFooterElem, [listFooterElem]);
 
@@ -364,7 +363,10 @@ export default function ThreadScreen() {
             flexGrow: 1,
           }}
           onScrollBeginDrag={() => setModelPickerOpen(false)}
-          renderItem={({ item }) => <MessageBubble message={item} threadId={id ?? ""} />}
+          renderItem={({ item }) => item.role === "system"
+            ? <SystemLine message={item} isDark={isDark} />
+            : <MessageBubble message={item} threadId={id ?? ""} />
+          }
           ListFooterComponent={listFooterComponent}
           ListEmptyComponent={() => (
             <View
@@ -727,6 +729,45 @@ function useMarkdownStyles(isDark: boolean) {
       ordered_list_icon:{ color: muted, fontSize: 14, marginRight: 6, marginTop: 2 },
     };
   }, [isDark]);
+}
+
+function SystemLine({ message, isDark }: { message: Message; isDark: boolean }) {
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 6,
+        paddingVertical: 4,
+      }}
+    >
+      <View
+        style={{
+          flex: 1,
+          height: 1,
+          backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)",
+        }}
+      />
+      <Text
+        style={{
+          color: isDark ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.3)",
+          fontSize: 11,
+          fontWeight: "500",
+          fontStyle: "italic",
+        }}
+      >
+        {message.content}
+      </Text>
+      <View
+        style={{
+          flex: 1,
+          height: 1,
+          backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)",
+        }}
+      />
+    </View>
+  );
 }
 
 function MessageBubble({ message, threadId }: { message: Message; threadId: string }) {
@@ -1369,6 +1410,43 @@ function CyclingLabel({ color }: { color: string }) {
   );
 }
 
+function CompactingLabel({ color }: { color: string }) {
+  const op1 = useRef(new Animated.Value(1)).current;
+  const op2 = useRef(new Animated.Value(0.2)).current;
+  const op3 = useRef(new Animated.Value(0.2)).current;
+
+  useEffect(() => {
+    const makePulse = (val: Animated.Value) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(val, { toValue: 1,   duration: 320, useNativeDriver: true }),
+          Animated.timing(val, { toValue: 0.2, duration: 320, useNativeDriver: true }),
+        ])
+      );
+
+    const a1 = makePulse(op1);
+    a1.start();
+    const animRefs: Animated.CompositeAnimation[] = [a1];
+    const t1 = setTimeout(() => { const a = makePulse(op2); a.start(); animRefs.push(a); }, 213);
+    const t2 = setTimeout(() => { const a = makePulse(op3); a.start(); animRefs.push(a); }, 426);
+
+    return () => {
+      animRefs.forEach((a) => a.stop());
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, []);
+
+  return (
+    <Text style={{ color, fontSize: 13, fontWeight: "500" }}>
+      compacting
+      <Animated.Text style={{ opacity: op1 }}>.</Animated.Text>
+      <Animated.Text style={{ opacity: op2 }}>.</Animated.Text>
+      <Animated.Text style={{ opacity: op3 }}>.</Animated.Text>
+    </Text>
+  );
+}
+
 function ThinkingIndicator({
   status,
   toolSteps,
@@ -1376,6 +1454,7 @@ function ThinkingIndicator({
   onApprove,
   onDeny,
   isDark,
+  isCompacting = false,
 }: {
   status: ThreadStatus;
   toolSteps: ToolStep[];
@@ -1383,6 +1462,7 @@ function ThinkingIndicator({
   onApprove: (id: string) => void;
   onDeny: (id: string) => void;
   isDark: boolean;
+  isCompacting?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -1412,8 +1492,10 @@ function ThinkingIndicator({
             paddingVertical: 4,
           }}
         >
-          {/* Cycling phrase + animated dots — always visible */}
-          <CyclingLabel color={dotColor} />
+          {isCompacting
+            ? <CompactingLabel color="#F59E0B" />
+            : <CyclingLabel color={dotColor} />
+          }
 
           {/* Divider between label and badges */}
           {hasBadges && (

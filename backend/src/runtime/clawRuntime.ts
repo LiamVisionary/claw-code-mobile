@@ -128,7 +128,7 @@ function buildCompactArgs(model?: ModelConfig, sessionDir?: string): string[] {
     }
   }
 
-  args.push("--resume", sessionArg, "/compact");
+  args.push("--output-format", "json", "--resume", sessionArg, "/compact");
   return args;
 }
 
@@ -286,6 +286,31 @@ function isContextOverflow(text: string): boolean {
     lower.includes("request is too large") ||
     (lower.includes("context") && lower.includes("compact"))
   );
+}
+
+function parseCompactResult(stdoutBuf: string): { removedMessages: number; keptMessages: number } {
+  try {
+    const trimmed = stdoutBuf.trim();
+    const jsonStart = trimmed.lastIndexOf("{");
+    if (jsonStart !== -1) {
+      const parsed = JSON.parse(trimmed.slice(jsonStart)) as Record<string, unknown>;
+      if (parsed["kind"] === "compact") {
+        return {
+          removedMessages: (parsed["removed_messages"] as number) ?? 0,
+          keptMessages: (parsed["kept_messages"] as number) ?? 0,
+        };
+      }
+    }
+  } catch {}
+  const removedMatch = stdoutBuf.match(/removed\s+(\d+)/i);
+  const keptMatch = stdoutBuf.match(/kept\s+(\d+)/i);
+  if (removedMatch || keptMatch) {
+    return {
+      removedMessages: removedMatch ? parseInt(removedMatch[1], 10) : 0,
+      keptMessages: keptMatch ? parseInt(keptMatch[1], 10) : 0,
+    };
+  }
+  return { removedMessages: 0, keptMessages: 0 };
 }
 
 function formatContextOverflow(): string {
@@ -515,18 +540,21 @@ export const clawRuntime = {
           finalSuccess = true;
         } catch (err: any) {
           if (err.isContextOverflow && autoCompact && !compactAttempted && !active.stopped) {
-            // Compact and retry this same model
             compactAttempted = true;
             emitTerminal(threadId, "↻ Auto-compacting context…");
-            const { succeeded: ok, stopped: cs } = await spawnOnce(
+            streamService.publish(threadId, { type: "compact_start" });
+            const { succeeded: ok, stopped: cs, stdoutBuf: compactOut } = await spawnOnce(
               threadId, "", cwd, sessionDir, model, active, true /* isCompact */
             );
             if (!cs && ok) {
-              emitTerminal(threadId, "✓ Context compacted — retrying your message");
-              i--; // retry same model on next iteration
+              const info = parseCompactResult(compactOut);
+              emitTerminal(threadId, `✓ Context compacted — removed ${info.removedMessages} messages, kept ${info.keptMessages}`);
+              streamService.publish(threadId, { type: "compact_end", ...info });
+              i--;
               continue;
             }
             if (cs) break;
+            streamService.publish(threadId, { type: "compact_end", removedMessages: 0, keptMessages: 0 });
             emitTerminal(threadId, "⚠ Compact failed");
           }
           if (err.isClawError) {
@@ -548,19 +576,22 @@ export const clawRuntime = {
       const errText = extractClawError(stdoutBuf, stderrBuf);
       logger.error({ stderrBuf: stderrBuf.slice(-200), model: label }, "claw attempt failed");
 
-      // Auto-compact on context overflow (non-zero exit)
       if (isContextOverflow(errText) && autoCompact && !compactAttempted && !active.stopped) {
         compactAttempted = true;
         emitTerminal(threadId, "↻ Auto-compacting context…");
-        const { succeeded: ok, stopped: cs } = await spawnOnce(
+        streamService.publish(threadId, { type: "compact_start" });
+        const { succeeded: ok, stopped: cs, stdoutBuf: compactOut } = await spawnOnce(
           threadId, "", cwd, sessionDir, model, active, true /* isCompact */
         );
         if (cs) break;
         if (ok) {
-          emitTerminal(threadId, "✓ Context compacted — retrying your message");
-          i--; // retry same model on next iteration
+          const info = parseCompactResult(compactOut);
+          emitTerminal(threadId, `✓ Context compacted — removed ${info.removedMessages} messages, kept ${info.keptMessages}`);
+          streamService.publish(threadId, { type: "compact_end", ...info });
+          i--;
           continue;
         }
+        streamService.publish(threadId, { type: "compact_end", removedMessages: 0, keptMessages: 0 });
         emitTerminal(threadId, "⚠ Compact failed — trying next model if available");
       }
 
