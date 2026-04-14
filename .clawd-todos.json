@@ -1,27 +1,27 @@
 [
   {
-    "content": "Add --output-format stream-json mode to claw that emits real-time NDJSON events (tool_start, tool_end, delta, done)",
-    "activeForm": "Adding --output-format stream-json to claw",
+    "content": "Implement StreamJson output format for streaming JSON events",
+    "activeForm": "Implementing StreamJson output format for streaming JSON events",
     "status": "in_progress"
   },
   {
-    "content": "Implement the streaming JSON renderer in main.rs that hooks into the tool executor and API stream events",
-    "activeForm": "Implementing streaming JSON renderer",
+    "content": "Add StreamJson arm to run_turn_with_output",
+    "activeForm": "Adding StreamJson arm to run_turn_with_output",
     "status": "pending"
   },
   {
-    "content": "Update clawRuntime.ts to spawn claw with --output-format stream-json and parse the NDJSON events in real-time",
-    "activeForm": "Updating clawRuntime.ts to parse NDJSON",
+    "content": "Add StreamJson arm to main() error handling",
+    "activeForm": "Adding StreamJson arm to main() error handling",
     "status": "pending"
   },
   {
-    "content": "Remove the fake replay delays from processSuccess()",
-    "activeForm": "Removing fake replay delays",
+    "content": "Update all match arms on CliOutputFormat to handle StreamJson",
+    "activeForm": "Updating all match arms on CliOutputFormat to handle StreamJson",
     "status": "pending"
   },
   {
-    "content": "Build the claw binary and test end-to-end",
-    "activeForm": "Building and testing",
+    "content": "Verify the build compiles",
+    "activeForm": "Verifying the build compiles",
     "status": "pending"
   }
 ]

@@ -115,8 +115,8 @@ fn main() {
         let argv: Vec<String> = std::env::args().collect();
         let json_output = argv
             .windows(2)
-            .any(|w| w[0] == "--output-format" && w[1] == "json")
-            || argv.iter().any(|a| a == "--output-format=json");
+            .any(|w| w[0] == "--output-format" && matches!(w[1].as_str(), "json" | "stream-json"))
+            || argv.iter().any(|a| a == "--output-format=json" || a == "--output-format=stream-json");
         if json_output {
             eprintln!(
                 "{}",
