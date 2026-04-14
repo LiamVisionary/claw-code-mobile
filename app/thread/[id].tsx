@@ -3,6 +3,7 @@ import { useFocusEffect } from "expo-router";
 import {
   Animated,
   ActivityIndicator,
+  AppState,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -85,8 +86,12 @@ export default function ThreadScreen() {
   }, [id, actions]);
 
   // Auto-delete empty threads when the user navigates away without sending any messages.
+  // Also refresh thread state on re-focus to catch missed SSE events.
   useFocusEffect(
     useCallback(() => {
+      if (id) {
+        actions.refreshThread(id).catch(() => {});
+      }
       return () => {
         if (!id || !messagesLoaded.current) return;
         const currentMessages = useGatewayStore.getState().messages[id] ?? [];
@@ -96,6 +101,16 @@ export default function ThreadScreen() {
       };
     }, [id, actions])
   );
+
+  // Refresh thread state when app returns from background
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active" && id) {
+        actions.refreshThread(id).catch(() => {});
+      }
+    });
+    return () => sub.remove();
+  }, [id, actions]);
 
   useEffect(() => {
     if (id && !thread) {

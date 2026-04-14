@@ -21,12 +21,14 @@ function openNativeSSE(
   url: string,
   headers: Record<string, string>,
   onMessage: (event: string, data: string) => boolean | void,
-  onError: (err: Error) => void
+  onError: (err: Error) => void,
+  onReconnect?: () => void
 ): { abort: () => void } {
   let aborted = false;
   let completed = false;
   let currentXhr: XMLHttpRequest | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let hasConnectedOnce = false;
 
   function cancelReconnect() {
     if (reconnectTimer !== null) {
@@ -48,6 +50,11 @@ function openNativeSSE(
       currentXhr = null;
       old.abort();
     }
+
+    if (hasConnectedOnce && onReconnect) {
+      onReconnect();
+    }
+    hasConnectedOnce = true;
 
     const xhr = new XMLHttpRequest();
     currentXhr = xhr;
@@ -272,6 +279,7 @@ type GatewayState = {
     setActiveThread: (threadId: string) => void;
     /** Respond to a permission request (approve/deny) */
     respondToPermission: (threadId: string, permissionId: string, approved: boolean) => Promise<void>;
+    refreshThread: (threadId: string) => Promise<void>;
     deleteThread: (threadId: string) => Promise<void>;
     duplicateThread: (threadId: string) => Promise<Thread>;
     updateThreadWorkDir: (threadId: string, workDir: string) => Promise<void>;
@@ -659,7 +667,10 @@ export const useGatewayStore = create<GatewayState>()(
             `${baseUrl}/threads/${threadId}/stream`,
             headers,
             handleMessage,
-            (err) => console.warn("SSE error", err)
+            (err) => console.warn("SSE error", err),
+            () => {
+              get().actions.refreshThread(threadId).catch(() => {});
+            }
           );
 
           set((current) => ({
@@ -709,6 +720,53 @@ export const useGatewayStore = create<GatewayState>()(
             headers,
             body: JSON.stringify({ approved }),
           });
+        },
+
+        refreshThread: async (threadId: string) => {
+          const state = get();
+          let baseUrl: string;
+          let headers: Record<string, string>;
+          try {
+            ({ baseUrl, headers } = getClientConfig(state));
+          } catch {
+            return;
+          }
+          try {
+            const [threadRes, msgRes] = await Promise.all([
+              fetch(`${baseUrl}/threads`, { headers }),
+              fetch(`${baseUrl}/threads/${threadId}/messages`, { headers }),
+            ]);
+            if (threadRes.ok) {
+              const data = await threadRes.json();
+              const freshThread = (data.threads as Thread[]).find((t) => t.id === threadId);
+              if (freshThread) {
+                const isIdle = freshThread.status !== "running" && freshThread.status !== "waiting";
+                set((current) => ({
+                  threads: current.threads.map((t) =>
+                    t.id === threadId ? { ...t, ...freshThread } : t
+                  ),
+                  ...(isIdle ? {
+                    compacting: { ...current.compacting, [threadId]: false },
+                    toolSteps: {
+                      ...current.toolSteps,
+                      [threadId]: (current.toolSteps[threadId] ?? []).map((s) =>
+                        s.status === "running" ? { ...s, status: "done" as ToolStepStatus } : s
+                      ),
+                    },
+                  } : {}),
+                }));
+              }
+            }
+            if (msgRes.ok) {
+              const data = await msgRes.json();
+              set((current) => ({
+                messages: {
+                  ...current.messages,
+                  [threadId]: data.messages as Message[],
+                },
+              }));
+            }
+          } catch {}
         },
 
         deleteThread: async (threadId: string) => {
