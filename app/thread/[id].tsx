@@ -1023,7 +1023,7 @@ function MessageBubble({ message, threadId }: { message: Message; threadId: stri
                 flex: 1,
               }}
             >
-              {message.content}
+              {message.content || "An error occurred — please try again."}
             </Text>
           </View>
         ) : (
