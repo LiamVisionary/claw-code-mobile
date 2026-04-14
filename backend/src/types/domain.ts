@@ -45,4 +45,9 @@ export type StreamEvent =
   | { type: "error"; message: string }
   | { type: "tool_start"; id: string; messageId: string; tool: string; label: string }
   | { type: "tool_end"; id: string; messageId: string; error?: boolean }
-  | { type: "message_error"; messageId: string; text: string };
+  | { type: "message_error"; messageId: string; text: string }
+  | { type: "run_phase"; phase: string }
+  | { type: "compact_start" }
+  | { type: "compact_end"; removedMessages: number; keptMessages: number }
+  | { type: "permission_request"; id: string; tool: string; description: string; message?: string }
+  | { type: "thinking_content"; messageId: string; content: string };

@@ -39,6 +39,13 @@ export const streamService = {
     }
   },
 
+  sendTo(res: Response, event: StreamEvent) {
+    const payload = format(event.type, event);
+    try {
+      res.write(payload);
+    } catch { /* client already gone */ }
+  },
+
   publish(threadId: string, event: StreamEvent) {
     const clients = subscribers.get(threadId);
     if (!clients || clients.size === 0) return;
