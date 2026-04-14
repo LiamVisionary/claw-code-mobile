@@ -250,6 +250,8 @@ type GatewayState = {
   toolSteps: Record<string, ToolStep[]>;
   /** Per-thread pending permission requests */
   permissionRequests: Record<string, PermissionRequest[]>;
+  /** Per-thread compacting state */
+  compacting: Record<string, boolean>;
   streams: Record<string, { abort: () => void } | undefined>;
   loadingThreads: boolean;
   activeThreadId?: string;
@@ -324,6 +326,7 @@ export const useGatewayStore = create<GatewayState>()(
       terminal: {},
       toolSteps: {},
       permissionRequests: {},
+      compacting: {},
       streams: {},
       loadingThreads: false,
       activeThreadId: undefined,
@@ -601,6 +604,30 @@ export const useGatewayStore = create<GatewayState>()(
                           : s
                       ),
                     },
+                  };
+                });
+                break;
+              case "compact_start":
+                set((current) => ({
+                  compacting: { ...current.compacting, [threadId]: true },
+                }));
+                break;
+              case "compact_end":
+                set((current) => {
+                  const removed = payload.removedMessages ?? 0;
+                  const kept = payload.keptMessages ?? 0;
+                  const systemMsg: Message = {
+                    id: `compact-${Date.now()}`,
+                    threadId,
+                    role: "system" as const,
+                    content: removed > 0
+                      ? `Compacted context — removed ${removed} messages, kept ${kept}`
+                      : "Compaction attempted — nothing to remove",
+                    createdAt: new Date().toISOString(),
+                  };
+                  return {
+                    compacting: { ...current.compacting, [threadId]: false },
+                    messages: upsertMessage(current.messages, systemMsg),
                   };
                 });
                 break;
