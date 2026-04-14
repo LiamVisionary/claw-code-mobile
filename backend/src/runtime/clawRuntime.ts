@@ -329,6 +329,9 @@ function friendlyError(raw: string): string {
   if (lower.includes("timeout") || lower.includes("timed out")) {
     return "The request timed out. Please try again.";
   }
+  if (lower.includes("error decoding response body") || lower.includes("hyper::error")) {
+    return "Failed to read the model's response — the connection may have dropped. Please try again.";
+  }
   // Pass through short plain-text messages; truncate long ones
   if (raw.length <= 200) return raw;
   return raw.slice(0, 200) + "…";
