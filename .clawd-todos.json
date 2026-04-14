@@ -12,12 +12,12 @@
   {
     "content": "Emit real-time TextDelta/ThinkingDelta/ToolStart/ToolEnd events to stderr from consume_stream",
     "activeForm": "Implementing real-time stderr streaming in Rust consume_stream",
-    "status": "in_progress"
+    "status": "completed"
   },
   {
     "content": "Update clawRuntime.ts to parse real-time streaming events from stderr",
     "activeForm": "Updating TS backend to parse new stderr event types",
-    "status": "pending"
+    "status": "in_progress"
   },
   {
     "content": "Build and test the changes",

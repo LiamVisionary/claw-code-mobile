@@ -33,6 +33,12 @@ type ActiveRun = {
   stopped: boolean;
   /** Tool step IDs already emitted in real-time from stderr, so processSuccess can skip them. */
   realtimeStepIds: Set<string>;
+  /** True when we've received at least one [stream] text_delta event from stderr,
+   *  meaning the response text was streamed in real-time and processSuccess should
+   *  NOT re-stream it via streamWords. */
+  streamedText: boolean;
+  /** Accumulated thinking content from real-time [stream] thinking_delta events. */
+  streamedThinking: string;
 };
 
 type SpawnResult = {

@@ -997,9 +997,6 @@ function MessageBubble({ message, threadId }: { message: Message; threadId: stri
           <View
             style={{
               maxWidth: "92%",
-              flexDirection: "row",
-              alignItems: "flex-start",
-              gap: 8,
               backgroundColor: isDark ? "rgba(239,68,68,0.10)" : "rgba(239,68,68,0.07)",
               borderRadius: BORDER_RADIUS.lg,
               borderWidth: 1,
@@ -1009,24 +1006,25 @@ function MessageBubble({ message, threadId }: { message: Message; threadId: stri
               ...SHADOW.sm,
             }}
           >
-            <IconSymbol
-              name="exclamationmark.triangle.fill"
-              size={14}
-              color="#EF4444"
-              style={{ marginTop: 3 }}
-            />
-            <Text
-              selectable
-              style={{
-                color: isDark ? "#FCA5A5" : "#B91C1C",
-                fontSize: TYPOGRAPHY.fontSizes.sm,
-                lineHeight: TYPOGRAPHY.lineHeights.md,
-                flexShrink: 1,
-                flexGrow: 1,
-              }}
-            >
-              {(message.content || "An error occurred — please try again.").slice(0, 500)}
-            </Text>
+            <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
+              <IconSymbol
+                name="exclamationmark.triangle.fill"
+                size={14}
+                color="#EF4444"
+                style={{ marginTop: 3 }}
+              />
+              <Text
+                selectable
+                style={{
+                  color: isDark ? "#FCA5A5" : "#B91C1C",
+                  fontSize: TYPOGRAPHY.fontSizes.sm,
+                  lineHeight: TYPOGRAPHY.lineHeights.md,
+                  flex: 1,
+                }}
+              >
+                {(message.content || "An error occurred — please try again.").slice(0, 500)}
+              </Text>
+            </View>
           </View>
         ) : (
           /* ── Normal bubble ── */

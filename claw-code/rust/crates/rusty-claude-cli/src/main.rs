@@ -6922,6 +6922,11 @@ impl AnthropicRuntimeClient {
         } else {
             &mut sink
         };
+        // When emit_output is off (--output-format json mode), emit real-time
+        // streaming events to stderr as NDJSON lines prefixed with [stream].
+        // This lets the TS backend show text/thinking/tools as they happen
+        // instead of waiting for the full JSON blob on stdout at the end.
+        let stream_stderr = !self.emit_output;
         let renderer = TerminalRenderer::new();
         let mut markdown_stream = MarkdownStreamState::default();
         let mut events = Vec::new();
@@ -6979,6 +6984,9 @@ impl AnthropicRuntimeClient {
                 ApiStreamEvent::ContentBlockDelta(delta) => match delta.delta {
                     ContentBlockDelta::TextDelta { text } => {
                         if !text.is_empty() {
+                            if stream_stderr {
+                                eprintln!("[stream]{{\"type\":\"text_delta\",\"text\":{}}}", serde_json::to_string(&text).unwrap_or_default());
+                            }
                             if let Some(progress_reporter) = &self.progress_reporter {
                                 progress_reporter.mark_text_phase(&text);
                             }
@@ -6995,7 +7003,10 @@ impl AnthropicRuntimeClient {
                             input.push_str(&partial_json);
                         }
                     }
-                    ContentBlockDelta::ThinkingDelta { .. } => {
+                    ContentBlockDelta::ThinkingDelta { thinking } => {
+                        if stream_stderr {
+                            eprintln!("[stream]{{\"type\":\"thinking_delta\",\"thinking\":{}}}", serde_json::to_string(&thinking).unwrap_or_default());
+                        }
                         if !block_has_thinking_summary {
                             render_thinking_block_summary(out, None, false)?;
                             block_has_thinking_summary = true;
@@ -7011,6 +7022,12 @@ impl AnthropicRuntimeClient {
                             .map_err(|error| RuntimeError::new(error.to_string()))?;
                     }
                     if let Some((id, name, input)) = pending_tool.take() {
+                        if stream_stderr {
+                            eprintln!("[stream]{{\"type\":\"tool_start\",\"id\":{},\"name\":{},\"input\":{}}}", 
+                                serde_json::to_string(&id).unwrap_or_default(),
+                                serde_json::to_string(&name).unwrap_or_default(),
+                                serde_json::to_string(&input).unwrap_or_default());
+                        }
                         if let Some(progress_reporter) = &self.progress_reporter {
                             progress_reporter.mark_tool_phase(&name, &input);
                         }
