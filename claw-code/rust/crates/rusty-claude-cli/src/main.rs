@@ -58,10 +58,19 @@ use tools::{
 
 const DEFAULT_MODEL: &str = "claude-opus-4-6";
 fn max_tokens_for_model(model: &str) -> u32 {
+    if let Ok(val) = env::var("CLAW_MAX_TOKENS") {
+        if let Ok(n) = val.parse::<u32>() {
+            return n;
+        }
+    }
     if model.contains("opus") {
         32_000
-    } else {
+    } else if model.contains("sonnet") || model.contains("haiku") || model.contains("claude") {
         64_000
+    } else if model.contains("grok") {
+        64_000
+    } else {
+        16_000
     }
 }
 // Build-time constants injected by build.rs (fall back to static values when
