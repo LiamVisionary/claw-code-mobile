@@ -1,12 +1,22 @@
 [
   {
-    "content": "Fix assistant running indicator - move to top, show below most recent message",
-    "activeForm": "Fixing assistant running indicator",
+    "content": "Understand what claw writes to stderr during --output-format json mode",
+    "activeForm": "Understanding stderr output patterns",
     "status": "in_progress"
   },
   {
-    "content": "Verify build compiles without errors",
-    "activeForm": "Verifying build",
+    "content": "Implement real-time stderr parsing in clawRuntime.ts to emit tool_start/tool_end events during the run",
+    "activeForm": "Implementing real-time stderr parsing",
+    "status": "pending"
+  },
+  {
+    "content": "Remove the fake replay delays from processSuccess()",
+    "activeForm": "Removing fake replay delays",
+    "status": "pending"
+  },
+  {
+    "content": "Test that tool badges appear in real-time in the UI",
+    "activeForm": "Testing real-time step badges",
     "status": "pending"
   }
 ]
