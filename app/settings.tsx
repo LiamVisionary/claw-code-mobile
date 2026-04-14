@@ -1,5 +1,5 @@
 import * as AC from "@bacons/apple-colors";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Animated,
   KeyboardAvoidingView,
@@ -300,7 +300,7 @@ function AddModelForm({
 // ─── Main Screen ─────────────────────────────────────────────────────────────
 
 export default function SettingsScreen() {
-  const { settings } = useGatewayStore();
+  const { settings, _hasHydrated } = useGatewayStore();
   const actions = useGatewayStore((s) => s.actions);
 
   const [serverUrl, setServerUrl] = useState(settings.serverUrl);
@@ -311,30 +311,27 @@ export default function SettingsScreen() {
   const [streamingEnabled, setStreamingEnabled] = useState(settings.streamingEnabled ?? true);
   const [saved, setSaved] = useState(false);
 
-  // Build initial queue: use stored queue, or migrate from legacy single model
-  const initialQueue = useMemo<ModelEntry[]>(() => {
-    if (settings.modelQueue && settings.modelQueue.length > 0) return settings.modelQueue;
-    if (settings.model) {
-      return [
-        {
-          id: makeId(),
-          provider: settings.model.provider,
-          name: settings.model.name,
-          apiKey: settings.model.apiKey,
-          enabled: true,
-        },
-      ];
+  const buildQueue = (s: typeof settings): ModelEntry[] => {
+    if (s.modelQueue && s.modelQueue.length > 0) return s.modelQueue;
+    if (s.model) {
+      return [{ id: makeId(), provider: s.model.provider, name: s.model.name, apiKey: s.model.apiKey, enabled: true }];
     }
     return [];
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  };
 
-  const [queue, setQueue] = useState<ModelEntry[]>(initialQueue);
+  const [queue, setQueue] = useState<ModelEntry[]>(() => buildQueue(settings));
 
+  // Once the store finishes reading from disk, sync all local fields.
+  // This handles the case where the settings screen mounts before hydration completes.
   useEffect(() => {
+    if (!_hasHydrated) return;
     setServerUrl(settings.serverUrl);
     setBearerToken(settings.bearerToken);
-  }, [settings.serverUrl, settings.bearerToken]);
+    setAutoCompact(settings.autoCompact ?? true);
+    setStreamingEnabled(settings.streamingEnabled ?? true);
+    setQueue(buildQueue(settings));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [_hasHydrated]);
 
   const save = () => {
     actions.setSettings({

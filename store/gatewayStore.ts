@@ -739,8 +739,8 @@ export const useGatewayStore = create<GatewayState>()(
       name: "gateway-settings",
       storage: createJSONStorage(() => fileStorage),
       partialize: (state) => ({ settings: state.settings }),
-      onRehydrateStorage: () => (state) => {
-        if (state) state._hasHydrated = true;
+      onRehydrateStorage: () => () => {
+        useGatewayStore.setState({ _hasHydrated: true });
       },
     }
   )
