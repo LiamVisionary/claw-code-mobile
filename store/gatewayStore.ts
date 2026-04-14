@@ -253,6 +253,8 @@ type GatewayState = {
   streams: Record<string, { abort: () => void } | undefined>;
   loadingThreads: boolean;
   activeThreadId?: string;
+  /** True once zustand-persist has finished rehydrating settings from disk */
+  _hasHydrated: boolean;
   actions: {
     setSettings: (input: Omit<Settings, "modelQueue" | "autoCompact" | "streamingEnabled"> & { modelQueue?: ModelEntry[]; autoCompact?: boolean; streamingEnabled?: boolean }) => void;
     loadThreads: () => Promise<void>;
@@ -325,6 +327,7 @@ export const useGatewayStore = create<GatewayState>()(
       streams: {},
       loadingThreads: false,
       activeThreadId: undefined,
+      _hasHydrated: false,
       actions: {
         setSettings: (input) =>
           set((state) => ({
@@ -736,6 +739,9 @@ export const useGatewayStore = create<GatewayState>()(
       name: "gateway-settings",
       storage: createJSONStorage(() => fileStorage),
       partialize: (state) => ({ settings: state.settings }),
+      onRehydrateStorage: () => (state) => {
+        if (state) state._hasHydrated = true;
+      },
     }
   )
 );
