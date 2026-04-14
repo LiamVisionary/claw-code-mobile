@@ -1,22 +1,27 @@
 [
   {
-    "content": "Investigate claw binary's streaming capabilities (Option C)",
-    "activeForm": "Investigating claw binary's streaming capabilities",
+    "content": "Investigate why tool badges don't appear in real-time",
+    "activeForm": "Investigating why tool badges don't appear in real-time",
     "status": "completed"
   },
   {
-    "content": "Investigate NDJSON/streaming JSON support (Option B)",
-    "activeForm": "Investigating NDJSON streaming support",
+    "content": "Investigate why thinking tokens don't stream in real-time",
+    "activeForm": "Investigating why thinking tokens don't stream in real-time",
     "status": "completed"
   },
   {
-    "content": "Implement Option A: parse stderr for real-time tool badges",
-    "activeForm": "Implementing stderr real-time parsing for tool badges",
+    "content": "Emit real-time TextDelta/ThinkingDelta/ToolStart/ToolEnd events to stderr from consume_stream",
+    "activeForm": "Implementing real-time stderr streaming in Rust consume_stream",
     "status": "in_progress"
   },
   {
-    "content": "Test the implementation",
-    "activeForm": "Testing the implementation",
+    "content": "Update clawRuntime.ts to parse real-time streaming events from stderr",
+    "activeForm": "Updating TS backend to parse new stderr event types",
+    "status": "pending"
+  },
+  {
+    "content": "Build and test the changes",
+    "activeForm": "Building and testing the changes",
     "status": "pending"
   }
 ]

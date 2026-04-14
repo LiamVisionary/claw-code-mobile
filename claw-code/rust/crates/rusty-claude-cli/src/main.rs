@@ -6659,9 +6659,13 @@ fn build_runtime_with_plugin_state(
         system_prompt,
         &feature_config,
     );
-    if emit_output {
-        runtime = runtime.with_hook_progress_reporter(Box::new(CliHookProgressReporter));
-    }
+    // Always attach the hook progress reporter so that tool lifecycle events
+    // are emitted to stderr in real-time, even in --output-format json mode.
+    // The reporter only writes to stderr (eprintln!), so it never corrupts
+    // the JSON blob on stdout.  The backend's clawRuntime.ts parses these
+    // [hook ...] lines to emit tool_start / tool_end SSE events while the
+    // claw process is still running.
+    runtime = runtime.with_hook_progress_reporter(Box::new(CliHookProgressReporter));
     Ok(BuiltRuntime::new(runtime, plugin_registry, mcp_state))
 }
 

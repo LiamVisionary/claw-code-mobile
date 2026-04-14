@@ -1016,14 +1016,16 @@ function MessageBubble({ message, threadId }: { message: Message; threadId: stri
               style={{ marginTop: 3 }}
             />
             <Text
+              selectable
               style={{
                 color: isDark ? "#FCA5A5" : "#B91C1C",
                 fontSize: TYPOGRAPHY.fontSizes.sm,
                 lineHeight: TYPOGRAPHY.lineHeights.md,
-                flex: 1,
+                flexShrink: 1,
+                flexGrow: 1,
               }}
             >
-              {message.content || "An error occurred — please try again."}
+              {(message.content || "An error occurred — please try again.").slice(0, 500)}
             </Text>
           </View>
         ) : (
