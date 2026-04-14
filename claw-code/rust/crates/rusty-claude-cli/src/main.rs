@@ -8127,6 +8127,23 @@ fn permission_policy(
     ))
 }
 
+const TOOL_RESULT_CHAR_LIMIT: usize = 16_000;
+
+fn truncate_tool_result(output: &str) -> String {
+    if output.len() <= TOOL_RESULT_CHAR_LIMIT {
+        return output.to_string();
+    }
+    let half = TOOL_RESULT_CHAR_LIMIT / 2;
+    let head: String = output.chars().take(half).collect();
+    let tail: String = {
+        let chars: Vec<char> = output.chars().collect();
+        let start = chars.len().saturating_sub(half);
+        chars[start..].iter().collect()
+    };
+    let omitted = output.len() - head.len() - tail.len();
+    format!("{head}\n\n… [{omitted} characters omitted] …\n\n{tail}")
+}
+
 fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMessage> {
     messages
         .iter()
@@ -8154,7 +8171,7 @@ fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMessage> {
                     } => InputContentBlock::ToolResult {
                         tool_use_id: tool_use_id.clone(),
                         content: vec![ToolResultContentBlock::Text {
-                            text: output.clone(),
+                            text: truncate_tool_result(output),
                         }],
                         is_error: *is_error,
                     },
