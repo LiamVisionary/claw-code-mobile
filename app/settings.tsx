@@ -471,66 +471,6 @@ export default function SettingsScreen() {
           Models are tried top-to-bottom, automatically falling back if one fails.
         </Text>
 
-        {/* Auto-compact toggle */}
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            backgroundColor: AC.systemBackground,
-            borderRadius: 12,
-            borderWidth: 1,
-            borderColor: AC.separator,
-            paddingHorizontal: 14,
-            paddingVertical: 12,
-            gap: 12,
-          }}
-        >
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: AC.label, fontSize: 15, fontWeight: "600" }}>
-              Auto-compact
-            </Text>
-            <Text style={{ color: AC.secondaryLabel, fontSize: 13, marginTop: 2 }}>
-              Automatically summarise the conversation when the context window fills up and retry
-            </Text>
-          </View>
-          <Switch
-            value={autoCompact}
-            onValueChange={setAutoCompact}
-            trackColor={{ true: AC.systemGreen as string, false: AC.systemGray4 as string }}
-            thumbColor="#fff"
-          />
-        </View>
-
-        {/* Stream responses toggle */}
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            backgroundColor: AC.systemBackground,
-            borderRadius: 12,
-            borderWidth: 1,
-            borderColor: AC.separator,
-            paddingHorizontal: 14,
-            paddingVertical: 12,
-            gap: 12,
-          }}
-        >
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: AC.label, fontSize: 15, fontWeight: "600" }}>
-              Stream responses
-            </Text>
-            <Text style={{ color: AC.secondaryLabel, fontSize: 13, marginTop: 2 }}>
-              Show words appearing as they arrive — turn off to display the full reply instantly
-            </Text>
-          </View>
-          <Switch
-            value={streamingEnabled}
-            onValueChange={setStreamingEnabled}
-            trackColor={{ true: AC.systemBlue as string, false: AC.systemGray4 as string }}
-            thumbColor="#fff"
-          />
-        </View>
-
         {queue.length === 0 && (
           <View
             style={{
@@ -562,6 +502,47 @@ export default function SettingsScreen() {
         ))}
 
         <AddModelForm existingEntries={queue} onAdd={addEntry} />
+      </View>
+
+      {/* ── Behaviour ─────────────────────────────────────────── */}
+      <View style={cardStyle}>
+        <Text style={sectionTitle}>Behaviour</Text>
+
+        {/* Auto-compact toggle */}
+        <View style={toggleRowStyle}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: AC.label, fontSize: 15, fontWeight: "600" }}>
+              Auto-compact
+            </Text>
+            <Text style={{ color: AC.secondaryLabel, fontSize: 13, marginTop: 2 }}>
+              Summarise the conversation when the context window fills up and retry automatically
+            </Text>
+          </View>
+          <Switch
+            value={autoCompact}
+            onValueChange={setAutoCompact}
+            trackColor={{ true: AC.systemGreen as string, false: AC.systemGray4 as string }}
+            thumbColor="#fff"
+          />
+        </View>
+
+        {/* Stream responses toggle */}
+        <View style={toggleRowStyle}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: AC.label, fontSize: 15, fontWeight: "600" }}>
+              Stream responses
+            </Text>
+            <Text style={{ color: AC.secondaryLabel, fontSize: 13, marginTop: 2 }}>
+              Show words appearing as they arrive — turn off to display the full reply instantly
+            </Text>
+          </View>
+          <Switch
+            value={streamingEnabled}
+            onValueChange={setStreamingEnabled}
+            trackColor={{ true: AC.systemBlue as string, false: AC.systemGray4 as string }}
+            thumbColor="#fff"
+          />
+        </View>
       </View>
 
       {/* ── Save ──────────────────────────────────────────────── */}
@@ -609,4 +590,16 @@ const buttonStyle = {
   borderRadius: 14,
   paddingVertical: 13,
   alignItems: "center",
+} as const;
+
+const toggleRowStyle = {
+  flexDirection: "row",
+  alignItems: "center",
+  backgroundColor: AC.systemBackground,
+  borderRadius: 12,
+  borderWidth: 1,
+  borderColor: AC.separator,
+  paddingHorizontal: 14,
+  paddingVertical: 12,
+  gap: 12,
 } as const;
