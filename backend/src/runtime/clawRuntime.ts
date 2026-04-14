@@ -261,9 +261,6 @@ function parseHookEvent(
   const toolName = hookMatch[3];
   const command = hookMatch[4] ?? "";
 
-  // Only care about tool-related hooks (not PostToolUseFailure)
-  if (hookPhase !== "PreToolUse" && hookPhase !== "PostToolUse") return;
-
   if (hookPhase === "PreToolUse" && !doneOrCancelled) {
     // Tool is about to start executing → emit tool_start
     const stepId = `step-${toolName}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -277,14 +274,31 @@ function parseHookEvent(
     });
     openSteps.set(toolName, stepId);
     active.realtimeStepIds.add(stepId);
-  } else if (hookPhase === "PostToolUse" && (doneOrCancelled === "done" || doneOrCancelled === "cancelled")) {
-    // Tool finished → emit tool_end
+  } else if (
+    (hookPhase === "PostToolUse" && (doneOrCancelled === "done" || doneOrCancelled === "cancelled")) ||
+    (hookPhase === "PostToolUseFailure" && (doneOrCancelled === "done" || doneOrCancelled === "cancelled"))
+  ) {
+    // Tool finished (or failed) → emit tool_end
+    const stepId = openSteps.get(toolName);
+    if (stepId) {
+      const isError = hookPhase === "PostToolUseFailure" || doneOrCancelled === "cancelled";
+      streamService.publish(threadId, {
+        type: "tool_end",
+        id: stepId,
+        messageId,
+        ...(isError ? { error: true } : {}),
+      });
+      openSteps.delete(toolName);
+    }
+  } else if (hookPhase === "PreToolUse" && doneOrCancelled === "cancelled") {
+    // PreToolUse hook cancelled the tool — close the running step with error
     const stepId = openSteps.get(toolName);
     if (stepId) {
       streamService.publish(threadId, {
         type: "tool_end",
         id: stepId,
         messageId,
+        error: true,
       });
       openSteps.delete(toolName);
     }
@@ -404,6 +418,9 @@ function friendlyError(raw: string): string {
   }
   if (lower.includes("invalid api key") || lower.includes("unauthorized") || lower.includes("401")) {
     return "Invalid API key. Please check your API key in Settings.";
+  }
+  if (lower.includes("402") || lower.includes("payment required") || lower.includes("more credits") || lower.includes("can only afford")) {
+    return "Insufficient API credits. Please add credits to your OpenRouter account and try again.";
   }
   if (lower.includes("context length") || lower.includes("context window")) {
     return formatContextOverflow();
