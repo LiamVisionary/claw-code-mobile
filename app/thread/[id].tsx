@@ -9,6 +9,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   Text,
   TextInput,
   View,
@@ -312,6 +313,12 @@ export default function ThreadScreen() {
     });
   }, [settings.modelQueue, thread?.title, modelPickerOpen, isDark, headerRight]);
 
+  const liveThinking = useMemo(() => {
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg?.role === "assistant" && lastMsg.thinking) return lastMsg.thinking;
+    return "";
+  }, [messages]);
+
   const listFooterElem = useMemo(() => {
     const lastMsg = messages[messages.length - 1];
     const phaseActive = runPhase !== "idle";
@@ -330,9 +337,10 @@ export default function ThreadScreen() {
         isDark={isDark}
         isCompacting={isCompacting}
         runPhase={runPhase}
+        thinkingContent={liveThinking}
       />
     ) : null;
-  }, [threadStatus, messages, toolSteps, permissionReqs, actions, id, isDark, isCompacting, runPhase]);
+  }, [threadStatus, messages, toolSteps, permissionReqs, actions, id, isDark, isCompacting, runPhase, liveThinking]);
 
   const listFooterComponent = useCallback(() => listFooterElem, [listFooterElem]);
 
@@ -1512,6 +1520,7 @@ function ThinkingIndicator({
   isDark,
   isCompacting = false,
   runPhase = "idle",
+  thinkingContent = "",
 }: {
   status: ThreadStatus;
   toolSteps: ToolStep[];
@@ -1521,26 +1530,36 @@ function ThinkingIndicator({
   isDark: boolean;
   isCompacting?: boolean;
   runPhase?: string;
+  thinkingContent?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [thinkingExpanded, setThinkingExpanded] = useState(false);
 
   const runningStep  = toolSteps.find((s) => s.status === "running") ?? null;
   const finishedSteps = toolSteps.filter((s) => s.status !== "running");
-  // Compact badge row: all finished steps + the running one at the end
   const badgeSteps   = runningStep ? [...finishedSteps, runningStep] : finishedSteps;
   const MAX_VISIBLE  = 8;
   const visibleBadges = badgeSteps.slice(-MAX_VISIBLE);
   const hiddenCount   = Math.max(0, badgeSteps.length - MAX_VISIBLE);
   const hasBadges    = badgeSteps.length > 0;
+  const hasThinking  = thinkingContent.length > 0;
   const dotColor     = isDark ? "rgba(255,255,255,0.45)" : "rgba(0,0,0,0.35)";
   const bubbleBg     = isDark ? "#1c1c1e" : "#fff";
   const bubbleBorder = isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.08)";
+  const tappable     = hasBadges || hasThinking;
 
   return (
     <View style={{ gap: 6, paddingTop: SPACING.xs }}>
 
       {/* ── Compact inline label + badges ────────────────── */}
-      <TouchableBounce sensory onPress={hasBadges ? () => setExpanded((v) => !v) : undefined}>
+      <TouchableBounce sensory onPress={tappable ? () => {
+        if (hasThinking && !hasBadges) {
+          setThinkingExpanded((v) => !v);
+        } else {
+          setExpanded((v) => !v);
+          if (!expanded && hasThinking) setThinkingExpanded(true);
+        }
+      } : undefined}>
         <View
           style={{
             alignSelf: "flex-start",
@@ -1557,12 +1576,18 @@ function ThinkingIndicator({
               : <CyclingLabel color={dotColor} />
           }
 
-          {/* Divider between label and badges */}
+          {hasThinking && !hasBadges && (
+            <IconSymbol
+              name={thinkingExpanded ? "chevron.up" : "chevron.down"}
+              size={9}
+              color={dotColor}
+            />
+          )}
+
           {hasBadges && (
             <View style={{ width: 1, height: 14, backgroundColor: dotColor, opacity: 0.25, marginHorizontal: 1 }} />
           )}
 
-          {/* One icon badge per completed/running step */}
           {visibleBadges.map((step) => {
             const meta      = TOOL_META[step.tool] ?? TOOL_META.unknown;
             const isRunning = step.status === "running";
@@ -1585,7 +1610,6 @@ function ThinkingIndicator({
             );
           })}
 
-          {/* Overflow count badge */}
           {hiddenCount > 0 && (
             <View
               style={{
@@ -1600,7 +1624,6 @@ function ThinkingIndicator({
             </View>
           )}
 
-          {/* Expand toggle */}
           {hasBadges && (
             <IconSymbol
               name={expanded ? "chevron.up" : "chevron.down"}
@@ -1665,6 +1688,34 @@ function ThinkingIndicator({
         </View>
       )}
 
+
+      {/* ── Live thinking content (expandable) ─────────────── */}
+      {thinkingExpanded && hasThinking && (
+        <View
+          style={{
+            backgroundColor: isDark ? "rgba(20,184,166,0.06)" : "rgba(20,184,166,0.04)",
+            borderRadius: BORDER_RADIUS.lg,
+            borderWidth: 1,
+            borderColor: isDark ? "rgba(20,184,166,0.18)" : "rgba(20,184,166,0.12)",
+            paddingHorizontal: 12,
+            paddingVertical: 10,
+            maxHeight: 200,
+          }}
+        >
+          <ScrollView showsVerticalScrollIndicator={false}>
+            <Text
+              style={{
+                color: isDark ? "rgba(255,255,255,0.50)" : "rgba(0,0,0,0.45)",
+                fontSize: 12,
+                lineHeight: 18,
+                fontStyle: "italic",
+              }}
+            >
+              {thinkingContent}
+            </Text>
+          </ScrollView>
+        </View>
+      )}
 
       {/* ── Permission request cards ───────────────────────── */}
       {permissionRequests.map((req) => {
