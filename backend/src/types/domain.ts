@@ -20,6 +20,7 @@ export interface Message {
   role: MessageRole;
   content: string;
   createdAt: string;
+  error?: boolean;
 }
 
 export type RunStatus = "running" | "done" | "stopped" | "error";
