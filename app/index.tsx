@@ -89,7 +89,7 @@ function RightActions({
 
 export default function ChatListScreen() {
   const router = useRouter();
-  const { threads, loadingThreads } = useGatewayStore();
+  const { threads, loadingThreads, _hasHydrated } = useGatewayStore();
   const actions = useGatewayStore((s) => s.actions);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -97,8 +97,9 @@ export default function ChatListScreen() {
   const { bottom } = useSafeAreaInsets();
 
   useEffect(() => {
+    if (!_hasHydrated) return;
     actions.loadThreads().catch((err) => setError(err.message));
-  }, [actions]);
+  }, [_hasHydrated, actions]);
 
   const sortedThreads = [...threads].sort(
     (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
@@ -186,7 +187,7 @@ export default function ChatListScreen() {
           </Text>
         )}
 
-        {loadingThreads ? (
+        {!_hasHydrated || loadingThreads ? (
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
             <ActivityIndicator />
           </View>
