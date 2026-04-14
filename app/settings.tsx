@@ -309,6 +309,7 @@ export default function SettingsScreen() {
   const [connMessage, setConnMessage] = useState<string | null>(null);
   const [autoCompact, setAutoCompact] = useState(settings.autoCompact ?? true);
   const [streamingEnabled, setStreamingEnabled] = useState(settings.streamingEnabled ?? true);
+  const [darkMode, setDarkMode] = useState<"system" | "light" | "dark">(settings.darkMode ?? "system");
   const [saved, setSaved] = useState(false);
 
   const buildQueue = (s: typeof settings): ModelEntry[] => {
@@ -329,6 +330,7 @@ export default function SettingsScreen() {
     setBearerToken(settings.bearerToken);
     setAutoCompact(settings.autoCompact ?? true);
     setStreamingEnabled(settings.streamingEnabled ?? true);
+    setDarkMode(settings.darkMode ?? "system");
     setQueue(buildQueue(settings));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [_hasHydrated]);
@@ -340,6 +342,7 @@ export default function SettingsScreen() {
       modelQueue: queue,
       autoCompact,
       streamingEnabled,
+      darkMode,
     });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
@@ -436,6 +439,55 @@ export default function SettingsScreen() {
             {connMessage}
           </Text>
         )}
+      </View>
+
+      {/* ── Appearance ───────────────────────────────────────────── */}
+      <View style={cardStyle}>
+        <Text style={sectionTitle}>Appearance</Text>
+
+        <View style={{ flexDirection: "row", gap: 6 }}>
+          {([
+            { key: "system" as const, label: "System", icon: "⚙️" },
+            { key: "light" as const, label: "Light", icon: "☀️" },
+            { key: "dark" as const, label: "Dark", icon: "🌙" },
+          ]).map((opt) => (
+            <TouchableBounce
+              key={opt.key}
+              sensory
+              onPress={() => setDarkMode(opt.key)}
+              style={{ flex: 1 }}
+            >
+              <View
+                style={{
+                  paddingVertical: 8,
+                  borderRadius: 10,
+                  alignItems: "center",
+                  backgroundColor: darkMode === opt.key ? AC.label : AC.systemGray6,
+                  borderWidth: 1,
+                  borderColor: darkMode === opt.key ? AC.label : AC.separator,
+                }}
+              >
+                <Text
+                  style={{
+                    fontSize: 13,
+                    fontWeight: "700",
+                    color: darkMode === opt.key ? AC.systemBackground : AC.secondaryLabel,
+                  }}
+                >
+                  {opt.icon} {opt.label}
+                </Text>
+              </View>
+            </TouchableBounce>
+          ))}
+        </View>
+
+        <Text style={{ color: AC.secondaryLabel, fontSize: 13 }}>
+          {darkMode === "system"
+            ? "Follows your device's appearance setting automatically"
+            : darkMode === "dark"
+            ? "Always use dark background with light text"
+            : "Always use light background with dark text"}
+        </Text>
       </View>
 
       {/* ── Model Queue ───────────────────────────────────────── */}

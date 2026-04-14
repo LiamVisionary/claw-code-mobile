@@ -802,6 +802,7 @@ function MessageBubble({ message, threadId }: { message: Message; threadId: stri
   const [copied, setCopied] = useState(false);
   const [stepsExpanded, setStepsExpanded] = useState(false);
   const [thinkingExpanded, setThinkingExpanded] = useState(false);
+  const [tappedBadgeId, setTappedBadgeId] = useState<string | null>(null);
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
   const mdStyles = useMarkdownStyles(isDark);
@@ -892,52 +893,116 @@ function MessageBubble({ message, threadId }: { message: Message; threadId: stri
 
       {/* ── Tool steps strip (assistant only, when steps exist) ─── */}
       {!isUser && msgSteps.length > 0 && (
-        <View style={{ maxWidth: "88%", gap: 4 }}>
-          {/* Collapsed header — tap to expand */}
-          <TouchableBounce sensory onPress={() => setStepsExpanded((v) => !v)}>
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 6,
-                paddingHorizontal: 10,
-                paddingVertical: 5,
-                backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
-                borderRadius: BORDER_RADIUS.full,
-                alignSelf: "flex-start",
-              }}
-            >
-              {/* One icon badge per call */}
-              {visibleStepBadges.map((step) => {
-                const meta = TOOL_META[step.tool] ?? TOOL_META.unknown;
-                return (
+        <View style={{ maxWidth: "92%", gap: 4 }}>
+          {/* Badge row — each badge tappable, expand button at end */}
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 5,
+              flexWrap: "wrap",
+            }}
+          >
+            {visibleStepBadges.map((step) => {
+              const meta = TOOL_META[step.tool] ?? TOOL_META.unknown;
+              const isActive = tappedBadgeId === step.id;
+              const isErr = step.status === "error";
+              return (
+                <TouchableBounce
+                  key={step.id}
+                  sensory
+                  onPress={() => setTappedBadgeId((prev) => prev === step.id ? null : step.id)}
+                >
                   <View
-                    key={step.id}
                     style={{
-                      width: 16, height: 16, borderRadius: 4,
-                      backgroundColor: isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.05)",
+                      width: 26, height: 26, borderRadius: 7,
+                      backgroundColor: isActive
+                        ? `${meta.color}33`
+                        : isErr
+                          ? "rgba(239,68,68,0.1)"
+                          : isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.05)",
+                      borderWidth: isActive ? 1 : 0,
+                      borderColor: `${meta.color}55`,
                       justifyContent: "center", alignItems: "center",
                     }}
                   >
-                    <IconSymbol name={meta.icon as any} size={9} color={meta.color} />
+                    {isErr
+                      ? <IconSymbol name="xmark.circle.fill" size={12} color="#EF4444" />
+                      : <IconSymbol name={meta.icon as any} size={12} color={isActive ? meta.color : (isDark ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.4)")} />
+                    }
                   </View>
-                );
-              })}
-              {stepOverflow > 0 && (
+                </TouchableBounce>
+              );
+            })}
+            {stepOverflow > 0 && (
+              <View style={{
+                paddingHorizontal: 5, paddingVertical: 2,
+                backgroundColor: isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.05)",
+                borderRadius: 6,
+              }}>
                 <Text style={{ color: isDark ? "rgba(255,255,255,0.35)" : "rgba(0,0,0,0.32)", fontSize: 10, fontWeight: "600" }}>
                   +{stepOverflow}
                 </Text>
-              )}
-              <Text style={{ color: isDark ? "rgba(255,255,255,0.45)" : "rgba(0,0,0,0.4)", fontSize: 11, fontWeight: "500" }}>
-                {msgSteps.length} {msgSteps.length === 1 ? "step" : "steps"}
-              </Text>
-              <IconSymbol
-                name={stepsExpanded ? "chevron.up" : "chevron.down"}
-                size={10}
-                color={isDark ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.28)"}
-              />
-            </View>
-          </TouchableBounce>
+              </View>
+            )}
+            {/* Expand toggle */}
+            <TouchableBounce sensory onPress={() => setStepsExpanded((v) => !v)}>
+              <View style={{
+                paddingHorizontal: 7, paddingVertical: 3,
+                backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
+                borderRadius: BORDER_RADIUS.full,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 3,
+              }}>
+                <Text style={{ color: isDark ? "rgba(255,255,255,0.38)" : "rgba(0,0,0,0.35)", fontSize: 10.5, fontWeight: "500" }}>
+                  {msgSteps.length} {msgSteps.length === 1 ? "step" : "steps"}
+                </Text>
+                <IconSymbol
+                  name={stepsExpanded ? "chevron.up" : "chevron.down"}
+                  size={9}
+                  color={isDark ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.28)"}
+                />
+              </View>
+            </TouchableBounce>
+          </View>
+
+          {/* Tapped badge label */}
+          {tappedBadgeId && (() => {
+            const step = msgSteps.find((s) => s.id === tappedBadgeId);
+            if (!step) return null;
+            const meta = TOOL_META[step.tool] ?? TOOL_META.unknown;
+            return (
+              <View style={{
+                backgroundColor: isDark ? "#1c1c1e" : "#fff",
+                borderRadius: BORDER_RADIUS.md,
+                borderWidth: 1,
+                borderColor: `${meta.color}33`,
+                paddingHorizontal: 10,
+                paddingVertical: 6,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+                alignSelf: "flex-start",
+              }}>
+                <View style={{
+                  width: 18, height: 18, borderRadius: 4,
+                  backgroundColor: `${meta.color}20`,
+                  justifyContent: "center", alignItems: "center",
+                }}>
+                  <IconSymbol name={meta.icon as any} size={10} color={meta.color} />
+                </View>
+                <Text style={{
+                  color: isDark ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.55)",
+                  fontSize: 12,
+                  fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+                  flexShrink: 1,
+                }} numberOfLines={2}>
+                  {step.label || step.tool}
+                </Text>
+              </View>
+            );
+          })()}
 
           {/* Expanded step list */}
           {stepsExpanded && (
@@ -1351,25 +1416,54 @@ function ModelPickerBar({
 
 /** SF Symbol name + accent color for each tool type */
 const TOOL_META: Record<string, { icon: string; color: string }> = {
-  bash:    { icon: "terminal",                   color: "#A855F7" },
-  edit:    { icon: "pencil",                     color: "#3B82F6" },
-  write:   { icon: "square.and.pencil",          color: "#3B82F6" },
-  read:    { icon: "doc.text",                   color: "#6B7280" },
-  cat:     { icon: "doc.text",                   color: "#6B7280" },
-  search:  { icon: "magnifyingglass",            color: "#F97316" },
-  grep:    { icon: "magnifyingglass",            color: "#F97316" },
-  glob:    { icon: "folder",                     color: "#F97316" },
-  ls:      { icon: "folder",                     color: "#6B7280" },
-  think:   { icon: "brain.head.profile",         color: "#14B8A6" },
-  diff:    { icon: "arrow.left.arrow.right",     color: "#8B5CF6" },
-  git:     { icon: "arrow.triangle.branch",      color: "#F59E0B" },
-  mv:      { icon: "arrow.right.doc.on.clipboard", color: "#6B7280" },
-  cp:      { icon: "doc.on.doc",                 color: "#6B7280" },
-  rm:      { icon: "trash",                      color: "#EF4444" },
-  mkdir:   { icon: "folder.badge.plus",          color: "#22C55E" },
-  write_file:         { icon: "square.and.pencil",          color: "#3B82F6" },
-  str_replace_editor: { icon: "pencil",                     color: "#3B82F6" },
-  unknown: { icon: "hammer",                     color: "#6B7280" },
+  // ── Shell execution ──────────────────────────────────────────────────
+  bash:               { icon: "terminal",                      color: "#A855F7" },
+  Bash:               { icon: "terminal",                      color: "#A855F7" },
+  // ── File reading ─────────────────────────────────────────────────────
+  read:               { icon: "doc.text",                      color: "#6B7280" },
+  Read:               { icon: "doc.text",                      color: "#6B7280" },
+  read_file:          { icon: "doc.text",                      color: "#6B7280" },
+  cat:                { icon: "doc.text",                      color: "#6B7280" },
+  view:               { icon: "doc.text",                      color: "#6B7280" },
+  // ── File writing / editing ───────────────────────────────────────────
+  edit:               { icon: "pencil",                        color: "#3B82F6" },
+  Edit:               { icon: "pencil",                        color: "#3B82F6" },
+  edit_file:          { icon: "pencil",                        color: "#3B82F6" },
+  str_replace_editor: { icon: "pencil",                        color: "#3B82F6" },
+  write:              { icon: "square.and.pencil",             color: "#3B82F6" },
+  Write:              { icon: "square.and.pencil",             color: "#3B82F6" },
+  write_file:         { icon: "square.and.pencil",             color: "#3B82F6" },
+  create:             { icon: "doc.badge.plus",                color: "#22C55E" },
+  create_file:        { icon: "doc.badge.plus",                color: "#22C55E" },
+  // ── Search ───────────────────────────────────────────────────────────
+  search:             { icon: "magnifyingglass",               color: "#F97316" },
+  Search:             { icon: "magnifyingglass",               color: "#F97316" },
+  grep:               { icon: "magnifyingglass",               color: "#F97316" },
+  Grep:               { icon: "magnifyingglass",               color: "#F97316" },
+  grep_search:        { icon: "magnifyingglass",               color: "#F97316" },
+  search_files:       { icon: "magnifyingglass",               color: "#F97316" },
+  web_search:         { icon: "magnifyingglass.circle",        color: "#0EA5E9" },
+  WebSearch:          { icon: "magnifyingglass.circle",        color: "#0EA5E9" },
+  // ── Directory / file navigation ──────────────────────────────────────
+  glob:               { icon: "folder",                        color: "#F97316" },
+  Glob:               { icon: "folder",                        color: "#F97316" },
+  glob_search:        { icon: "folder",                        color: "#F97316" },
+  ls:                 { icon: "folder",                        color: "#6B7280" },
+  list_directory:     { icon: "folder",                        color: "#6B7280" },
+  // ── Git ──────────────────────────────────────────────────────────────
+  git:                { icon: "arrow.triangle.branch",         color: "#F59E0B" },
+  // ── File operations ──────────────────────────────────────────────────
+  diff:               { icon: "arrow.left.arrow.right",        color: "#8B5CF6" },
+  mv:                 { icon: "arrow.right.doc.on.clipboard",  color: "#6B7280" },
+  move_file:          { icon: "arrow.right.doc.on.clipboard",  color: "#6B7280" },
+  cp:                 { icon: "doc.on.doc",                    color: "#6B7280" },
+  rm:                 { icon: "trash",                         color: "#EF4444" },
+  delete_file:        { icon: "trash",                         color: "#EF4444" },
+  mkdir:              { icon: "folder.badge.plus",             color: "#22C55E" },
+  // ── Thinking ─────────────────────────────────────────────────────────
+  think:              { icon: "brain.head.profile",            color: "#14B8A6" },
+  // ── Fallback ─────────────────────────────────────────────────────────
+  unknown:            { icon: "hammer",                        color: "#6B7280" },
 };
 
 const THINKING_PHRASES = [
@@ -1525,105 +1619,157 @@ function ThinkingIndicator({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [thinkingExpanded, setThinkingExpanded] = useState(false);
+  const [tappedBadgeId, setTappedBadgeId] = useState<string | null>(null);
 
-  const runningStep  = toolSteps.find((s) => s.status === "running") ?? null;
-  const finishedSteps = toolSteps.filter((s) => s.status !== "running");
-  const badgeSteps   = runningStep ? [...finishedSteps, runningStep] : finishedSteps;
   const MAX_VISIBLE  = 8;
-  const visibleBadges = badgeSteps.slice(-MAX_VISIBLE);
-  const hiddenCount   = Math.max(0, badgeSteps.length - MAX_VISIBLE);
-  const hasBadges    = badgeSteps.length > 0;
+  const visibleBadges = toolSteps.slice(-MAX_VISIBLE);
+  const hiddenCount   = Math.max(0, toolSteps.length - MAX_VISIBLE);
+  const hasBadges    = toolSteps.length > 0;
   const hasThinking  = thinkingContent.length > 0;
   const dotColor     = isDark ? "rgba(255,255,255,0.45)" : "rgba(0,0,0,0.35)";
   const bubbleBg     = isDark ? "#1c1c1e" : "#fff";
   const bubbleBorder = isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.08)";
-  const tappable     = hasBadges || hasThinking;
+
+  const tappedStep = tappedBadgeId ? toolSteps.find((s) => s.id === tappedBadgeId) : null;
 
   return (
     <View style={{ gap: 6, paddingTop: SPACING.xs }}>
 
-      {/* ── Compact inline label + badges ────────────────── */}
-      <TouchableBounce sensory onPress={tappable ? () => {
-        if (hasThinking && !hasBadges) {
-          setThinkingExpanded((v) => !v);
-        } else {
-          setExpanded((v) => !v);
-          if (!expanded && hasThinking) setThinkingExpanded(true);
-        }
-      } : undefined}>
-        <View
-          style={{
-            alignSelf: "flex-start",
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 5,
-            paddingVertical: 4,
-          }}
-        >
-          {isCompacting || runPhase === "compacting"
-            ? <CompactingLabel color="#F59E0B" />
-            : runPhase === "responding"
-              ? <RespondingLabel color={dotColor} />
-              : <CyclingLabel color={dotColor} />
-          }
+      {/* ── Compact inline label + individual tappable badges ────── */}
+      <View
+        style={{
+          alignSelf: "flex-start",
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 5,
+          paddingVertical: 4,
+        }}
+      >
+        {/* Phase label — tappable to toggle thinking */}
+        <TouchableBounce sensory onPress={hasThinking ? () => setThinkingExpanded((v) => !v) : undefined}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+            {isCompacting || runPhase === "compacting"
+              ? <CompactingLabel color="#F59E0B" />
+              : runPhase === "responding"
+                ? <RespondingLabel color={dotColor} />
+                : <CyclingLabel color={dotColor} />
+            }
+            {hasThinking && (
+              <IconSymbol
+                name={thinkingExpanded ? "chevron.up" : "chevron.down"}
+                size={9}
+                color={dotColor}
+              />
+            )}
+          </View>
+        </TouchableBounce>
 
-          {hasThinking && !hasBadges && (
-            <IconSymbol
-              name={thinkingExpanded ? "chevron.up" : "chevron.down"}
-              size={9}
-              color={dotColor}
-            />
-          )}
+        {hasBadges && (
+          <View style={{ width: 1, height: 14, backgroundColor: dotColor, opacity: 0.25, marginHorizontal: 1 }} />
+        )}
 
-          {hasBadges && (
-            <View style={{ width: 1, height: 14, backgroundColor: dotColor, opacity: 0.25, marginHorizontal: 1 }} />
-          )}
-
-          {visibleBadges.map((step) => {
-            const meta      = TOOL_META[step.tool] ?? TOOL_META.unknown;
-            const isRunning = step.status === "running";
-            return (
+        {/* Individual tappable badges — each toggles its label */}
+        {visibleBadges.map((step) => {
+          const meta      = TOOL_META[step.tool] ?? TOOL_META.unknown;
+          const isRunning = step.status === "running";
+          const isActive  = tappedBadgeId === step.id;
+          return (
+            <TouchableBounce
+              key={step.id}
+              sensory
+              onPress={() => setTappedBadgeId((prev) => prev === step.id ? null : step.id)}
+            >
               <View
-                key={step.id}
                 style={{
-                  width: 22, height: 22, borderRadius: 6,
-                  backgroundColor: isRunning
-                    ? `${meta.color}22`
-                    : isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.05)",
+                  width: 26, height: 26, borderRadius: 7,
+                  backgroundColor: isActive
+                    ? `${meta.color}33`
+                    : isRunning
+                      ? `${meta.color}22`
+                      : isDark ? "rgba(255,255,255,0.09)" : "rgba(0,0,0,0.06)",
+                  borderWidth: isActive ? 1 : 0,
+                  borderColor: `${meta.color}55`,
                   justifyContent: "center", alignItems: "center",
                 }}
               >
                 {isRunning
                   ? <ActivityIndicator size="small" color={meta.color} style={{ width: 14, height: 14 }} />
-                  : <IconSymbol name={meta.icon as any} size={10} color={meta.color} />
+                  : <IconSymbol name={meta.icon as any} size={12} color={meta.color} />
                 }
               </View>
-            );
-          })}
+            </TouchableBounce>
+          );
+        })}
 
-          {hiddenCount > 0 && (
-            <View
-              style={{
-                paddingHorizontal: 5, paddingVertical: 2,
-                backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)",
-                borderRadius: 6,
-              }}
-            >
-              <Text style={{ color: dotColor, fontSize: 10, fontWeight: "600" }}>
-                +{hiddenCount}
-              </Text>
-            </View>
-          )}
+        {hiddenCount > 0 && (
+          <View
+            style={{
+              paddingHorizontal: 5, paddingVertical: 2,
+              backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)",
+              borderRadius: 6,
+            }}
+          >
+            <Text style={{ color: dotColor, fontSize: 10, fontWeight: "600" }}>
+              +{hiddenCount}
+            </Text>
+          </View>
+        )}
 
-          {hasBadges && (
+        {/* Expand toggle for full step list */}
+        {hasBadges && (
+          <TouchableBounce sensory onPress={() => setExpanded((v) => !v)}>
             <IconSymbol
               name={expanded ? "chevron.up" : "chevron.down"}
               size={9}
               color={dotColor}
             />
-          )}
+          </TouchableBounce>
+        )}
+      </View>
+
+      {/* ── Tapped badge label tooltip ────────────────────────── */}
+      {tappedStep && (
+        <View
+          style={{
+            backgroundColor: bubbleBg,
+            borderRadius: BORDER_RADIUS.md,
+            borderWidth: 1,
+            borderColor: `${(TOOL_META[tappedStep.tool] ?? TOOL_META.unknown).color}33`,
+            paddingHorizontal: 10,
+            paddingVertical: 6,
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 6,
+            alignSelf: "flex-start",
+          }}
+        >
+          {(() => {
+            const meta = TOOL_META[tappedStep.tool] ?? TOOL_META.unknown;
+            return (
+              <>
+                <View style={{
+                  width: 18, height: 18, borderRadius: 4,
+                  backgroundColor: `${meta.color}20`,
+                  justifyContent: "center", alignItems: "center",
+                }}>
+                  <IconSymbol name={meta.icon as any} size={10} color={meta.color} />
+                </View>
+                <Text
+                  style={{
+                    color: isDark ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.55)",
+                    fontSize: 12,
+                    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+                    flexShrink: 1,
+                  }}
+                  numberOfLines={2}
+                >
+                  {tappedStep.label || tappedStep.tool}
+                </Text>
+              </>
+            );
+          })()}
         </View>
-      </TouchableBounce>
+      )}
 
       {/* ── Expanded step list ────────────────────────────── */}
       {expanded && hasBadges && (

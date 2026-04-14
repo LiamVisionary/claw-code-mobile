@@ -253,6 +253,7 @@ type Settings = {
   modelQueue: ModelEntry[];   // ordered fallback list (source of truth)
   autoCompact: boolean;       // auto-compact context when window is full
   streamingEnabled: boolean;  // stream response word-by-word (vs. show all at once)
+  darkMode: "system" | "light" | "dark";  // appearance preference
 };
 
 type GatewayState = {
@@ -274,7 +275,7 @@ type GatewayState = {
   /** True once zustand-persist has finished rehydrating settings from disk */
   _hasHydrated: boolean;
   actions: {
-    setSettings: (input: Omit<Settings, "modelQueue" | "autoCompact" | "streamingEnabled"> & { modelQueue?: ModelEntry[]; autoCompact?: boolean; streamingEnabled?: boolean }) => void;
+    setSettings: (input: Omit<Settings, "modelQueue" | "autoCompact" | "streamingEnabled" | "darkMode"> & { modelQueue?: ModelEntry[]; autoCompact?: boolean; streamingEnabled?: boolean; darkMode?: "system" | "light" | "dark" }) => void;
     loadThreads: () => Promise<void>;
     createThread: (workDir?: string) => Promise<Thread>;
     browseFsDirectory: (path?: string) => Promise<FsListing>;
@@ -337,6 +338,7 @@ export const useGatewayStore = create<GatewayState>()(
         modelQueue: [],
         autoCompact: true,
         streamingEnabled: true,
+        darkMode: "system",
       },
       threads: [],
       messages: {},
@@ -360,6 +362,7 @@ export const useGatewayStore = create<GatewayState>()(
               modelQueue: input.modelQueue ?? state.settings.modelQueue ?? [],
               autoCompact: input.autoCompact ?? state.settings.autoCompact ?? true,
               streamingEnabled: input.streamingEnabled ?? state.settings.streamingEnabled ?? true,
+              darkMode: input.darkMode ?? state.settings.darkMode ?? "system",
             },
           })),
 
@@ -505,6 +508,7 @@ export const useGatewayStore = create<GatewayState>()(
             switch (eventName) {
               case "status": {
                 const sIdle = payload.status === "idle" || payload.status === "error";
+                const isRunning = payload.status === "running";
                 set((current) => ({
                   threads: current.threads.map((t) =>
                     t.id === threadId ? { ...t, status: payload.status } : t
@@ -512,6 +516,11 @@ export const useGatewayStore = create<GatewayState>()(
                   ...(sIdle ? {
                     runPhase: { ...current.runPhase, [threadId]: "idle" },
                     compacting: { ...current.compacting, [threadId]: false },
+                  } : {}),
+                  // Clear tool steps when a new run starts so the live indicator
+                  // only shows steps from the current run, not all historical steps.
+                  ...(isRunning ? {
+                    toolSteps: { ...current.toolSteps, [threadId]: [] },
                   } : {}),
                 }));
                 break;

@@ -559,23 +559,54 @@ function friendlyError(raw: string): string {
 
 /** Derive a human-readable label from a tool_use input object. */
 function toolLabel(toolName: string, input: unknown): string {
-  const inp = input as Record<string, unknown>;
+  const inp = (input ?? {}) as Record<string, unknown>;
+  const path = (inp["file_path"] as string ?? inp["path"] as string ?? "").slice(0, 80);
   switch (toolName) {
+    // Shell
     case "bash":
+    case "Bash":
       return (inp["command"] as string ?? "").slice(0, 80);
+    // File reading
     case "read":
+    case "Read":
+    case "read_file":
+    case "view":
     case "cat":
-      return (inp["file_path"] as string ?? inp["path"] as string ?? "").slice(0, 80);
+      return path;
+    // File writing / editing
     case "edit":
-    case "write":
-    case "write_file":
+    case "Edit":
+    case "edit_file":
     case "str_replace_editor":
-      return (inp["file_path"] as string ?? inp["path"] as string ?? "").slice(0, 80);
+      return path;
+    case "write":
+    case "Write":
+    case "write_file":
+    case "create":
+    case "create_file":
+      return path;
+    // Search
     case "grep":
+    case "Grep":
+    case "grep_search":
     case "search":
+    case "Search":
+    case "search_files":
       return (inp["pattern"] as string ?? inp["query"] as string ?? "").slice(0, 80);
+    case "web_search":
+    case "WebSearch":
+      return (inp["query"] as string ?? inp["q"] as string ?? "").slice(0, 80);
+    // Directory navigation
     case "glob":
+    case "Glob":
+    case "glob_search":
       return (inp["pattern"] as string ?? "").slice(0, 80);
+    case "ls":
+    case "list_directory":
+      return path || ".";
+    // Git
+    case "git":
+      return (inp["command"] as string ?? inp["args"] as string ?? "").slice(0, 80);
     default:
       return JSON.stringify(input ?? {}).slice(0, 60);
   }
