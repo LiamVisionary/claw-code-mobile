@@ -1,27 +1,27 @@
 [
   {
-    "content": "Implement StreamJson output format for streaming JSON events",
-    "activeForm": "Implementing StreamJson output format for streaming JSON events",
+    "content": "Investigate current backend architecture and claw binary integration",
+    "activeForm": "Investigating current backend architecture and claw binary integration",
     "status": "in_progress"
   },
   {
-    "content": "Add StreamJson arm to run_turn_with_output",
-    "activeForm": "Adding StreamJson arm to run_turn_with_output",
+    "content": "Check if claw has a native streaming/SSE API (Option C)",
+    "activeForm": "Checking if claw has a native streaming/SSE API",
     "status": "pending"
   },
   {
-    "content": "Add StreamJson arm to main() error handling",
-    "activeForm": "Adding StreamJson arm to main() error handling",
+    "content": "Check if claw supports NDJSON/streaming JSON output (Option B)",
+    "activeForm": "Checking if claw supports NDJSON streaming output",
     "status": "pending"
   },
   {
-    "content": "Update all match arms on CliOutputFormat to handle StreamJson",
-    "activeForm": "Updating all match arms on CliOutputFormat to handle StreamJson",
+    "content": "Implement real-time tool badges using the best available option",
+    "activeForm": "Implementing real-time tool badges",
     "status": "pending"
   },
   {
-    "content": "Verify the build compiles",
-    "activeForm": "Verifying the build compiles",
+    "content": "Test the implementation",
+    "activeForm": "Testing the implementation",
     "status": "pending"
   }
 ]
