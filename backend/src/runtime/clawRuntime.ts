@@ -414,9 +414,9 @@ async function processSuccess(
     estimated_cost?: string;
   };
 
-  // Claw may exit 0 but output an error JSON — treat it as a failure
   if (result.type === "error") {
-    const msg = result.message ?? "claw reported an error";
+    const raw = (result.message ?? "").trim();
+    const msg = raw || "claw reported an error";
     const overflow = isContextOverflow(msg);
     throw Object.assign(new Error(overflow ? formatContextOverflow() : msg.split("\n")[0].trim() || msg), {
       isClawError: true,
@@ -581,13 +581,15 @@ export const clawRuntime = {
           }
           if (err.isClawError) {
             logger.warn({ model: label }, "claw exited ok but reported error");
-            const text = friendlyError(err.message);
+            const text = friendlyError(err.message) || "An error occurred — please try again.";
             messageService.appendAssistantDelta(threadId, messageId, text);
+            messageService.markError(threadId, messageId);
             streamService.publish(threadId, { type: "message_error", messageId, text });
           } else {
             logger.error({ err, stdoutBuf }, "Failed to parse claw JSON output");
-            const text = friendlyError(err.message);
+            const text = friendlyError(err.message) || "An error occurred — please try again.";
             messageService.appendAssistantDelta(threadId, messageId, text);
+            messageService.markError(threadId, messageId);
             streamService.publish(threadId, { type: "message_error", messageId, text });
           }
         }
@@ -625,10 +627,11 @@ export const clawRuntime = {
         continue;
       }
 
-      // Last model exhausted — surface error in message bubble
       const text = isContextOverflow(errText) ? formatContextOverflow() : friendlyError(errText);
-      messageService.appendAssistantDelta(threadId, messageId, text);
-      streamService.publish(threadId, { type: "message_error", messageId, text });
+      const safeText = text || "An error occurred — please try again.";
+      messageService.appendAssistantDelta(threadId, messageId, safeText);
+      messageService.markError(threadId, messageId);
+      streamService.publish(threadId, { type: "message_error", messageId, text: safeText });
     }
 
     activeRuns.delete(threadId);

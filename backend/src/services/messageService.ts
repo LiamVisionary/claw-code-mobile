@@ -3,7 +3,7 @@ import type { Message } from "../types/domain";
 import { createId } from "../utils/ids";
 import { threadService } from "./threadService";
 
-const messageColumns = "id, threadId, role, content, createdAt";
+const messageColumns = "id, threadId, role, content, createdAt, error";
 
 const mapRow = (row: any): Message => ({
   id: row.id,
@@ -11,6 +11,7 @@ const mapRow = (row: any): Message => ({
   role: row.role,
   content: row.content,
   createdAt: row.createdAt,
+  ...(row.error ? { error: true } : {}),
 });
 
 export const messageService = {
@@ -69,6 +70,10 @@ export const messageService = {
     }
     threadService.updatePreview(threadId, message.content.slice(-180));
     return message;
+  },
+
+  markError(_threadId: string, messageId: string) {
+    db.prepare(`UPDATE messages SET error = 1 WHERE id = @id`).run({ id: messageId });
   },
 
   get(messageId: string): Message | undefined {

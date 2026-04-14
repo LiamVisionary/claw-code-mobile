@@ -42,4 +42,5 @@ export const applyMigrations = () => {
 
   // Additive migrations — safe to re-run (errors ignored if column already exists)
   try { db.exec(`ALTER TABLE threads ADD COLUMN workDir TEXT NOT NULL DEFAULT ''`); } catch {}
+  try { db.exec(`ALTER TABLE messages ADD COLUMN error INTEGER NOT NULL DEFAULT 0`); } catch {}
 };
