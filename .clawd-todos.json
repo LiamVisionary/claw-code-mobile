@@ -1,37 +1,17 @@
 [
   {
-    "content": "Add turn_event_callback field and builder method to ConversationRuntime",
-    "activeForm": "Adding TurnEventCallback field and builder to ConversationRuntime",
+    "content": "Investigate claw binary for Option C: native SSE/streaming API",
+    "activeForm": "Investigating claw binary streaming capabilities",
     "status": "in_progress"
   },
   {
-    "content": "Emit TurnEvents from run_turn at appropriate points",
-    "activeForm": "Emitting TurnEvents from run_turn",
+    "content": "If C fails, investigate Option B: line-by-line JSON streaming",
+    "activeForm": "Checking for NDJSON streaming support",
     "status": "pending"
   },
   {
-    "content": "Export TurnEvent and TurnEventCallback from runtime lib.rs",
-    "activeForm": "Exporting new types from lib.rs",
-    "status": "pending"
-  },
-  {
-    "content": "Implement NDJSON streaming emitter in CLI for stream-json format",
-    "activeForm": "Implementing stream-json NDJSON emitter in CLI",
-    "status": "pending"
-  },
-  {
-    "content": "Wire stream-json output format to use streaming in CLI main",
-    "activeForm": "Wiring stream-json in CLI main",
-    "status": "pending"
-  },
-  {
-    "content": "Update backend clawRuntime.ts to parse NDJSON stream",
-    "activeForm": "Updating backend to parse NDJSON stream",
-    "status": "pending"
-  },
-  {
-    "content": "Build and verify compilation",
-    "activeForm": "Verifying compilation",
+    "content": "If B fails, implement Option A: parse stderr for real-time tool badges",
+    "activeForm": "Implementing stderr-based real-time tool badges",
     "status": "pending"
   }
 ]
