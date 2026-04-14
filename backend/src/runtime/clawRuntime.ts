@@ -308,9 +308,12 @@ function parseStreamEvent(
     case "tool_start": {
       const id = (payload.id as string) ?? `step-${Date.now()}`;
       const name = (payload.name as string) ?? "unknown";
-      const input = (payload.input as string) ?? "";
+      const rawInput = payload.input;
+      const input = typeof rawInput === "string"
+        ? rawInput
+        : rawInput != null ? JSON.stringify(rawInput) : "";
       const stepId = `step-${name}-${id}`;
-      const label = input || name;
+      const label = toolLabel(name, payload.input) || input || name;
       streamService.publish(threadId, {
         type: "tool_start",
         id: stepId,
