@@ -104,48 +104,10 @@ function buildArgs(prompt: string, model?: ModelConfig): string[] {
   return args;
 }
 
-/**
- * Args for a compact run.
- * Uses `--resume <session-file> /compact`, NOT the `prompt` subcommand.
- * We resolve the actual session .jsonl path so that CLAW_SESSION_DIR is
- * honoured — `--resume latest` resolves from the default sessions dir,
- * which ignores our per-thread CLAW_SESSION_DIR override.
- */
-function buildCompactArgs(model?: ModelConfig, sessionDir?: string): string[] {
+function buildCompactArgs(model?: ModelConfig): string[] {
   const args: string[] = [];
   if (model?.name) args.push("--model", model.name);
-
-  // Resolve the most recently modified .jsonl file in our per-thread session dir.
-  // Claw uses a legacy layout: <sessionDir>/<hash>/session-*.jsonl (1 level deep)
-  // so we scan both the top level AND one level of subdirectories.
-  let sessionArg = "latest"; // safe fallback — claw resolves from CWD
-  if (sessionDir && fs.existsSync(sessionDir)) {
-    try {
-      const candidates: { file: string; mtime: number }[] = [];
-      const addIfJsonl = (p: string) => {
-        if (p.endsWith(".jsonl") || p.endsWith(".json")) {
-          try { candidates.push({ file: p, mtime: fs.statSync(p).mtimeMs }); } catch { /* skip */ }
-        }
-      };
-      for (const entry of fs.readdirSync(sessionDir)) {
-        const full = path.join(sessionDir, entry);
-        try {
-          const stat = fs.statSync(full);
-          if (stat.isDirectory()) {
-            for (const sub of fs.readdirSync(full)) addIfJsonl(path.join(full, sub));
-          } else {
-            addIfJsonl(full);
-          }
-        } catch { /* skip */ }
-      }
-      candidates.sort((a, b) => b.mtime - a.mtime);
-      if (candidates.length > 0) sessionArg = candidates[0].file;
-    } catch {
-      // ignore — fall back to "latest"
-    }
-  }
-
-  args.push("--output-format", "json", "--resume", sessionArg, "/compact");
+  args.push("--output-format", "json", "--resume", "latest", "/compact");
   return args;
 }
 
@@ -191,47 +153,6 @@ function emitTerminal(threadId: string, line: string) {
   streamService.publish(threadId, { type: "terminal", chunk: line + "\n" });
 }
 
-function scanSessionFiles(dir: string): Set<string> {
-  const files = new Set<string>();
-  if (!fs.existsSync(dir)) return files;
-  try {
-    for (const entry of fs.readdirSync(dir)) {
-      const full = path.join(dir, entry);
-      try {
-        const stat = fs.statSync(full);
-        if (stat.isDirectory()) {
-          for (const sub of fs.readdirSync(full)) {
-            if (sub.endsWith(".jsonl") || sub.endsWith(".json")) {
-              files.add(path.join(full, sub));
-            }
-          }
-        } else if (entry.endsWith(".jsonl") || entry.endsWith(".json")) {
-          files.add(full);
-        }
-      } catch { /* skip */ }
-    }
-  } catch { /* skip */ }
-  return files;
-}
-
-function relocateNewSessions(cwdSessionsDir: string, perThreadDir: string, before: Set<string>) {
-  if (!fs.existsSync(cwdSessionsDir)) return;
-  const after = scanSessionFiles(cwdSessionsDir);
-  for (const file of after) {
-    if (!before.has(file)) {
-      try {
-        const rel = path.relative(cwdSessionsDir, file);
-        const dest = path.join(perThreadDir, rel);
-        fs.mkdirSync(path.dirname(dest), { recursive: true });
-        fs.copyFileSync(file, dest);
-        fs.unlinkSync(file);
-      } catch (err) {
-        logger.warn({ err, file }, "Failed to relocate session file");
-      }
-    }
-  }
-}
-
 /**
  * Spawn claw once with the given model config. Resolves with a SpawnResult
  * so the caller can decide whether to retry with a fallback model.
@@ -246,12 +167,9 @@ function spawnOnce(
   isCompact = false
 ): Promise<SpawnResult> {
   return new Promise((resolve) => {
-    const args = isCompact ? buildCompactArgs(model, sessionDir) : buildArgs(content, model);
+    const args = isCompact ? buildCompactArgs(model) : buildArgs(content, model);
     const env = buildEnv(model, sessionDir);
     logger.info({ threadId, cwd, model: model?.name ?? model?.provider, args }, "Spawning claw");
-
-    const cwdSessionsDir = path.join(cwd, ".claw", "sessions");
-    const beforeFiles = scanSessionFiles(cwdSessionsDir);
 
     const child = spawn(CLAW_BINARY, args, {
       cwd,
@@ -277,7 +195,6 @@ function spawnOnce(
     });
 
     child.on("close", (code) => {
-      relocateNewSessions(cwdSessionsDir, sessionDir, beforeFiles);
       if (active.stopped) {
         resolve({ succeeded: false, stdoutBuf, stderrBuf, stopped: true });
         return;
@@ -566,7 +483,7 @@ export const clawRuntime = {
     // creates it lazily on first content. This prevents empty ghost bubbles
     // when a run produces no output (e.g. compact-only cycle).
 
-    const sessionDir = path.join(workspaceDir(threadId), ".claw", "sessions");
+    const sessionDir = path.join(workspaceDir(threadId), ".claw");
     const cwd =
       thread.workDir && fs.existsSync(thread.workDir)
         ? thread.workDir
