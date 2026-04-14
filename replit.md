@@ -115,7 +115,8 @@ Clones `ultraworkers/claw-code` and runs `cargo build`. Takes ~5 min on first ru
 
 ### SSE Streaming
 - Mobile uses XHR-based SSE (not `@microsoft/fetch-event-source` which requires `document`)
-- Events: `status` | `delta` | `terminal` | `done` | `error` | `compact_start` | `compact_end` | `run_phase` | `tool_start` | `tool_end` | `thinking_content` | `permission_request`
+- Parser buffers partial lines across XHR chunks (`partialLine` carry) to prevent data loss at chunk boundaries; also strips `\r` for CRLF compatibility
+- Events: `status` | `delta` | `terminal` | `done` | `error` | `compact_start` | `compact_end` | `run_phase` | `tool_start` | `tool_end` | `thinking_content` | `permission_request` | `message_error`
 
 ### Persistence
 - Settings persisted via `expo-file-system/legacy` (replaces broken AsyncStorage v3)

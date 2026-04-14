@@ -61,6 +61,7 @@ function openNativeSSE(
     let offset = 0;
     let currentEvent = "";
     let dataBuffer = "";
+    let partialLine = "";
     let reconnectScheduled = false; // prevent double-scheduling within one XHR lifecycle
 
     xhr.open("GET", url, true);
@@ -85,7 +86,13 @@ function openNativeSSE(
       const newText = xhr.responseText.slice(offset);
       offset = xhr.responseText.length;
 
-      for (const line of newText.split("\n")) {
+      const raw = partialLine + newText;
+      const endsWithNewline = raw.endsWith("\n");
+      const segments = raw.split("\n");
+      partialLine = endsWithNewline ? "" : (segments.pop() ?? "");
+
+      for (const rawLine of segments) {
+        const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
         if (line.startsWith("event: ")) {
           currentEvent = line.slice(7).trim();
         } else if (line.startsWith("data: ")) {
@@ -540,7 +547,7 @@ export const useGatewayStore = create<GatewayState>()(
                   return {
                     messages: upsertMessage(current.messages, {
                       ...existing,
-                      content: payload.text,
+                      content: payload.text || "An error occurred — please try again.",
                       error: true,
                     }),
                   };
