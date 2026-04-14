@@ -8,6 +8,7 @@ import { streamService } from "../services/streamService";
 import { threadService } from "../services/threadService";
 import { terminalService } from "../services/terminalService";
 import { runService } from "../services/runService";
+import { createId } from "../utils/ids";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -39,6 +40,13 @@ type ActiveRun = {
   streamedText: boolean;
   /** Accumulated thinking content from real-time [stream] thinking_delta events. */
   streamedThinking: string;
+  /** The message ID for the current agentic turn bubble. Rotates on each text-after-tool transition. */
+  currentMessageId: string;
+  /** True once a tool_start has been seen since the last text_delta — signals that the next
+   *  text_delta should open a new chat bubble rather than continuing the current one. */
+  hadToolSinceLastText: boolean;
+  /** All message IDs created during this run (initial + any new bubbles), for finalization. */
+  allMessageIds: string[];
 };
 
 type SpawnResult = {
@@ -215,8 +223,8 @@ function spawnOnce(
         //   [hook PreToolUse] bash: ls -la                 — hook progress (existing)
         // We try [stream] first; if it doesn't match, fall through to hook parsing.
         if (messageId && !isCompact) {
-          parseStreamEvent(trimmed, threadId, messageId, active, openSteps);
-          parseHookEvent(trimmed, threadId, messageId, active, openSteps);
+          parseStreamEvent(trimmed, threadId, active, openSteps);
+          parseHookEvent(trimmed, threadId, active, openSteps);
         }
       }
     });
@@ -264,13 +272,13 @@ function spawnOnce(
 function parseStreamEvent(
   line: string,
   threadId: string,
-  messageId: string,
   active: ActiveRun,
   openSteps: Map<string, string>,
 ): void {
   const prefix = "[stream]";
   if (!line.startsWith(prefix)) return;
   const jsonStr = line.slice(prefix.length);
+  logger.info({ jsonStr: jsonStr.slice(0, 200), threadId }, "[stream] event received");
   let payload: Record<string, unknown>;
   try {
     payload = JSON.parse(jsonStr) as Record<string, unknown>;
@@ -285,22 +293,44 @@ function parseStreamEvent(
     case "text_delta": {
       const text = payload.text as string | undefined;
       if (!text) break;
+
+      // If we've already produced text in a prior turn AND a tool was used since
+      // then, rotate to a fresh message bubble for this new agentic turn.
+      if (active.hadToolSinceLastText && active.streamedText) {
+        const newMsgId = createId("msg");
+        active.currentMessageId = newMsgId;
+        active.allMessageIds.push(newMsgId);
+        active.streamedThinking = ""; // fresh thinking slate for new bubble
+      }
+      active.hadToolSinceLastText = false;
       active.streamedText = true;
+
+      const msgId = active.currentMessageId;
       // Transition from thinking → responding when text starts flowing
       setRunPhase(threadId, "responding");
       // Update the server-side message store and publish delta to SSE
-      messageService.appendAssistantDelta(threadId, messageId, text);
-      streamService.publish(threadId, { type: "delta", messageId, chunk: text });
+      messageService.appendAssistantDelta(threadId, msgId, text);
+      streamService.publish(threadId, { type: "delta", messageId: msgId, chunk: text });
       break;
     }
     case "thinking_delta": {
       const thinking = payload.thinking as string | undefined;
       if (!thinking) break;
+      // If a tool was used since the last text, the model is now thinking for a new
+      // turn — open a fresh bubble so the thinking is scoped to the right message.
+      if (active.hadToolSinceLastText && active.streamedText) {
+        const newMsgId = createId("msg");
+        active.currentMessageId = newMsgId;
+        active.allMessageIds.push(newMsgId);
+        active.streamedThinking = ""; // fresh slate for new turn
+        // Reset here so text_delta for this same turn doesn't open yet another bubble
+        active.hadToolSinceLastText = false;
+      }
       active.streamedThinking += thinking;
-      // Publish incremental thinking content to SSE
+      // Publish incremental thinking content to SSE (scoped to current bubble)
       streamService.publish(threadId, {
         type: "thinking_content",
-        messageId,
+        messageId: active.currentMessageId,
         content: active.streamedThinking,
       });
       break;
@@ -314,10 +344,12 @@ function parseStreamEvent(
         : rawInput != null ? JSON.stringify(rawInput) : "";
       const stepId = `step-${name}-${id}`;
       const label = toolLabel(name, payload.input) || input || name;
+      // Mark that a tool was used — next text_delta will open a new bubble
+      active.hadToolSinceLastText = true;
       streamService.publish(threadId, {
         type: "tool_start",
         id: stepId,
-        messageId,
+        messageId: active.currentMessageId,
         tool: name,
         label: label.slice(0, 80),
       });
@@ -331,7 +363,6 @@ function parseStreamEvent(
 function parseHookEvent(
   line: string,
   threadId: string,
-  messageId: string,
   active: ActiveRun,
   openSteps: Map<string, string>,
 ): void {
@@ -354,10 +385,11 @@ function parseHookEvent(
     if (openSteps.has(toolName)) return;
     const stepId = `step-${toolName}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const label = command || toolName;
+    active.hadToolSinceLastText = true;
     streamService.publish(threadId, {
       type: "tool_start",
       id: stepId,
-      messageId,
+      messageId: active.currentMessageId,
       tool: toolName,
       label: label.slice(0, 80),
     });
@@ -374,7 +406,7 @@ function parseHookEvent(
       streamService.publish(threadId, {
         type: "tool_end",
         id: stepId,
-        messageId,
+        messageId: active.currentMessageId,
         ...(isError ? { error: true } : {}),
       });
       openSteps.delete(toolName);
@@ -386,7 +418,7 @@ function parseHookEvent(
       streamService.publish(threadId, {
         type: "tool_end",
         id: stepId,
-        messageId,
+        messageId: active.currentMessageId,
         error: true,
       });
       openSteps.delete(toolName);
@@ -718,7 +750,17 @@ export const clawRuntime = {
         ? thread.workDir
         : workspaceDir(threadId);
 
-    const active: ActiveRun = { runId: run.id, child: null, stopped: false, realtimeStepIds: new Set(), streamedText: false, streamedThinking: "" };
+    const active: ActiveRun = {
+      runId: run.id,
+      child: null,
+      stopped: false,
+      realtimeStepIds: new Set(),
+      streamedText: false,
+      streamedThinking: "",
+      currentMessageId: messageId,
+      hadToolSinceLastText: false,
+      allMessageIds: [messageId],
+    };
     activeRuns.set(threadId, active);
     setRunPhase(threadId, "thinking");
 
@@ -773,15 +815,17 @@ export const clawRuntime = {
           if (err.isClawError) {
             logger.warn({ model: label }, "claw exited ok but reported error");
             const text = friendlyError(err.message) || "An error occurred — please try again.";
-            messageService.appendAssistantDelta(threadId, messageId, text);
-            messageService.markError(threadId, messageId);
-            streamService.publish(threadId, { type: "message_error", messageId, text });
+            const errMsgId = active.currentMessageId;
+            messageService.appendAssistantDelta(threadId, errMsgId, text);
+            messageService.markError(threadId, errMsgId);
+            streamService.publish(threadId, { type: "message_error", messageId: errMsgId, text });
           } else {
             logger.error({ err, stdoutBuf }, "Failed to parse claw JSON output");
             const text = friendlyError(err.message) || "An error occurred — please try again.";
-            messageService.appendAssistantDelta(threadId, messageId, text);
-            messageService.markError(threadId, messageId);
-            streamService.publish(threadId, { type: "message_error", messageId, text });
+            const errMsgId = active.currentMessageId;
+            messageService.appendAssistantDelta(threadId, errMsgId, text);
+            messageService.markError(threadId, errMsgId);
+            streamService.publish(threadId, { type: "message_error", messageId: errMsgId, text });
           }
         }
         break;
@@ -820,9 +864,10 @@ export const clawRuntime = {
 
       const text = isContextOverflow(errText) ? formatContextOverflow() : friendlyError(errText);
       const safeText = text || "An error occurred — please try again.";
-      messageService.appendAssistantDelta(threadId, messageId, safeText);
-      messageService.markError(threadId, messageId);
-      streamService.publish(threadId, { type: "message_error", messageId, text: safeText });
+      const errMsgId = active.currentMessageId;
+      messageService.appendAssistantDelta(threadId, errMsgId, safeText);
+      messageService.markError(threadId, errMsgId);
+      streamService.publish(threadId, { type: "message_error", messageId: errMsgId, text: safeText });
     }
 
     activeRuns.delete(threadId);
@@ -833,8 +878,12 @@ export const clawRuntime = {
       return run.id;
     }
 
-    messageService.finalizeAssistant(threadId, messageId);
-    streamService.publish(threadId, { type: "done", messageId });
+    // Finalize every bubble created during this run (initial + any new-turn bubbles).
+    for (const mid of active.allMessageIds) {
+      messageService.finalizeAssistant(threadId, mid);
+    }
+    // Signal done on the last active bubble so the client clears its run state.
+    streamService.publish(threadId, { type: "done", messageId: active.currentMessageId });
 
     if (finalSuccess) {
       threadService.setStatus(threadId, "idle");
