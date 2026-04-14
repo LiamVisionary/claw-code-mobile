@@ -6985,7 +6985,7 @@ impl AnthropicRuntimeClient {
                     ContentBlockDelta::TextDelta { text } => {
                         if !text.is_empty() {
                             if stream_stderr {
-                                eprintln!("[stream]{{\"type\":\"text_delta\",\"text\":{}}}", serde_json::to_string(&text).unwrap_or_default());
+                                eprintln!("[stream]{}", json!({"type": "text_delta", "text": text}));
                             }
                             if let Some(progress_reporter) = &self.progress_reporter {
                                 progress_reporter.mark_text_phase(&text);
@@ -7005,7 +7005,7 @@ impl AnthropicRuntimeClient {
                     }
                     ContentBlockDelta::ThinkingDelta { thinking } => {
                         if stream_stderr {
-                            eprintln!("[stream]{{\"type\":\"thinking_delta\",\"thinking\":{}}}", serde_json::to_string(&thinking).unwrap_or_default());
+                            eprintln!("[stream]{}", json!({"type": "thinking_delta", "thinking": thinking}));
                         }
                         if !block_has_thinking_summary {
                             render_thinking_block_summary(out, None, false)?;
@@ -7023,10 +7023,9 @@ impl AnthropicRuntimeClient {
                     }
                     if let Some((id, name, input)) = pending_tool.take() {
                         if stream_stderr {
-                            eprintln!("[stream]{{\"type\":\"tool_start\",\"id\":{},\"name\":{},\"input\":{}}}", 
-                                serde_json::to_string(&id).unwrap_or_default(),
-                                serde_json::to_string(&name).unwrap_or_default(),
-                                serde_json::to_string(&input).unwrap_or_default());
+                            let input_val: serde_json::Value = serde_json::from_str(&input)
+                                .unwrap_or(serde_json::Value::String(input.clone()));
+                            eprintln!("[stream]{}", json!({"type": "tool_start", "id": id, "name": name, "input": input_val}));
                         }
                         if let Some(progress_reporter) = &self.progress_reporter {
                             progress_reporter.mark_tool_phase(&name, &input);
