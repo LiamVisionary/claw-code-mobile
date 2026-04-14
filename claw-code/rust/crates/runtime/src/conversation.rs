@@ -169,6 +169,7 @@ pub struct ConversationRuntime<C, T> {
     hook_abort_signal: HookAbortSignal,
     hook_progress_reporter: Option<Box<dyn HookProgressReporter>>,
     session_tracer: Option<SessionTracer>,
+    turn_event_callback: Option<Box<dyn TurnEventCallback>>,
 }
 
 impl<C, T> ConversationRuntime<C, T>
@@ -218,6 +219,7 @@ where
             hook_abort_signal: HookAbortSignal::default(),
             hook_progress_reporter: None,
             session_tracer: None,
+            turn_event_callback: None,
         }
     }
 
