@@ -1,17 +1,27 @@
 [
   {
-    "content": "Investigate claw binary for Option C: native SSE/streaming API",
-    "activeForm": "Investigating claw binary streaming capabilities",
+    "content": "Investigate claw binary's streaming capabilities (Option C)",
+    "activeForm": "Investigating claw binary's streaming capabilities",
     "status": "in_progress"
   },
   {
-    "content": "If C fails, investigate Option B: line-by-line JSON streaming",
-    "activeForm": "Checking for NDJSON streaming support",
+    "content": "Investigate NDJSON/streaming JSON support (Option B)",
+    "activeForm": "Investigating NDJSON streaming support",
     "status": "pending"
   },
   {
-    "content": "If B fails, implement Option A: parse stderr for real-time tool badges",
-    "activeForm": "Implementing stderr-based real-time tool badges",
+    "content": "Implement stderr real-time parsing as fallback (Option A)",
+    "activeForm": "Implementing stderr real-time parsing",
+    "status": "pending"
+  },
+  {
+    "content": "Implement real-time tool badge SSE events",
+    "activeForm": "Implementing real-time tool badge SSE events",
+    "status": "pending"
+  },
+  {
+    "content": "Test the implementation",
+    "activeForm": "Testing the implementation",
     "status": "pending"
   }
 ]
