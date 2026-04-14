@@ -17,11 +17,11 @@
   {
     "content": "Update clawRuntime.ts to parse real-time streaming events from stderr",
     "activeForm": "Updating TS backend to parse new stderr event types",
-    "status": "in_progress"
+    "status": "completed"
   },
   {
-    "content": "Build and test the changes",
-    "activeForm": "Building and testing the changes",
-    "status": "pending"
+    "content": "Verify the complete pipeline and restart the server",
+    "activeForm": "Verifying the complete pipeline",
+    "status": "in_progress"
   }
 ]

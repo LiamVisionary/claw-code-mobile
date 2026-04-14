@@ -204,17 +204,18 @@ function spawnOnce(
       for (const line of text.split("\n")) {
         const trimmed = line.trim();
         if (!trimmed) continue;
-        emitTerminal(threadId, trimmed);
+        // Don't send internal [stream] protocol lines to the terminal view
+        if (!trimmed.startsWith("[stream]")) {
+          emitTerminal(threadId, trimmed);
+        }
 
-        // Parse hook progress events from stderr for real-time tool badges.
-        // Claw writes lines like:
-        //   [hook PreToolUse] bash: ls -la
-        //   [hook done PreToolUse] bash: ls -la
-        //   [hook PostToolUse] bash: ls -la
-        //   [hook done PostToolUse] bash: ls -la
-        //   [hook cancelled PostToolUse] bash: ls -la
-        // We emit tool_start on "PreToolUse" and tool_end on "done PostToolUse" or "cancelled PostToolUse".
+        // Parse real-time streaming events and hook progress events from stderr.
+        // Claw writes two kinds of structured lines:
+        //   [stream]{"type":"text_delta","text":"Hello"}   — real-time streaming (new)
+        //   [hook PreToolUse] bash: ls -la                 — hook progress (existing)
+        // We try [stream] first; if it doesn't match, fall through to hook parsing.
         if (messageId && !isCompact) {
+          parseStreamEvent(trimmed, threadId, messageId, active, openSteps);
           parseHookEvent(trimmed, threadId, messageId, active, openSteps);
         }
       }
@@ -248,6 +249,82 @@ function spawnOnce(
  * We emit `tool_start` when we see `PreToolUse` (tool is about to execute) and
  * `tool_end` when we see `done PostToolUse` or `cancelled PostToolUse` (tool finished).
  */
+
+/**
+ * Parse a `[stream]` NDJSON line from stderr and emit real-time SSE events.
+ *
+ * When running with `--output-format json`, claw emits structured events to
+ * stderr as they happen so the TS backend can stream text/thinking/tools
+ * in real-time instead of waiting for the full JSON blob on stdout.
+ *
+ * Format: `[stream]{"type":"text_delta","text":"Hello"}`
+ *         `[stream]{"type":"thinking_delta","thinking":"I need to..."}`
+ *         `[stream]{"type":"tool_start","id":"toolu_xxx","name":"bash","input":"ls"}`
+ */
+function parseStreamEvent(
+  line: string,
+  threadId: string,
+  messageId: string,
+  active: ActiveRun,
+  openSteps: Map<string, string>,
+): void {
+  const prefix = "[stream]";
+  if (!line.startsWith(prefix)) return;
+  const jsonStr = line.slice(prefix.length);
+  let payload: Record<string, unknown>;
+  try {
+    payload = JSON.parse(jsonStr) as Record<string, unknown>;
+  } catch {
+    return; // not valid JSON — skip
+  }
+
+  const type = payload.type as string | undefined;
+  if (!type) return;
+
+  switch (type) {
+    case "text_delta": {
+      const text = payload.text as string | undefined;
+      if (!text) break;
+      active.streamedText = true;
+      // Transition from thinking → responding when text starts flowing
+      setRunPhase(threadId, "responding");
+      // Update the server-side message store and publish delta to SSE
+      messageService.appendAssistantDelta(threadId, messageId, text);
+      streamService.publish(threadId, { type: "delta", messageId, chunk: text });
+      break;
+    }
+    case "thinking_delta": {
+      const thinking = payload.thinking as string | undefined;
+      if (!thinking) break;
+      active.streamedThinking += thinking;
+      // Publish incremental thinking content to SSE
+      streamService.publish(threadId, {
+        type: "thinking_content",
+        messageId,
+        content: active.streamedThinking,
+      });
+      break;
+    }
+    case "tool_start": {
+      const id = (payload.id as string) ?? `step-${Date.now()}`;
+      const name = (payload.name as string) ?? "unknown";
+      const input = (payload.input as string) ?? "";
+      const stepId = `step-${name}-${id}`;
+      const label = input || name;
+      streamService.publish(threadId, {
+        type: "tool_start",
+        id: stepId,
+        messageId,
+        tool: name,
+        label: label.slice(0, 80),
+      });
+      openSteps.set(name, stepId);
+      active.realtimeStepIds.add(stepId);
+      break;
+    }
+  }
+}
+
 function parseHookEvent(
   line: string,
   threadId: string,
@@ -269,6 +346,9 @@ function parseHookEvent(
 
   if (hookPhase === "PreToolUse" && !doneOrCancelled) {
     // Tool is about to start executing → emit tool_start
+    // But skip if already emitted via [stream] tool_start (the openSteps entry
+    // will already exist from parseStreamEvent).
+    if (openSteps.has(toolName)) return;
     const stepId = `step-${toolName}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const label = command || toolName;
     streamService.publish(threadId, {
@@ -562,22 +642,37 @@ async function processSuccess(
   // Parse <thinking>...</thinking> blocks from the model's text response.
   // Some models (e.g. extended thinking, DeepSeek-R1 style) embed their chain-of-thought
   // inside explicit XML tags in the message text.
-  const thinkRegex = /<thinking>([\s\S]*?)<\/thinking>/gi;
-  const thinkMatches = [...(result.message ?? "").matchAll(thinkRegex)];
-  if (thinkMatches.length > 0) {
-    const thinkingContent = thinkMatches.map((m) => m[1].trim()).join("\n\n");
-    if (thinkingContent && !active.stopped) {
-      streamService.publish(threadId, {
-        type: "thinking_content",
-        messageId,
-        content: thinkingContent,
-      });
+  // If thinking was already streamed in real-time via [stream] thinking_delta events,
+  // skip the post-hoc emission to avoid duplicate content.
+  if (!active.streamedThinking) {
+    const thinkRegex = /<thinking>([\s\S]*?)<\/thinking>/gi;
+    const thinkMatches = [...(result.message ?? "").matchAll(thinkRegex)];
+    if (thinkMatches.length > 0) {
+      const thinkingContent = thinkMatches.map((m) => m[1].trim()).join("\n\n");
+      if (thinkingContent && !active.stopped) {
+        streamService.publish(threadId, {
+          type: "thinking_content",
+          messageId,
+          content: thinkingContent,
+        });
+      }
     }
   }
   // Strip <thinking> blocks from the visible message text
+  const thinkRegex = /<thinking>([\s\S]*?)<\/thinking>/gi;
   const cleanMessage = (result.message ?? "").replace(thinkRegex, "").trim();
 
-  await streamWords(threadId, messageId, cleanMessage, () => active.stopped, streamingEnabled);
+  // If text was already streamed in real-time via [stream] text_delta events,
+  // we still need to update the server-side message store with the full final text
+  // (to ensure messageService has the canonical version), but we do NOT re-emit
+  // delta SSE events — the client already has the text.
+  if (active.streamedText) {
+    // The message service already has the incremental deltas appended in
+    // parseStreamEvent. finalizeAssistant will be called after processSuccess
+    // returns. No need to stream words again.
+  } else {
+    await streamWords(threadId, messageId, cleanMessage, () => active.stopped, streamingEnabled);
+  }
 }
 
 export const clawRuntime = {
@@ -620,7 +715,7 @@ export const clawRuntime = {
         ? thread.workDir
         : workspaceDir(threadId);
 
-    const active: ActiveRun = { runId: run.id, child: null, stopped: false, realtimeStepIds: new Set() };
+    const active: ActiveRun = { runId: run.id, child: null, stopped: false, realtimeStepIds: new Set(), streamedText: false, streamedThinking: "" };
     activeRuns.set(threadId, active);
     setRunPhase(threadId, "thinking");
 
