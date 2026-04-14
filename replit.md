@@ -102,9 +102,20 @@ Clones `ultraworkers/claw-code` and runs `cargo build`. Takes ~5 min on first ru
 - Store tracks `compacting` state per thread; inserts a `role: "system"` message on compact_end
 - UI shows animated "compacting..." label (amber) in ThinkingIndicator; system messages render as subtle centered inline text with hairline dividers
 
+### Run Phase Tracking
+- Backend tracks the current activity phase per thread in an in-memory map: `idle` | `thinking` | `compacting` | `responding`
+- Phase is set at every transition point in `sendMessage` / `stop`, broadcast as `run_phase` SSE event
+- On SSE connect, server sends current phase via `sendTo` (unicast) — not broadcast — so existing subscribers aren't affected
+- `GET /threads/:threadId/run-state` returns `{ status, phase, runId }` for polling
+- Client store stores `runPhase[threadId]` and derives `compacting` from it
+- `refreshThread` fetches run-state alongside threads/messages; thread status is authoritative — if idle/error, forces `runPhase=idle`
+- `done` and `status(idle/error)` events also clear `runPhase` and `compacting` client-side
+- UI: ThinkingIndicator shows "thinking..." / "compacting..." / "responding..." based on `runPhase`
+- Stale recovery: useFocusEffect, AppState foreground listener, and SSE onReconnect all call `refreshThread` which fetches the authoritative phase
+
 ### SSE Streaming
 - Mobile uses XHR-based SSE (not `@microsoft/fetch-event-source` which requires `document`)
-- Events: `status` | `delta` | `terminal` | `done` | `error` | `compact_start` | `compact_end`
+- Events: `status` | `delta` | `terminal` | `done` | `error` | `compact_start` | `compact_end` | `run_phase` | `tool_start` | `tool_end` | `thinking_content` | `permission_request`
 
 ### Persistence
 - Settings persisted via `expo-file-system/legacy` (replaces broken AsyncStorage v3)

@@ -47,6 +47,7 @@ export default function ThreadScreen() {
   const toolSteps = useGatewayStore((s) => s.toolSteps[id ?? ""] ?? EMPTY_STEPS);
   const rawPermReqs = useGatewayStore((s) => s.permissionRequests[id ?? ""] ?? EMPTY_REQS);
   const isCompacting = useGatewayStore((s) => s.compacting[id ?? ""] ?? false);
+  const runPhase = useGatewayStore((s) => s.runPhase[id ?? ""] ?? "idle");
   const permissionReqs = useMemo(
     () => rawPermReqs.filter((r) => r.pending),
     [rawPermReqs]
@@ -313,8 +314,10 @@ export default function ThreadScreen() {
 
   const listFooterElem = useMemo(() => {
     const lastMsg = messages[messages.length - 1];
+    const phaseActive = runPhase !== "idle";
     const needsIndicator =
       isCompacting ||
+      phaseActive ||
       threadStatus === "waiting" ||
       (threadStatus === "running" && (!lastMsg || lastMsg.role === "user"));
     return needsIndicator ? (
@@ -326,9 +329,10 @@ export default function ThreadScreen() {
         onDeny={(permId) => actions.respondToPermission(id ?? "", permId, false)}
         isDark={isDark}
         isCompacting={isCompacting}
+        runPhase={runPhase}
       />
     ) : null;
-  }, [threadStatus, messages, toolSteps, permissionReqs, actions, id, isDark, isCompacting]);
+  }, [threadStatus, messages, toolSteps, permissionReqs, actions, id, isDark, isCompacting, runPhase]);
 
   const listFooterComponent = useCallback(() => listFooterElem, [listFooterElem]);
 
@@ -1462,6 +1466,43 @@ function CompactingLabel({ color }: { color: string }) {
   );
 }
 
+function RespondingLabel({ color }: { color: string }) {
+  const op1 = useRef(new Animated.Value(1)).current;
+  const op2 = useRef(new Animated.Value(0.2)).current;
+  const op3 = useRef(new Animated.Value(0.2)).current;
+
+  useEffect(() => {
+    const makePulse = (val: Animated.Value) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(val, { toValue: 1,   duration: 320, useNativeDriver: true }),
+          Animated.timing(val, { toValue: 0.2, duration: 320, useNativeDriver: true }),
+        ])
+      );
+
+    const a1 = makePulse(op1);
+    a1.start();
+    const animRefs: Animated.CompositeAnimation[] = [a1];
+    const t1 = setTimeout(() => { const a = makePulse(op2); a.start(); animRefs.push(a); }, 213);
+    const t2 = setTimeout(() => { const a = makePulse(op3); a.start(); animRefs.push(a); }, 426);
+
+    return () => {
+      animRefs.forEach((a) => a.stop());
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, []);
+
+  return (
+    <Text style={{ color, fontSize: 13, fontWeight: "500" }}>
+      responding
+      <Animated.Text style={{ opacity: op1 }}>.</Animated.Text>
+      <Animated.Text style={{ opacity: op2 }}>.</Animated.Text>
+      <Animated.Text style={{ opacity: op3 }}>.</Animated.Text>
+    </Text>
+  );
+}
+
 function ThinkingIndicator({
   status,
   toolSteps,
@@ -1470,6 +1511,7 @@ function ThinkingIndicator({
   onDeny,
   isDark,
   isCompacting = false,
+  runPhase = "idle",
 }: {
   status: ThreadStatus;
   toolSteps: ToolStep[];
@@ -1478,6 +1520,7 @@ function ThinkingIndicator({
   onDeny: (id: string) => void;
   isDark: boolean;
   isCompacting?: boolean;
+  runPhase?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -1507,9 +1550,11 @@ function ThinkingIndicator({
             paddingVertical: 4,
           }}
         >
-          {isCompacting
+          {isCompacting || runPhase === "compacting"
             ? <CompactingLabel color="#F59E0B" />
-            : <CyclingLabel color={dotColor} />
+            : runPhase === "responding"
+              ? <RespondingLabel color={dotColor} />
+              : <CyclingLabel color={dotColor} />
           }
 
           {/* Divider between label and badges */}

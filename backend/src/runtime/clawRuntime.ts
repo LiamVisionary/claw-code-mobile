@@ -42,6 +42,23 @@ type SpawnResult = {
 
 const activeRuns = new Map<string, ActiveRun>();
 
+export type RunPhase = "idle" | "thinking" | "compacting" | "responding";
+
+const runPhases = new Map<string, RunPhase>();
+
+function setRunPhase(threadId: string, phase: RunPhase) {
+  if (phase === "idle") {
+    runPhases.delete(threadId);
+  } else {
+    runPhases.set(threadId, phase);
+  }
+  streamService.publish(threadId, { type: "run_phase", phase });
+}
+
+export function getRunPhase(threadId: string): RunPhase {
+  return runPhases.get(threadId) ?? "idle";
+}
+
 function workspaceDir(threadId: string): string {
   const dir = path.join(WORKSPACES_DIR, threadId);
   fs.mkdirSync(dir, { recursive: true });
@@ -512,6 +529,7 @@ export const clawRuntime = {
 
     const active: ActiveRun = { runId: run.id, child: null, stopped: false };
     activeRuns.set(threadId, active);
+    setRunPhase(threadId, "thinking");
 
     // Ensure at least one entry to try (no-model mode)
     const queue: Array<ModelConfig | undefined> = models.length > 0 ? models : [undefined];
@@ -536,11 +554,13 @@ export const clawRuntime = {
       // ── Success path ───────────────────────────────────────────
       if (succeeded) {
         try {
+          setRunPhase(threadId, "responding");
           await processSuccess(threadId, messageId, stdoutBuf, active, streamingEnabled);
           finalSuccess = true;
         } catch (err: any) {
           if (err.isContextOverflow && autoCompact && !compactAttempted && !active.stopped) {
             compactAttempted = true;
+            setRunPhase(threadId, "compacting");
             emitTerminal(threadId, "↻ Auto-compacting context…");
             streamService.publish(threadId, { type: "compact_start" });
             const { succeeded: ok, stopped: cs, stdoutBuf: compactOut } = await spawnOnce(
@@ -550,11 +570,13 @@ export const clawRuntime = {
               const info = parseCompactResult(compactOut);
               emitTerminal(threadId, `✓ Context compacted — removed ${info.removedMessages} messages, kept ${info.keptMessages}`);
               streamService.publish(threadId, { type: "compact_end", ...info });
+              setRunPhase(threadId, "thinking");
               i--;
               continue;
             }
             if (cs) break;
             streamService.publish(threadId, { type: "compact_end", removedMessages: 0, keptMessages: 0 });
+            setRunPhase(threadId, "thinking");
             emitTerminal(threadId, "⚠ Compact failed");
           }
           if (err.isClawError) {
@@ -578,6 +600,7 @@ export const clawRuntime = {
 
       if (isContextOverflow(errText) && autoCompact && !compactAttempted && !active.stopped) {
         compactAttempted = true;
+        setRunPhase(threadId, "compacting");
         emitTerminal(threadId, "↻ Auto-compacting context…");
         streamService.publish(threadId, { type: "compact_start" });
         const { succeeded: ok, stopped: cs, stdoutBuf: compactOut } = await spawnOnce(
@@ -588,10 +611,12 @@ export const clawRuntime = {
           const info = parseCompactResult(compactOut);
           emitTerminal(threadId, `✓ Context compacted — removed ${info.removedMessages} messages, kept ${info.keptMessages}`);
           streamService.publish(threadId, { type: "compact_end", ...info });
+          setRunPhase(threadId, "thinking");
           i--;
           continue;
         }
         streamService.publish(threadId, { type: "compact_end", removedMessages: 0, keptMessages: 0 });
+        setRunPhase(threadId, "thinking");
         emitTerminal(threadId, "⚠ Compact failed — trying next model if available");
       }
 
@@ -607,6 +632,7 @@ export const clawRuntime = {
     }
 
     activeRuns.delete(threadId);
+    setRunPhase(threadId, "idle");
 
     if (active.stopped) {
       runService.markStatus(run.id, "stopped");
@@ -633,6 +659,7 @@ export const clawRuntime = {
     const active = activeRuns.get(threadId);
     if (!active) {
       threadService.setStatus(threadId, "idle");
+      setRunPhase(threadId, "idle");
       return;
     }
     active.stopped = true;
@@ -643,6 +670,7 @@ export const clawRuntime = {
       }, 2000);
     }
     activeRuns.delete(threadId);
+    setRunPhase(threadId, "idle");
     runService.markStatus(active.runId, "stopped");
     threadService.setStatus(threadId, "idle");
     streamService.publish(threadId, { type: "status", status: "idle" });

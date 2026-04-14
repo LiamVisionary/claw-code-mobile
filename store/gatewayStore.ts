@@ -259,6 +259,8 @@ type GatewayState = {
   permissionRequests: Record<string, PermissionRequest[]>;
   /** Per-thread compacting state */
   compacting: Record<string, boolean>;
+  /** Per-thread run phase (authoritative from backend) */
+  runPhase: Record<string, string>;
   streams: Record<string, { abort: () => void } | undefined>;
   loadingThreads: boolean;
   activeThreadId?: string;
@@ -335,6 +337,7 @@ export const useGatewayStore = create<GatewayState>()(
       toolSteps: {},
       permissionRequests: {},
       compacting: {},
+      runPhase: {},
       streams: {},
       loadingThreads: false,
       activeThreadId: undefined,
@@ -493,13 +496,19 @@ export const useGatewayStore = create<GatewayState>()(
             try { payload = JSON.parse(data); } catch { return; }
 
             switch (eventName) {
-              case "status":
+              case "status": {
+                const sIdle = payload.status === "idle" || payload.status === "error";
                 set((current) => ({
                   threads: current.threads.map((t) =>
                     t.id === threadId ? { ...t, status: payload.status } : t
                   ),
+                  ...(sIdle ? {
+                    runPhase: { ...current.runPhase, [threadId]: "idle" },
+                    compacting: { ...current.compacting, [threadId]: false },
+                  } : {}),
                 }));
                 break;
+              }
               case "delta":
                 set((current) => {
                   const msgs = current.messages[threadId] ?? [];
@@ -542,6 +551,8 @@ export const useGatewayStore = create<GatewayState>()(
                   threads: current.threads.map((t) =>
                     t.id === threadId ? { ...t, status: "idle" } : t
                   ),
+                  runPhase: { ...current.runPhase, [threadId]: "idle" },
+                  compacting: { ...current.compacting, [threadId]: false },
                 }));
                 return true; // signal openNativeSSE to stop reconnecting
               case "terminal":
@@ -639,6 +650,18 @@ export const useGatewayStore = create<GatewayState>()(
                   };
                 });
                 break;
+              case "run_phase":
+                set((current) => {
+                  const phase = payload.phase ?? "idle";
+                  return {
+                    runPhase: { ...current.runPhase, [threadId]: phase },
+                    compacting: {
+                      ...current.compacting,
+                      [threadId]: phase === "compacting",
+                    },
+                  };
+                });
+                break;
               case "permission_request":
                 set((current) => {
                   const reqs = current.permissionRequests[threadId] ?? [];
@@ -732,21 +755,35 @@ export const useGatewayStore = create<GatewayState>()(
             return;
           }
           try {
-            const [threadRes, msgRes] = await Promise.all([
+            const [threadRes, msgRes, runStateRes] = await Promise.all([
               fetch(`${baseUrl}/threads`, { headers }),
               fetch(`${baseUrl}/threads/${threadId}/messages`, { headers }),
+              fetch(`${baseUrl}/threads/${threadId}/run-state`, { headers }),
             ]);
+            let phase: string | null = null;
+            if (runStateRes.ok) {
+              const rs = await runStateRes.json();
+              phase = rs.phase ?? "idle";
+            }
             if (threadRes.ok) {
               const data = await threadRes.json();
               const freshThread = (data.threads as Thread[]).find((t) => t.id === threadId);
               if (freshThread) {
                 const isIdle = freshThread.status !== "running" && freshThread.status !== "waiting";
+                const resolvedPhase = isIdle ? "idle" : (phase ?? "idle");
                 set((current) => ({
                   threads: current.threads.map((t) =>
                     t.id === threadId ? { ...t, ...freshThread } : t
                   ),
+                  runPhase: {
+                    ...current.runPhase,
+                    [threadId]: resolvedPhase,
+                  },
+                  compacting: {
+                    ...current.compacting,
+                    [threadId]: resolvedPhase === "compacting",
+                  },
                   ...(isIdle ? {
-                    compacting: { ...current.compacting, [threadId]: false },
                     toolSteps: {
                       ...current.toolSteps,
                       [threadId]: (current.toolSteps[threadId] ?? []).map((s) =>
