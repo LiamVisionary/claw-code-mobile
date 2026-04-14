@@ -6,6 +6,7 @@ import {
   Theme,
 } from "@react-navigation/native";
 import { useColorScheme } from "react-native";
+import { useGatewayStore } from "@/store/gatewayStore";
 
 // Use exact native P3 colors and equivalents on Android/web.
 // This lines up well with React Navigation.
@@ -32,12 +33,17 @@ const BaconDarkTheme: Theme = {
 };
 
 export default function ThemeProvider(props: { children: React.ReactNode }) {
-  const colorScheme = useColorScheme();
+  const systemColorScheme = useColorScheme();
+  const darkMode = useGatewayStore((s) => s.settings.darkMode);
+
+  const isDark =
+    darkMode === "dark" || (darkMode === "system" && systemColorScheme === "dark");
+
   return (
     <RNTheme
       // This isn't needed on iOS or web, but it's required on Android since the dynamic colors are broken
       // https://github.com/facebook/react-native/issues/32823
-      value={colorScheme === "dark" ? BaconDarkTheme : BaconDefaultTheme}
+      value={isDark ? BaconDarkTheme : BaconDefaultTheme}
     >
       {props.children}
     </RNTheme>
