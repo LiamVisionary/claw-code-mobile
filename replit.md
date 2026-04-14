@@ -83,7 +83,7 @@ Clones `ultraworkers/claw-code` and runs `cargo build`. Takes ~5 min on first ru
 ### Claw Runtime
 - cwd: `thread.workDir` if set and exists, else `backend/data/workspaces/<threadId>/`
 - Sessions: always `backend/data/workspaces/<threadId>/.claw/sessions/` (CLAW_SESSION_DIR env var)
-- Session isolation: claw writes sessions to `CWD/.claw/sessions/` (ignoring CLAW_SESSION_DIR for writes). After each spawn, `relocateNewSessions()` moves new files from the CWD sessions dir to the per-thread dir. This prevents cross-thread session leakage.
+- Session isolation: `CLAW_SESSION_DIR` is set to `<workspaceDir>/.claw` per thread. Claw's `current_session_store()` uses `from_data_dir(CLAW_SESSION_DIR, cwd)` when the env var is set, so both reads (auto-resume) and writes (session persistence) go to the per-thread data directory. Layout: `<CLAW_SESSION_DIR>/sessions/<workspace_hash>/`.
 - First message auto-detects prior session via `new_cli_session()` in `main.rs` (patched)
 - Command: `claw --output-format json --permission-mode danger-full-access prompt "..."`
 - JSON response streamed word-by-word for visual streaming effect

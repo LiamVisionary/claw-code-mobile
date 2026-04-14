@@ -1495,7 +1495,7 @@ fn run_doctor(output_format: CliOutputFormat) -> Result<(), Box<dyn std::error::
     let message = report.render();
     match output_format {
         CliOutputFormat::Text => println!("{message}"),
-        CliOutputFormat::Json => {
+        CliOutputFormat::Json | CliOutputFormat::StreamJson => {
             println!("{}", serde_json::to_string_pretty(&report.json_value())?);
         }
     }
@@ -1532,7 +1532,7 @@ fn run_worker_state(output_format: CliOutputFormat) -> Result<(), Box<dyn std::e
     let raw = std::fs::read_to_string(&state_path)?;
     match output_format {
         CliOutputFormat::Text => println!("{raw}"),
-        CliOutputFormat::Json => {
+        CliOutputFormat::Json | CliOutputFormat::StreamJson => {
             // Validate it parses as JSON before re-emitting
             let _: serde_json::Value = serde_json::from_str(&raw)?;
             println!("{raw}");
@@ -2052,7 +2052,7 @@ fn dump_manifests_at_path(
                     println!("tools: {}", manifest.tools.entries().len());
                     println!("bootstrap phases: {}", manifest.bootstrap.phases().len());
                 }
-                CliOutputFormat::Json => println!(
+                CliOutputFormat::Json | CliOutputFormat::StreamJson => println!(
                     "{}",
                     serde_json::to_string_pretty(&json!({
                         "kind": "dump-manifests",
@@ -2084,7 +2084,7 @@ fn print_bootstrap_plan(output_format: CliOutputFormat) -> Result<(), Box<dyn st
                 println!("- {phase}");
             }
         }
-        CliOutputFormat::Json => println!(
+        CliOutputFormat::Json | CliOutputFormat::StreamJson => println!(
             "{}",
             serde_json::to_string_pretty(&json!({
                 "kind": "bootstrap-plan",
@@ -2108,7 +2108,7 @@ fn print_system_prompt(
     );
     match output_format {
         CliOutputFormat::Text => println!("{message}"),
-        CliOutputFormat::Json => println!(
+        CliOutputFormat::Json | CliOutputFormat::StreamJson => println!(
             "{}",
             serde_json::to_string_pretty(&json!({
                 "kind": "system-prompt",
@@ -2123,7 +2123,7 @@ fn print_system_prompt(
 fn print_version(output_format: CliOutputFormat) -> Result<(), Box<dyn std::error::Error>> {
     match output_format {
         CliOutputFormat::Text => println!("{}", render_version_report()),
-        CliOutputFormat::Json => {
+        CliOutputFormat::Json | CliOutputFormat::StreamJson => {
             println!("{}", serde_json::to_string_pretty(&version_json_value())?);
         }
     }
@@ -2146,7 +2146,7 @@ fn resume_session(session_path: &Path, commands: &[String], output_format: CliOu
     let (handle, session) = match load_session_reference(&session_reference) {
         Ok(loaded) => loaded,
         Err(error) => {
-            if output_format == CliOutputFormat::Json {
+            if matches!(output_format, CliOutputFormat::Json | CliOutputFormat::StreamJson) {
                 eprintln!(
                     "{}",
                     serde_json::json!({
@@ -2163,7 +2163,7 @@ fn resume_session(session_path: &Path, commands: &[String], output_format: CliOu
     let resolved_path = handle.path.clone();
 
     if commands.is_empty() {
-        if output_format == CliOutputFormat::Json {
+        if matches!(output_format, CliOutputFormat::Json | CliOutputFormat::StreamJson) {
             println!(
                 "{}",
                 serde_json::json!({
@@ -2197,7 +2197,7 @@ fn resume_session(session_path: &Path, commands: &[String], output_format: CliOu
                 .next()
                 .unwrap_or("");
             if STUB_COMMANDS.contains(&cmd_root) {
-                if output_format == CliOutputFormat::Json {
+                if matches!(output_format, CliOutputFormat::Json | CliOutputFormat::StreamJson) {
                     eprintln!(
                         "{}",
                         serde_json::json!({
@@ -2215,7 +2215,7 @@ fn resume_session(session_path: &Path, commands: &[String], output_format: CliOu
         let command = match SlashCommand::parse(raw_command) {
             Ok(Some(command)) => command,
             Ok(None) => {
-                if output_format == CliOutputFormat::Json {
+                if matches!(output_format, CliOutputFormat::Json | CliOutputFormat::StreamJson) {
                     eprintln!(
                         "{}",
                         serde_json::json!({
@@ -2230,7 +2230,7 @@ fn resume_session(session_path: &Path, commands: &[String], output_format: CliOu
                 std::process::exit(2);
             }
             Err(error) => {
-                if output_format == CliOutputFormat::Json {
+                if matches!(output_format, CliOutputFormat::Json | CliOutputFormat::StreamJson) {
                     eprintln!(
                         "{}",
                         serde_json::json!({
@@ -2252,7 +2252,7 @@ fn resume_session(session_path: &Path, commands: &[String], output_format: CliOu
                 json,
             }) => {
                 session = next_session;
-                if output_format == CliOutputFormat::Json {
+                if matches!(output_format, CliOutputFormat::Json | CliOutputFormat::StreamJson) {
                     if let Some(value) = json {
                         println!(
                             "{}",
@@ -2267,7 +2267,7 @@ fn resume_session(session_path: &Path, commands: &[String], output_format: CliOu
                 }
             }
             Err(error) => {
-                if output_format == CliOutputFormat::Json {
+                if matches!(output_format, CliOutputFormat::Json | CliOutputFormat::StreamJson) {
                     eprintln!(
                         "{}",
                         serde_json::json!({
@@ -3017,7 +3017,7 @@ fn enforce_broad_cwd_policy(
             cwd.display()
         );
         match output_format {
-            CliOutputFormat::Json => {
+            CliOutputFormat::Json | CliOutputFormat::StreamJson => {
                 eprintln!(
                     "{}",
                     serde_json::json!({
@@ -3792,7 +3792,7 @@ impl LiveCli {
         match output_format {
             CliOutputFormat::Text if compact => self.run_prompt_compact(input),
             CliOutputFormat::Text => self.run_turn(input),
-            CliOutputFormat::Json => self.run_prompt_json(input),
+            CliOutputFormat::Json | CliOutputFormat::StreamJson => self.run_prompt_json(input),
         }
     }
 
@@ -4298,7 +4298,7 @@ impl LiveCli {
         let cwd = env::current_dir()?;
         match output_format {
             CliOutputFormat::Text => println!("{}", handle_agents_slash_command(args, &cwd)?),
-            CliOutputFormat::Json => println!(
+            CliOutputFormat::Json | CliOutputFormat::StreamJson => println!(
                 "{}",
                 serde_json::to_string_pretty(&handle_agents_slash_command_json(args, &cwd)?)?
             ),
@@ -4319,7 +4319,7 @@ impl LiveCli {
         let cwd = env::current_dir()?;
         match output_format {
             CliOutputFormat::Text => println!("{}", handle_mcp_slash_command(args, &cwd)?),
-            CliOutputFormat::Json => println!(
+            CliOutputFormat::Json | CliOutputFormat::StreamJson => println!(
                 "{}",
                 serde_json::to_string_pretty(&handle_mcp_slash_command_json(args, &cwd)?)?
             ),
@@ -4334,7 +4334,7 @@ impl LiveCli {
         let cwd = env::current_dir()?;
         match output_format {
             CliOutputFormat::Text => println!("{}", handle_skills_slash_command(args, &cwd)?),
-            CliOutputFormat::Json => println!(
+            CliOutputFormat::Json | CliOutputFormat::StreamJson => println!(
                 "{}",
                 serde_json::to_string_pretty(&handle_skills_slash_command_json(args, &cwd)?)?
             ),
@@ -4354,7 +4354,7 @@ impl LiveCli {
         let result = handle_plugins_slash_command(action, target, &mut manager)?;
         match output_format {
             CliOutputFormat::Text => println!("{}", result.message),
-            CliOutputFormat::Json => println!(
+            CliOutputFormat::Json | CliOutputFormat::StreamJson => println!(
                 "{}",
                 serde_json::to_string_pretty(&json!({
                     "kind": "plugin",
@@ -4673,7 +4673,13 @@ fn sessions_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
 
 fn current_session_store() -> Result<runtime::SessionStore, Box<dyn std::error::Error>> {
     let cwd = env::current_dir()?;
-    runtime::SessionStore::from_cwd(&cwd).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+    if let Ok(dir) = env::var("CLAW_SESSION_DIR") {
+        runtime::SessionStore::from_data_dir(dir, &cwd)
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+    } else {
+        runtime::SessionStore::from_cwd(&cwd)
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+    }
 }
 
 fn new_cli_session() -> Result<Session, Box<dyn std::error::Error>> {
@@ -4682,14 +4688,11 @@ fn new_cli_session() -> Result<Session, Box<dyn std::error::Error>> {
     // Sessions live in  .claw/sessions/<hash>/<session>.jsonl  (legacy layout)
     // or .claw/sessions/<session_id>.jsonl (managed layout from a previous auto-resume).
     //
-    // CLAW_SESSION_DIR can override the sessions directory so the gateway can
+    // CLAW_SESSION_DIR overrides the data directory so the gateway can
     // store per-thread sessions in isolated directories even when multiple
-    // threads share the same project working directory.
-    let sessions_dir = if let Ok(dir) = std::env::var("CLAW_SESSION_DIR") {
-        std::path::PathBuf::from(dir)
-    } else {
-        workspace_root.join(".claw").join("sessions")
-    };
+    // threads share the same project working directory. Both reads (auto-resume)
+    // and writes (session persistence via current_session_store) honour it.
+    let sessions_dir = current_session_store()?.sessions_dir().to_path_buf();
     if sessions_dir.exists() {
         let mut latest_mtime: Option<std::time::SystemTime> = None;
         let mut latest_path: Option<std::path::PathBuf> = None;
@@ -4940,7 +4943,7 @@ fn print_status_snapshot(
             "{}",
             format_status_report(model, usage, permission_mode.as_str(), &context)
         ),
-        CliOutputFormat::Json => println!(
+        CliOutputFormat::Json | CliOutputFormat::StreamJson => println!(
             "{}",
             serde_json::to_string_pretty(&status_json_value(
                 Some(model),
@@ -5180,7 +5183,7 @@ fn print_sandbox_status_snapshot(
     let status = resolve_sandbox_status(runtime_config.sandbox(), &cwd);
     match output_format {
         CliOutputFormat::Text => println!("{}", format_sandbox_report(&status)),
-        CliOutputFormat::Json => println!(
+        CliOutputFormat::Json | CliOutputFormat::StreamJson => println!(
             "{}",
             serde_json::to_string_pretty(&sandbox_json_value(&status))?
         ),
@@ -5426,7 +5429,7 @@ fn run_init(output_format: CliOutputFormat) -> Result<(), Box<dyn std::error::Er
     let message = init_claude_md()?;
     match output_format {
         CliOutputFormat::Text => println!("{message}"),
-        CliOutputFormat::Json => println!(
+        CliOutputFormat::Json | CliOutputFormat::StreamJson => println!(
             "{}",
             serde_json::to_string_pretty(&init_json_value(&message))?
         ),
@@ -6025,7 +6028,7 @@ fn run_export(
         );
         match output_format {
             CliOutputFormat::Text => println!("{report}"),
-            CliOutputFormat::Json => println!(
+            CliOutputFormat::Json | CliOutputFormat::StreamJson => println!(
                 "{}",
                 serde_json::to_string_pretty(&json!({
                     "kind": "export",
@@ -6046,7 +6049,7 @@ fn run_export(
                 println!();
             }
         }
-        CliOutputFormat::Json => println!(
+        CliOutputFormat::Json | CliOutputFormat::StreamJson => println!(
             "{}",
             serde_json::to_string_pretty(&json!({
                 "kind": "export",
@@ -8311,7 +8314,7 @@ fn print_help(output_format: CliOutputFormat) -> Result<(), Box<dyn std::error::
     let message = String::from_utf8(buffer)?;
     match output_format {
         CliOutputFormat::Text => print!("{message}"),
-        CliOutputFormat::Json => println!(
+        CliOutputFormat::Json | CliOutputFormat::StreamJson => println!(
             "{}",
             serde_json::to_string_pretty(&json!({
                 "kind": "help",
