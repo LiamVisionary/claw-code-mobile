@@ -191,6 +191,47 @@ function emitTerminal(threadId: string, line: string) {
   streamService.publish(threadId, { type: "terminal", chunk: line + "\n" });
 }
 
+function scanSessionFiles(dir: string): Set<string> {
+  const files = new Set<string>();
+  if (!fs.existsSync(dir)) return files;
+  try {
+    for (const entry of fs.readdirSync(dir)) {
+      const full = path.join(dir, entry);
+      try {
+        const stat = fs.statSync(full);
+        if (stat.isDirectory()) {
+          for (const sub of fs.readdirSync(full)) {
+            if (sub.endsWith(".jsonl") || sub.endsWith(".json")) {
+              files.add(path.join(full, sub));
+            }
+          }
+        } else if (entry.endsWith(".jsonl") || entry.endsWith(".json")) {
+          files.add(full);
+        }
+      } catch { /* skip */ }
+    }
+  } catch { /* skip */ }
+  return files;
+}
+
+function relocateNewSessions(cwdSessionsDir: string, perThreadDir: string, before: Set<string>) {
+  if (!fs.existsSync(cwdSessionsDir)) return;
+  const after = scanSessionFiles(cwdSessionsDir);
+  for (const file of after) {
+    if (!before.has(file)) {
+      try {
+        const rel = path.relative(cwdSessionsDir, file);
+        const dest = path.join(perThreadDir, rel);
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        fs.copyFileSync(file, dest);
+        fs.unlinkSync(file);
+      } catch (err) {
+        logger.warn({ err, file }, "Failed to relocate session file");
+      }
+    }
+  }
+}
+
 /**
  * Spawn claw once with the given model config. Resolves with a SpawnResult
  * so the caller can decide whether to retry with a fallback model.
@@ -208,6 +249,9 @@ function spawnOnce(
     const args = isCompact ? buildCompactArgs(model, sessionDir) : buildArgs(content, model);
     const env = buildEnv(model, sessionDir);
     logger.info({ threadId, cwd, model: model?.name ?? model?.provider, args }, "Spawning claw");
+
+    const cwdSessionsDir = path.join(cwd, ".claw", "sessions");
+    const beforeFiles = scanSessionFiles(cwdSessionsDir);
 
     const child = spawn(CLAW_BINARY, args, {
       cwd,
@@ -233,6 +277,7 @@ function spawnOnce(
     });
 
     child.on("close", (code) => {
+      relocateNewSessions(cwdSessionsDir, sessionDir, beforeFiles);
       if (active.stopped) {
         resolve({ succeeded: false, stdoutBuf, stderrBuf, stopped: true });
         return;
