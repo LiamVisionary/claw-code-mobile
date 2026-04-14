@@ -1,27 +1,37 @@
 [
   {
-    "content": "Implement run_prompt_stream_json in Rust CLI that emits NDJSON events in real-time",
-    "activeForm": "Implementing run_prompt_stream_json in Rust CLI",
+    "content": "Add turn_event_callback field and builder method to ConversationRuntime",
+    "activeForm": "Adding TurnEventCallback field and builder to ConversationRuntime",
     "status": "in_progress"
   },
   {
-    "content": "Update run_turn_with_output to dispatch StreamJson to the new method",
-    "activeForm": "Updating run_turn_with_output to dispatch StreamJson",
+    "content": "Emit TurnEvents from run_turn at appropriate points",
+    "activeForm": "Emitting TurnEvents from run_turn",
     "status": "pending"
   },
   {
-    "content": "Update Node backend to use stream-json format and parse NDJSON line-by-line",
-    "activeForm": "Updating Node backend to use stream-json and parse NDJSON",
+    "content": "Export TurnEvent and TurnEventCallback from runtime lib.rs",
+    "activeForm": "Exporting new types from lib.rs",
     "status": "pending"
   },
   {
-    "content": "Build and test the Rust binary",
-    "activeForm": "Building and testing the Rust binary",
+    "content": "Implement NDJSON streaming emitter in CLI for stream-json format",
+    "activeForm": "Implementing stream-json NDJSON emitter in CLI",
     "status": "pending"
   },
   {
-    "content": "Test end-to-end streaming of tool badges and text",
-    "activeForm": "Testing end-to-end streaming",
+    "content": "Wire stream-json output format to use streaming in CLI main",
+    "activeForm": "Wiring stream-json in CLI main",
+    "status": "pending"
+  },
+  {
+    "content": "Update backend clawRuntime.ts to parse NDJSON stream",
+    "activeForm": "Updating backend to parse NDJSON stream",
+    "status": "pending"
+  },
+  {
+    "content": "Build and verify compilation",
+    "activeForm": "Verifying compilation",
     "status": "pending"
   }
 ]

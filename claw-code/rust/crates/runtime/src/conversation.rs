@@ -116,6 +116,39 @@ pub struct TurnSummary {
     pub auto_compaction: Option<AutoCompactionEvent>,
 }
 
+/// Events emitted during a turn for real-time streaming consumers.
+/// When a `TurnEventCallback` is installed on the runtime, these events
+/// are emitted as the turn progresses — allowing downstream consumers
+/// (e.g. the CLI's NDJSON streaming mode) to react in real-time rather
+/// than waiting for the full turn to complete.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TurnEvent {
+    /// The model is requesting a tool execution (tool_use block received).
+    ToolStart {
+        id: String,
+        name: String,
+        input: String,
+    },
+    /// A tool execution has completed.
+    ToolEnd {
+        id: String,
+        name: String,
+        output: String,
+        is_error: bool,
+    },
+    /// A text delta from the assistant's response.
+    TextDelta(String),
+    /// The turn has completed with the full summary.
+    TurnComplete,
+}
+
+/// Callback trait for receiving real-time events during a turn.
+/// Implement this to stream events (e.g. as NDJSON lines to stdout)
+/// as they happen rather than waiting for the full turn result.
+pub trait TurnEventCallback {
+    fn on_event(&mut self, event: &TurnEvent);
+}
+
 /// Details about automatic session compaction applied during a turn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AutoCompactionEvent {
