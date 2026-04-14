@@ -31,6 +31,8 @@ type ActiveRun = {
   runId: string;
   child: ReturnType<typeof spawn> | null;
   stopped: boolean;
+  /** Tool step IDs already emitted in real-time from stderr, so processSuccess can skip them. */
+  realtimeStepIds: Set<string>;
 };
 
 type SpawnResult = {
@@ -164,7 +166,8 @@ function spawnOnce(
   sessionDir: string,
   model: ModelConfig | undefined,
   active: ActiveRun,
-  isCompact = false
+  isCompact = false,
+  messageId?: string
 ): Promise<SpawnResult> {
   return new Promise((resolve) => {
     const args = isCompact ? buildCompactArgs(model) : buildArgs(content, model);
@@ -181,6 +184,10 @@ function spawnOnce(
     let stdoutBuf = "";
     let stderrBuf = "";
 
+    // Track the current "open" tool step so we can emit tool_end when it completes.
+    // Map from tool name to the most recent stepId that was started but not yet ended.
+    const openSteps = new Map<string, string>();
+
     child.stdout.on("data", (chunk: Buffer) => {
       stdoutBuf += chunk.toString();
     });
@@ -190,7 +197,20 @@ function spawnOnce(
       stderrBuf += text;
       for (const line of text.split("\n")) {
         const trimmed = line.trim();
-        if (trimmed) emitTerminal(threadId, trimmed);
+        if (!trimmed) continue;
+        emitTerminal(threadId, trimmed);
+
+        // Parse hook progress events from stderr for real-time tool badges.
+        // Claw writes lines like:
+        //   [hook PreToolUse] bash: ls -la
+        //   [hook done PreToolUse] bash: ls -la
+        //   [hook PostToolUse] bash: ls -la
+        //   [hook done PostToolUse] bash: ls -la
+        //   [hook cancelled PostToolUse] bash: ls -la
+        // We emit tool_start on "PreToolUse" and tool_end on "done PostToolUse" or "cancelled PostToolUse".
+        if (messageId && !isCompact) {
+          parseHookEvent(trimmed, threadId, messageId, active, openSteps);
+        }
       }
     });
 
@@ -207,6 +227,68 @@ function spawnOnce(
       resolve({ succeeded: false, stdoutBuf, stderrBuf: err.message, stopped: false });
     });
   });
+}
+
+/**
+ * Parse a claw hook progress line from stderr and emit real-time tool_start / tool_end SSE events.
+ *
+ * Claw writes lines like:
+ *   [hook PreToolUse] bash: ls -la          ← tool about to run
+ *   [hook done PreToolUse] bash: ls -la      ← pre-hook completed (tool executing)
+ *   [hook PostToolUse] bash: ls -la          ← tool finished, post-hook starting
+ *   [hook done PostToolUse] bash: ls -la     ← post-hook completed (tool fully done)
+ *   [hook cancelled PostToolUse] bash: ...   ← tool cancelled
+ *
+ * We emit `tool_start` when we see `PreToolUse` (tool is about to execute) and
+ * `tool_end` when we see `done PostToolUse` or `cancelled PostToolUse` (tool finished).
+ */
+function parseHookEvent(
+  line: string,
+  threadId: string,
+  messageId: string,
+  active: ActiveRun,
+  openSteps: Map<string, string>,
+): void {
+  // Match: [hook <status>] <tool_name>: <command>
+  // Where <status> is one of: pre_tool, done pre_tool, post_tool, done post_tool, cancelled post_tool
+  const hookMatch = line.match(
+    /^\[hook\s+(done\s+|cancelled\s+)?(\w+)\]\s+(\w+)(?::\s+(.*))?$/
+  );
+  if (!hookMatch) return;
+
+  const doneOrCancelled = hookMatch[1]?.trim() ?? ""; // "done", "cancelled", or ""
+  const hookPhase = hookMatch[2]; // "PreToolUse", "PostToolUse", "PostToolUseFailure"
+  const toolName = hookMatch[3];
+  const command = hookMatch[4] ?? "";
+
+  // Only care about tool-related hooks (not PostToolUseFailure)
+  if (hookPhase !== "PreToolUse" && hookPhase !== "PostToolUse") return;
+
+  if (hookPhase === "PreToolUse" && !doneOrCancelled) {
+    // Tool is about to start executing → emit tool_start
+    const stepId = `step-${toolName}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const label = command || toolName;
+    streamService.publish(threadId, {
+      type: "tool_start",
+      id: stepId,
+      messageId,
+      tool: toolName,
+      label: label.slice(0, 80),
+    });
+    openSteps.set(toolName, stepId);
+    active.realtimeStepIds.add(stepId);
+  } else if (hookPhase === "PostToolUse" && (doneOrCancelled === "done" || doneOrCancelled === "cancelled")) {
+    // Tool finished → emit tool_end
+    const stepId = openSteps.get(toolName);
+    if (stepId) {
+      streamService.publish(threadId, {
+        type: "tool_end",
+        id: stepId,
+        messageId,
+      });
+      openSteps.delete(toolName);
+    }
+  }
 }
 
 /**
@@ -389,15 +471,37 @@ async function processSuccess(
     });
   }
 
-  // Stagger tool_start / tool_end events so the UI can display each badge
-  // appearing one-by-one before the response message streams in.
+  // Emit tool_start / tool_end events for tools that were NOT already
+  // emitted in real-time from stderr hook events.
   // Each tool gets a brief "running" window (spinner visible) before done.
   const toolUses = result.tool_uses ?? [];
+  const hadRealtimeTools = active.realtimeStepIds.size > 0;
   for (const tu of toolUses) {
     if (active.stopped) break;
     const toolName = tu.name ?? "unknown";
-    const stepId = `step-${toolName}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const label = toolLabel(toolName, tu.input) || toolName;
+
+    // Check if this tool was already emitted in real-time via stderr hooks.
+    // The realtime step IDs are keyed by tool name, so we look for any
+    // step ID that starts with `step-${toolName}-`.
+    const alreadyEmitted = [...active.realtimeStepIds].some(
+      (id) => id.startsWith(`step-${toolName}-`)
+    );
+
+    if (alreadyEmitted) {
+      // Tool was already shown in real-time — just emit terminal debug line
+      emitTerminal(threadId, `[${toolName}] ${JSON.stringify(tu.input).slice(0, 200)}`);
+      // Remove the used step ID so we don't match it again for the same tool name
+      for (const id of active.realtimeStepIds) {
+        if (id.startsWith(`step-${toolName}-`)) {
+          active.realtimeStepIds.delete(id);
+          break;
+        }
+      }
+      continue;
+    }
+
+    const stepId = `step-${toolName}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     streamService.publish(threadId, {
       type: "tool_start",
       id: stepId,
@@ -417,9 +521,10 @@ async function processSuccess(
     // Short gap between steps for a natural appearance
     await sleep(55);
   }
-  // Pause briefly so user can see all steps before the text begins streaming
+  // Pause briefly so user can see all steps before the text begins streaming.
+  // If tools were already shown in real-time, a shorter pause is fine.
   if (toolUses.length > 0 && !active.stopped) {
-    await sleep(220);
+    await sleep(hadRealtimeTools ? 50 : 220);
   }
   for (const tr of result.tool_results ?? []) {
     if (tr.content) emitTerminal(threadId, tr.content.slice(0, 400));
@@ -492,7 +597,7 @@ export const clawRuntime = {
         ? thread.workDir
         : workspaceDir(threadId);
 
-    const active: ActiveRun = { runId: run.id, child: null, stopped: false };
+    const active: ActiveRun = { runId: run.id, child: null, stopped: false, realtimeStepIds: new Set() };
     activeRuns.set(threadId, active);
     setRunPhase(threadId, "thinking");
 
@@ -511,7 +616,7 @@ export const clawRuntime = {
       if (i > 0) emitTerminal(threadId, `↻ Trying fallback: ${label}`);
 
       const { succeeded, stdoutBuf, stderrBuf, stopped } = await spawnOnce(
-        threadId, content, cwd, sessionDir, model, active
+        threadId, content, cwd, sessionDir, model, active, false, messageId
       );
 
       if (stopped) break;
