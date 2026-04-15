@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFocusEffect } from "expo-router";
 import {
   Animated,
-  ActivityIndicator,
   AppState,
   FlatList,
   KeyboardAvoidingView,
@@ -19,9 +18,11 @@ import Markdown from "react-native-markdown-display";
 import * as Clipboard from "expo-clipboard";
 import { Stack, useLocalSearchParams, useNavigation } from "expo-router";
 import { BottomSheetModal } from "@gorhom/bottom-sheet";
-import * as AC from "@bacons/apple-colors";
 import TouchableBounce from "@/components/ui/TouchableBounce";
 import { IconSymbol } from "@/components/ui/IconSymbol";
+import { ThinkingSprite } from "@/components/ui/ThinkingSprite";
+import { usePalette } from "@/hooks/usePalette";
+import type { Palette } from "@/constants/palette";
 import SlashCommandPicker from "@/components/SlashCommandPicker";
 import DirectoryBrowser from "@/components/DirectoryBrowser";
 import { useGatewayStore } from "@/store/gatewayStore";
@@ -71,6 +72,7 @@ export default function ThreadScreen() {
   const { bottom } = useSafeAreaInsets();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
+  const palette = usePalette();
 
   // Track whether messages were successfully loaded so we never accidentally
   // delete a thread whose messages just failed to fetch.
@@ -201,7 +203,7 @@ export default function ThreadScreen() {
                 height: 32,
                 justifyContent: "center",
                 alignItems: "center",
-                backgroundColor: AC.systemRed,
+                backgroundColor: palette.danger,
                 borderRadius: BORDER_RADIUS.full,
               }}
             >
@@ -226,7 +228,7 @@ export default function ThreadScreen() {
               borderRadius: BORDER_RADIUS.full,
             }}
           >
-            <IconSymbol name="terminal" color={AC.label} size={14} />
+            <IconSymbol name="terminal" color={palette.text} size={14} />
           </View>
         </TouchableBounce>
         <TouchableBounce
@@ -242,14 +244,14 @@ export default function ThreadScreen() {
               justifyContent: "center",
               alignItems: "center",
               backgroundColor: copiedConvo
-                ? AC.systemGreen
+                ? palette.success
                 : isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.05)",
               borderRadius: BORDER_RADIUS.full,
             }}
           >
             <IconSymbol
               name={copiedConvo ? "checkmark" : "doc.on.doc"}
-              color={copiedConvo ? "#fff" : AC.label}
+              color={copiedConvo ? "#fff" : palette.text}
               size={14}
             />
           </View>
@@ -269,7 +271,7 @@ export default function ThreadScreen() {
       headerTitle: () => {
         if (!active) {
           return (
-            <Text style={{ color: AC.label, fontSize: 16, fontWeight: "600" }} numberOfLines={1}>
+            <Text style={{ color: palette.text, fontSize: 16, fontWeight: "600" }} numberOfLines={1}>
               {thread?.title ?? "Chat"}
             </Text>
           );
@@ -295,7 +297,7 @@ export default function ThreadScreen() {
             >
               <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: dotColor }} />
               <Text
-                style={{ color: AC.label, fontSize: 13, fontWeight: "600", maxWidth: 180 }}
+                style={{ color: palette.text, fontSize: 13, fontWeight: "600", maxWidth: 180 }}
                 numberOfLines={1}
               >
                 {shortName}
@@ -319,6 +321,26 @@ export default function ThreadScreen() {
     return "";
   }, [messages]);
 
+  // Live-cycle badges: the trailing run of tool steps whose messageId
+  // matches the most recent step's messageId. The backend rotates
+  // `currentMessageId` on text-after-tool (each thought + its actions
+  // get their own bubble), so the "latest step's messageId" is also the
+  // current cycle's bubble id. When rotation fires, the new cycle starts
+  // with a single tool and grows from there — the filter breaks at the
+  // bubble boundary, so previous cycle's badges stay visible only on
+  // their own MessageBubble (via the per-bubble messageId filter there),
+  // not in the live indicator below the list.
+  const liveCycleSteps = useMemo(() => {
+    if (toolSteps.length === 0) return EMPTY_STEPS;
+    const latestMsgId = toolSteps[toolSteps.length - 1].messageId;
+    const out: typeof toolSteps = [];
+    for (let i = toolSteps.length - 1; i >= 0; i--) {
+      if (toolSteps[i].messageId === latestMsgId) out.unshift(toolSteps[i]);
+      else break;
+    }
+    return out;
+  }, [toolSteps]);
+
   const listFooterElem = useMemo(() => {
     const lastMsg = messages[messages.length - 1];
     const phaseActive = runPhase !== "idle";
@@ -330,7 +352,7 @@ export default function ThreadScreen() {
     return needsIndicator ? (
       <ThinkingIndicator
         status={threadStatus}
-        toolSteps={toolSteps}
+        toolSteps={liveCycleSteps}
         permissionRequests={permissionReqs}
         onApprove={(permId) => actions.respondToPermission(id ?? "", permId, true)}
         onDeny={(permId) => actions.respondToPermission(id ?? "", permId, false)}
@@ -340,7 +362,7 @@ export default function ThreadScreen() {
         thinkingContent={liveThinking}
       />
     ) : null;
-  }, [threadStatus, messages, toolSteps, permissionReqs, actions, id, isDark, isCompacting, runPhase, liveThinking]);
+  }, [threadStatus, messages, liveCycleSteps, permissionReqs, actions, id, isDark, isCompacting, runPhase, liveThinking]);
 
   const listFooterComponent = useCallback(() => listFooterElem, [listFooterElem]);
 
@@ -351,17 +373,17 @@ export default function ThreadScreen() {
           flex: 1,
           alignItems: "center",
           justifyContent: "center",
-          backgroundColor: AC.systemGroupedBackground,
+          backgroundColor: palette.bg,
         }}
       >
-        <Text style={{ color: AC.label, fontSize: 16 }}>Thread not found</Text>
+        <Text style={{ color: palette.text, fontSize: 16 }}>Thread not found</Text>
       </View>
     );
   }
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: AC.systemGroupedBackground }}
+      style={{ flex: 1, backgroundColor: palette.bg }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       keyboardVerticalOffset={80}
     >
@@ -415,11 +437,11 @@ export default function ThreadScreen() {
               }}>
                 <IconSymbol
                   name="ellipsis.bubble"
-                  color={AC.systemGray3}
+                  color={palette.textSoft}
                   size={22}
                 />
               </View>
-              <Text style={{ color: AC.systemGray, fontSize: 14 }}>
+              <Text style={{ color: palette.textMuted, fontSize: 14 }}>
                 Start a conversation
               </Text>
             </View>
@@ -487,7 +509,7 @@ export default function ThreadScreen() {
                 <Text style={{ fontSize: 11 }}>📁</Text>
                 <Text
                   style={{
-                    color: AC.secondaryLabel,
+                    color: palette.textMuted,
                     fontSize: 12,
                     fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
                     maxWidth: 220,
@@ -500,7 +522,7 @@ export default function ThreadScreen() {
                   <IconSymbol
                     name="chevron.down"
                     size={10}
-                    color={AC.secondaryLabel as any}
+                    color={palette.textMuted as any}
                   />
                 )}
               </View>
@@ -515,7 +537,7 @@ export default function ThreadScreen() {
               backgroundColor: isDark ? "#1c1c1e" : "#fff",
               borderRadius: 22,
               borderWidth: 1,
-              borderColor: isDark ? "rgba(255,255,255,0.08)" : AC.separator,
+              borderColor: isDark ? "rgba(255,255,255,0.08)" : palette.divider,
               paddingHorizontal: SPACING.md,
               paddingVertical: SPACING.xs,
               ...SHADOW.sm,
@@ -523,14 +545,14 @@ export default function ThreadScreen() {
           >
             <TextInput
               placeholder="Message…"
-              placeholderTextColor={AC.systemGray3}
+              placeholderTextColor={palette.textSoft}
               value={input}
               onChangeText={handleInputChange}
               multiline
               style={{
                 minHeight: 40,
                 maxHeight: 120,
-                color: AC.label,
+                color: palette.text,
                 fontSize: TYPOGRAPHY.fontSizes.md,
                 lineHeight: TYPOGRAPHY.lineHeights.md,
                 paddingVertical: SPACING.sm,
@@ -551,7 +573,7 @@ export default function ThreadScreen() {
                   width: 32,
                   height: 32,
                   borderRadius: 16,
-                  backgroundColor: input.trim() ? AC.label : (isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.08)"),
+                  backgroundColor: input.trim() ? palette.text : (isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.08)"),
                   justifyContent: "center",
                   alignItems: "center",
                 }}
@@ -559,7 +581,7 @@ export default function ThreadScreen() {
                 <IconSymbol
                   name="arrow.up"
                   size={14}
-                  color={input.trim() ? (isDark ? "#000" : "#fff") : AC.systemGray3}
+                  color={input.trim() ? (isDark ? "#000" : "#fff") : palette.textSoft}
                 />
               </View>
             </TouchableBounce>
@@ -581,13 +603,13 @@ export default function ThreadScreen() {
         ref={terminalRef}
         snapPoints={["40%", "70%"]}
         backgroundStyle={{
-          backgroundColor: AC.systemBackground,
+          backgroundColor: palette.surface,
         }}
-        handleIndicatorStyle={{ backgroundColor: AC.systemGray3 }}
+        handleIndicatorStyle={{ backgroundColor: palette.textSoft }}
       >
         <View style={{ flex: 1, padding: SPACING.md, gap: SPACING.md }}>
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-            <Text style={{ color: AC.label, fontWeight: "600", fontSize: 15 }}>
+            <Text style={{ color: palette.text, fontWeight: "600", fontSize: 15 }}>
               Terminal
             </Text>
             <TouchableBounce
@@ -602,7 +624,7 @@ export default function ThreadScreen() {
                 justifyContent: "center",
                 alignItems: "center",
               }}>
-                <IconSymbol name="xmark" color={AC.systemGray} size={12} />
+                <IconSymbol name="xmark" color={palette.textMuted} size={12} />
               </View>
             </TouchableBounce>
           </View>
@@ -641,16 +663,16 @@ export default function ThreadScreen() {
               value={command}
               onChangeText={setCommand}
               placeholder="Run a command"
-              placeholderTextColor={AC.systemGray3}
+              placeholderTextColor={palette.textSoft}
               style={{
                 flex: 1,
-                backgroundColor: isDark ? "#1c1c1e" : AC.secondarySystemGroupedBackground,
+                backgroundColor: isDark ? "#1c1c1e" : palette.surface,
                 borderRadius: BORDER_RADIUS.md,
                 paddingHorizontal: SPACING.md,
                 paddingVertical: SPACING.sm,
                 borderWidth: 1,
-                borderColor: isDark ? "rgba(255,255,255,0.06)" : AC.separator,
-                color: AC.label,
+                borderColor: isDark ? "rgba(255,255,255,0.06)" : palette.divider,
+                color: palette.text,
                 fontSize: 14,
               }}
             />
@@ -668,13 +690,13 @@ export default function ThreadScreen() {
                   width: 36,
                   height: 36,
                   borderRadius: 18,
-                  backgroundColor: command.trim() ? AC.label : (isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.05)"),
+                  backgroundColor: command.trim() ? palette.text : (isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.05)"),
                   justifyContent: "center",
                   alignItems: "center",
                   opacity: command.trim() ? 1 : 0.5,
                 }}
               >
-                <IconSymbol name="arrow.up" color={command.trim() ? (isDark ? "#000" : "#fff") : AC.systemGray3} size={14} />
+                <IconSymbol name="arrow.up" color={command.trim() ? (isDark ? "#000" : "#fff") : palette.textSoft} size={14} />
               </View>
             </TouchableBounce>
           </View>
@@ -806,6 +828,7 @@ function MessageBubble({ message, threadId }: { message: Message; threadId: stri
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
   const mdStyles = useMarkdownStyles(isDark);
+  const palette = usePalette();
 
   // Tool steps for THIS message — only populated for assistant messages after a run.
   // Separate selector + useMemo avoids creating new arrays on every store update.
@@ -1088,7 +1111,7 @@ function MessageBubble({ message, threadId }: { message: Message; threadId: stri
             style={{
               maxWidth: isUser ? "80%" : "92%",
               backgroundColor: isUser
-                ? AC.systemBlue
+                ? palette.accent
                 : isDark
                   ? "#1c1c1e"
                   : "#fff",
@@ -1098,7 +1121,7 @@ function MessageBubble({ message, threadId }: { message: Message; threadId: stri
               paddingHorizontal: SPACING.md,
               paddingVertical: SPACING.sm + 2,
               borderWidth: isUser ? 0 : 1,
-              borderColor: isDark ? "rgba(255,255,255,0.06)" : AC.separator,
+              borderColor: isDark ? "rgba(255,255,255,0.06)" : palette.divider,
               ...(isUser ? SHADOW.md : SHADOW.sm),
             }}
           >
@@ -1144,8 +1167,8 @@ function MessageBubble({ message, threadId }: { message: Message; threadId: stri
             paddingHorizontal: SPACING.sm,
           }}
         >
-          <IconSymbol name="checkmark" size={10} color={AC.systemGreen} />
-          <Text style={{ fontSize: 11, color: AC.systemGreen }}>Copied</Text>
+          <IconSymbol name="checkmark" size={10} color={palette.success} />
+          <Text style={{ fontSize: 11, color: palette.success }}>Copied</Text>
         </View>
       )}
     </View>
@@ -1620,6 +1643,7 @@ function ThinkingIndicator({
   const [expanded, setExpanded] = useState(false);
   const [thinkingExpanded, setThinkingExpanded] = useState(false);
   const [tappedBadgeId, setTappedBadgeId] = useState<string | null>(null);
+  const palette = usePalette();
 
   const MAX_VISIBLE  = 8;
   const visibleBadges = toolSteps.slice(-MAX_VISIBLE);
@@ -1647,7 +1671,8 @@ function ThinkingIndicator({
       >
         {/* Phase label — tappable to toggle thinking */}
         <TouchableBounce sensory onPress={hasThinking ? () => setThinkingExpanded((v) => !v) : undefined}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+            <ThinkingSprite size={21} />
             {isCompacting || runPhase === "compacting"
               ? <CompactingLabel color="#F59E0B" />
               : runPhase === "responding"
@@ -1668,11 +1693,15 @@ function ThinkingIndicator({
           <View style={{ width: 1, height: 14, backgroundColor: dotColor, opacity: 0.25, marginHorizontal: 1 }} />
         )}
 
-        {/* Individual tappable badges — each toggles its label */}
+        {/* Individual tappable badges — each toggles its label.
+            Note: claw's stream API doesn't emit tool_end in real-time, so
+            we intentionally don't show a running-spinner state. Each badge
+            appearing at all means the tool invocation was started; its
+            mere presence is the live-progress indicator. */}
         {visibleBadges.map((step) => {
-          const meta      = TOOL_META[step.tool] ?? TOOL_META.unknown;
-          const isRunning = step.status === "running";
-          const isActive  = tappedBadgeId === step.id;
+          const meta     = TOOL_META[step.tool] ?? TOOL_META.unknown;
+          const isError  = step.status === "error";
+          const isActive = tappedBadgeId === step.id;
           return (
             <TouchableBounce
               key={step.id}
@@ -1684,16 +1713,16 @@ function ThinkingIndicator({
                   width: 26, height: 26, borderRadius: 7,
                   backgroundColor: isActive
                     ? `${meta.color}33`
-                    : isRunning
-                      ? `${meta.color}22`
+                    : isError
+                      ? "rgba(239,68,68,0.12)"
                       : isDark ? "rgba(255,255,255,0.09)" : "rgba(0,0,0,0.06)",
                   borderWidth: isActive ? 1 : 0,
                   borderColor: `${meta.color}55`,
                   justifyContent: "center", alignItems: "center",
                 }}
               >
-                {isRunning
-                  ? <ActivityIndicator size="small" color={meta.color} style={{ width: 14, height: 14 }} />
+                {isError
+                  ? <IconSymbol name="xmark.circle.fill" size={12} color="#EF4444" />
                   : <IconSymbol name={meta.icon as any} size={12} color={meta.color} />
                 }
               </View>
@@ -1786,32 +1815,26 @@ function ThinkingIndicator({
           }}
         >
           {toolSteps.map((step) => {
-            const meta      = TOOL_META[step.tool] ?? TOOL_META.unknown;
-            const isRunning = step.status === "running";
-            const isError   = step.status === "error";
-            const rowColor  = isRunning ? meta.color
-              : isError ? "#EF4444"
-              : isDark ? "rgba(255,255,255,0.28)" : "rgba(0,0,0,0.28)";
+            const meta    = TOOL_META[step.tool] ?? TOOL_META.unknown;
+            const isError = step.status === "error";
             return (
               <View key={step.id} style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
-                {isRunning
-                  ? <ActivityIndicator size="small" color={meta.color} style={{ width: 14, height: 14 }} />
-                  : isError
-                    ? <IconSymbol name="xmark.circle.fill" size={12} color="#EF4444" />
-                    : <IconSymbol name="checkmark.circle.fill" size={12} color="#22C55E" />
+                {isError
+                  ? <IconSymbol name="xmark.circle.fill" size={12} color="#EF4444" />
+                  : <IconSymbol name="checkmark.circle.fill" size={12} color="#22C55E" />
                 }
                 <View style={{
                   width: 20, height: 20, borderRadius: 5,
-                  backgroundColor: isRunning ? `${meta.color}20` : (isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)"),
+                  backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)",
                   justifyContent: "center", alignItems: "center",
                 }}>
-                  <IconSymbol name={meta.icon as any} size={11} color={isRunning ? meta.color : rowColor} />
+                  <IconSymbol name={meta.icon as any} size={11} color={meta.color} />
                 </View>
                 <Text
                   style={{
-                    color: isRunning ? AC.label : (isDark ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.38)"),
+                    color: isDark ? "rgba(255,255,255,0.55)" : "rgba(0,0,0,0.55)",
                     fontSize: 12.5,
-                    fontWeight: isRunning ? "500" : "400",
+                    fontWeight: "500",
                     fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
                     flexShrink: 1,
                   }}
@@ -1864,7 +1887,7 @@ function ThinkingIndicator({
               backgroundColor: bubbleBg,
               borderRadius: BORDER_RADIUS.lg,
               borderWidth: 1.5,
-              borderColor: AC.systemOrange,
+              borderColor: "#FF9500",
               overflow: "hidden",
               ...SHADOW.sm,
             }}
@@ -1887,19 +1910,19 @@ function ThinkingIndicator({
                   justifyContent: "center", alignItems: "center",
                 }}
               >
-                <IconSymbol name={meta.icon as any} size={13} color={AC.systemOrange} />
+                <IconSymbol name={meta.icon as any} size={13} color={"#FF9500"} />
               </View>
-              <Text style={{ color: AC.systemOrange, fontSize: 13, fontWeight: "700", flex: 1 }}>
+              <Text style={{ color: "#FF9500", fontSize: 13, fontWeight: "700", flex: 1 }}>
                 Permission Required
               </Text>
-              <IconSymbol name="exclamationmark.triangle.fill" size={13} color={AC.systemOrange} />
+              <IconSymbol name="exclamationmark.triangle.fill" size={13} color={"#FF9500"} />
             </View>
 
             {/* Description + buttons */}
             <View style={{ padding: 14, gap: 12 }}>
               <Text
                 style={{
-                  color: AC.label,
+                  color: palette.text,
                   fontSize: 13,
                   lineHeight: 18,
                   fontFamily: req.tool === "bash" ? (Platform.OS === "ios" ? "Menlo" : "monospace") : undefined,
@@ -1911,7 +1934,7 @@ function ThinkingIndicator({
                 <TouchableBounce sensory onPress={() => onApprove(req.id)} style={{ flex: 1 }}>
                   <View
                     style={{
-                      backgroundColor: AC.systemBlue,
+                      backgroundColor: palette.accent,
                       borderRadius: BORDER_RADIUS.md,
                       paddingVertical: 9,
                       alignItems: "center",
@@ -1929,7 +1952,7 @@ function ThinkingIndicator({
                       alignItems: "center",
                     }}
                   >
-                    <Text style={{ color: AC.label, fontSize: 14, fontWeight: "600" }}>Deny</Text>
+                    <Text style={{ color: palette.text, fontSize: 14, fontWeight: "600" }}>Deny</Text>
                   </View>
                 </TouchableBounce>
               </View>

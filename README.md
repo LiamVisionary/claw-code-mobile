@@ -22,6 +22,7 @@ Chat with an AI that can execute code, edit files, and manage projects on your r
 - **Dark & light mode** — Full native iOS theming with semantic colors
 - **Swipe actions** — Swipe to delete or duplicate conversations
 - **Message queuing** — Queue a message while the AI is busy; it sends automatically when the run finishes
+- **Local diagnostic telemetry** — Every SSE emission, tool call, token count, and client render is logged to a local `events` table so you can diff backend-emitted events against what the UI rendered and find token-consumption hot spots. **All telemetry lives on your own machine** — events are written to the same local SQLite database the rest of the app uses, never transmitted off-device. The goal is to enable stronger local data analysis and UX improvements without any data leaving your setup. Toggle it off any time under Settings → Behaviour → "Diagnostic telemetry".
 
 ---
 
@@ -48,35 +49,71 @@ The gateway spawns a Claw process for each AI run, pipes its output back to the 
 
 ## Quick Start
 
-### 1. Gateway
+### Prerequisites
+
+- **Node.js 20+** and **npm**
+- **Rust toolchain** (`cargo`, `rustc`, and a C compiler) — required to build the `claw` CLI binary that powers the backend. If you don't have it:
+  ```bash
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+  # Linux only: also ensure a C compiler is installed
+  sudo apt-get install -y build-essential     # Debian/Ubuntu
+  ```
+- **cloudflared** (only for remote mode) — `brew install cloudflared` or see [releases](https://github.com/cloudflare/cloudflared/releases)
+
+The first `npm run dev` / `npm run dev:tunnel` will clone and compile the Rust `claw` CLI into `~/.cache/claw-code-mobile/target/` (~3–5 min). Subsequent runs are instant.
+
+### Local (phone + dev machine on the same Wi-Fi) — 1 command
 
 ```bash
-cd backend
-yarn install
-GATEWAY_AUTH_TOKEN=dev-token yarn dev
-# → http://localhost:4000
+npm install --legacy-peer-deps
+npm --prefix backend install
+npm run dev
 ```
 
-**Environment variables:**
+That's it. A Metro QR code appears in the terminal — **scan it with the Expo Go app** on your phone (iOS Camera also works). The app auto-discovers the backend at `http://<your-lan-ip>:5000` with the default `dev-token`, so **Settings needs no changes**.
+
+If the auto-detect doesn't resolve for some reason, open **Settings** in the app and the values are already pre-filled — just tap **Test**.
+
+### Remote (dev machine is a VPS, or phone on cellular) — 1 command
+
+```bash
+cp .env.example .env         # optional — edit to taste
+npm install --legacy-peer-deps
+npm --prefix backend install
+npm run dev:tunnel
+```
+
+This starts the backend + Expo **and** opens two public cloudflared tunnels. It also **auto-injects** the backend tunnel URL + bearer token into the Metro bundle as `EXPO_PUBLIC_GATEWAY_URL` / `EXPO_PUBLIC_GATEWAY_TOKEN`, so **the app auto-configures its Server URL on launch** — no manual paste into Settings.
+
+The terminal prints:
+
+```
+  1. Open Expo Go on your phone
+  2. Tap 'Enter URL manually' and paste:
+       exp://<random>.trycloudflare.com
+  3. Server URL / Bearer are already wired up.
+```
+
+**Telegram integration** (optional but strongly recommended if you're on mobile): set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.env`. Each startup DMs you a message with a tappable **Open in Expo Go** link that goes through the backend's `/open-app` landing page and hands off directly to Expo Go. No copy-paste. (Telegram refuses to make `exp://` URLs tappable in any form, so the message routes through an https redirect hop — worth knowing if you're wondering why the link lands on a tiny landing page with a button.)
+
+**Tunnel providers** (choose in `.env` → `TUNNEL_PROVIDER=`):
+
+| Provider      | Account? | Install |
+|---------------|----------|---------|
+| `cloudflared` (default) | no   | `brew install cloudflared` · [releases](https://github.com/cloudflare/cloudflared/releases) |
+| `ngrok`       | yes (free) — add `NGROK_AUTHTOKEN` to `.env` | `brew install ngrok` · [download](https://ngrok.com/download) |
+
+> ⚠️ Use ngrok's **standalone v3 binary**, not `npx expo start --tunnel`. Expo bundles a legacy ngrok v2 client that no longer works against current ngrok servers.
+
+**`EXPO_TOKEN` (recommended for remote mode):** Without it, `dev:tunnel` falls back to `--offline` which skips EAS manifest signing and works fine for most cases. For the full experience (EAS Update metadata, etc.), generate a personal token at [expo.dev access tokens](https://expo.dev/accounts/[username]/settings/access-tokens) and put it in `.env` as `EXPO_TOKEN=...`. Each developer needs their own — **don't share**.
+
+### Gateway environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PORT` | `4000` | Server port |
+| `PORT` | `5000` | Server port |
 | `GATEWAY_AUTH_TOKEN` | `dev-token` | Bearer token for API auth |
 | `DATABASE_FILE` | — | SQLite file path (optional) |
-
-### 2. Mobile
-
-```bash
-yarn install
-yarn start
-```
-
-Then in **Settings** (gear icon):
-
-1. Set **Server URL** — e.g. `http://localhost:4000`
-2. Set **Bearer token** — match `GATEWAY_AUTH_TOKEN`
-3. Tap **Test** to confirm `/health` responds
 
 ---
 

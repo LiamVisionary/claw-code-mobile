@@ -37,7 +37,9 @@ messagesRouter.post("/threads/:threadId/messages", async (req, res, next) => {
         modelQueue: z.array(modelEntrySchema).optional(),
         model: modelEntrySchema.optional(),
         autoCompact: z.boolean().optional(),
+        autoCompactThreshold: z.number().min(0).max(100).optional(),
         streamingEnabled: z.boolean().optional(),
+        autoContinueEnabled: z.boolean().optional(),
       })
       .parse(req.body);
 
@@ -62,7 +64,9 @@ messagesRouter.post("/threads/:threadId/messages", async (req, res, next) => {
         assistantMessageId,
         models,
         body.autoCompact ?? true,
-        body.streamingEnabled ?? true
+        body.streamingEnabled ?? true,
+        body.autoCompactThreshold ?? 70,
+        body.autoContinueEnabled ?? true
       )
       .catch((err: unknown) => {
         logger.error({ err }, "clawRuntime.sendMessage failed");

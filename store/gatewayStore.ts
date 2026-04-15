@@ -1,6 +1,91 @@
+import Constants from "expo-constants";
 import * as FileSystem from "expo-file-system/legacy";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+
+/**
+ * Infer the gateway server URL from Expo's packager host.
+ *
+ * When running over LAN (plain `expo start`), `hostUri` looks like
+ * `192.168.1.12:8081`. The backend listens on the same machine at :5000,
+ * so we swap the port and prepend http://. This lets zero-config LAN setups
+ * work without touching Settings.
+ *
+ * Returns "" when hostUri isn't a LAN host (e.g. tunnel mode) — the user
+ * is expected to set EXPO_PUBLIC_GATEWAY_URL or fill it in manually.
+ */
+const inferDefaultServerUrl = (): string => {
+  const hostUri =
+    (Constants.expoConfig as { hostUri?: string } | null)?.hostUri ??
+    (Constants.expoGoConfig as { debuggerHost?: string } | null)?.debuggerHost ??
+    "";
+  if (!hostUri) return "";
+  const host = hostUri.split("/")[0].split(":")[0];
+  if (!host) return "";
+  // Skip tunnel hosts — they won't proxy to :5000 on the dev machine.
+  if (host.endsWith(".trycloudflare.com") || host.endsWith(".exp.direct") || host.endsWith(".ngrok.io") || host.endsWith(".ngrok-free.app")) {
+    return "";
+  }
+  return `http://${host}:5000`;
+};
+
+// ── Telemetry ─────────────────────────────────────────────────────────────
+// Mirror every SSE event the client receives and every bubble render the
+// client performs into a small buffer, then batch-upload to the backend's
+// /events/client endpoint every 2 seconds (or when the buffer fills). This
+// gives us a server-side record of exactly what the UI saw and rendered,
+// so backend-emission-vs-client-render mismatches can be diffed in the
+// `events` table after the fact.
+
+type ClientEventInput = {
+  type: string;
+  threadId?: string;
+  runId?: string;
+  payload?: Record<string, unknown>;
+};
+
+const telemetryBuffer: ClientEventInput[] = [];
+let telemetryFlushTimer: ReturnType<typeof setTimeout> | null = null;
+const TELEMETRY_FLUSH_INTERVAL_MS = 2000;
+const TELEMETRY_MAX_BUFFER = 200;
+
+function logClientEvent(event: ClientEventInput): void {
+  telemetryBuffer.push(event);
+  if (telemetryBuffer.length >= TELEMETRY_MAX_BUFFER) {
+    void flushTelemetry();
+    return;
+  }
+  if (telemetryFlushTimer === null) {
+    telemetryFlushTimer = setTimeout(() => {
+      telemetryFlushTimer = null;
+      void flushTelemetry();
+    }, TELEMETRY_FLUSH_INTERVAL_MS);
+  }
+}
+
+async function flushTelemetry(): Promise<void> {
+  if (telemetryBuffer.length === 0) return;
+  // Snapshot + clear so new events during the in-flight POST aren't lost.
+  const batch = telemetryBuffer.splice(0, telemetryBuffer.length);
+  try {
+    const state = useGatewayStore.getState();
+    if (!state.settings.telemetryEnabled) return;
+    const { serverUrl, bearerToken } = state.settings;
+    if (!serverUrl || !bearerToken) return;
+    const baseUrl = serverUrl.replace(/\/+$/, "");
+    await fetch(`${baseUrl}/events/client`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${bearerToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ events: batch }),
+    });
+  } catch {
+    // Never let telemetry block or error the UI. Dropped batches are
+    // acceptable — server-side emission logging is authoritative anyway.
+  }
+}
 
 /**
  * openNativeSSE — XHR-based SSE client for React Native.
@@ -71,9 +156,13 @@ function openNativeSSE(
       xhr.setRequestHeader(k, v);
     }
 
-    xhr.onreadystatechange = () => {
-      if (xhr.readyState < 3) return;
-
+    // Shared chunk processor — called from both readystatechange and
+    // progress handlers. React Native's XHR implementation is inconsistent
+    // about which event fires for incremental chunks: some versions fire
+    // onreadystatechange on every chunk at readyState 3, others only fire
+    // it once and deliver subsequent chunks via onprogress. Listening to
+    // both and advancing a shared offset keeps us robust either way.
+    const processChunk = () => {
       if (xhr.status !== 0 && xhr.status !== 200) {
         onError(new Error(`SSE status ${xhr.status}`));
         if (!reconnectScheduled) {
@@ -83,8 +172,10 @@ function openNativeSSE(
         return;
       }
 
-      const newText = xhr.responseText.slice(offset);
-      offset = xhr.responseText.length;
+      const responseText = xhr.responseText ?? "";
+      if (responseText.length <= offset) return;
+      const newText = responseText.slice(offset);
+      offset = responseText.length;
 
       const raw = partialLine + newText;
       const endsWithNewline = raw.endsWith("\n");
@@ -98,7 +189,7 @@ function openNativeSSE(
         } else if (line.startsWith("data: ")) {
           dataBuffer += (dataBuffer ? "\n" : "") + line.slice(6);
         } else if (line.startsWith(":")) {
-          // keep-alive comment — ignore
+          // keep-alive / padding comment — ignore
         } else if (line === "") {
           if (dataBuffer !== "") {
             const isDone = onMessage(currentEvent, dataBuffer);
@@ -108,12 +199,21 @@ function openNativeSSE(
           }
         }
       }
+    };
+
+    xhr.onreadystatechange = () => {
+      if (xhr.readyState < 3) return;
+      processChunk();
 
       // readyState 4 = DONE — connection closed by server or proxy
       if (xhr.readyState === 4 && !reconnectScheduled) {
         reconnectScheduled = true;
         scheduleReconnect();
       }
+    };
+
+    xhr.onprogress = () => {
+      processChunk();
     };
 
     xhr.onerror = () => {
@@ -254,6 +354,28 @@ type Settings = {
   autoCompact: boolean;       // auto-compact context when window is full
   streamingEnabled: boolean;  // stream response word-by-word (vs. show all at once)
   darkMode: "system" | "light" | "dark";  // appearance preference
+  accentTheme: "claude" | "lavender";  // which accent palette to use
+  /**
+   * Percentage (0–100) of the active model's context window at which to
+   * proactively compact the conversation before the next turn. Also used
+   * as the threshold for treating an empty-response error as an implicit
+   * overflow and triggering a compact+retry.
+   */
+  autoCompactThreshold: number;
+  /**
+   * When true, the client mirrors every SSE event it receives and every
+   * bubble render it performs to the backend's /events/client endpoint,
+   * so backend emission vs client reception can be diffed in the events
+   * table for debugging.
+   */
+  telemetryEnabled: boolean;
+  /**
+   * When true, the backend fires one synthetic "continue" spawn after a
+   * turn that ended with mid-sentence punctuation (":", ",", "—", etc.).
+   * Works around GLM-via-OpenRouter voluntarily quitting after a handful
+   * of output tokens. Only runs once per user message.
+   */
+  autoContinueEnabled: boolean;
 };
 
 type GatewayState = {
@@ -269,13 +391,20 @@ type GatewayState = {
   compacting: Record<string, boolean>;
   /** Per-thread run phase (authoritative from backend) */
   runPhase: Record<string, string>;
+  /**
+   * Per-thread timestamp (unix ms) of the most recent `status: running`
+   * event. The live ThinkingIndicator uses this to show only tool steps
+   * added during the current run without wiping the historical toolSteps
+   * that previous bubbles still need for their own badge displays.
+   */
+  runStartedAt: Record<string, number>;
   streams: Record<string, { abort: () => void } | undefined>;
   loadingThreads: boolean;
   activeThreadId?: string;
   /** True once zustand-persist has finished rehydrating settings from disk */
   _hasHydrated: boolean;
   actions: {
-    setSettings: (input: Omit<Settings, "modelQueue" | "autoCompact" | "streamingEnabled" | "darkMode"> & { modelQueue?: ModelEntry[]; autoCompact?: boolean; streamingEnabled?: boolean; darkMode?: "system" | "light" | "dark" }) => void;
+    setSettings: (input: Omit<Settings, "modelQueue" | "autoCompact" | "streamingEnabled" | "darkMode" | "accentTheme" | "autoCompactThreshold" | "telemetryEnabled" | "autoContinueEnabled"> & { modelQueue?: ModelEntry[]; autoCompact?: boolean; streamingEnabled?: boolean; darkMode?: "system" | "light" | "dark"; accentTheme?: "claude" | "lavender"; autoCompactThreshold?: number; telemetryEnabled?: boolean; autoContinueEnabled?: boolean }) => void;
     loadThreads: () => Promise<void>;
     createThread: (workDir?: string) => Promise<Thread>;
     browseFsDirectory: (path?: string) => Promise<FsListing>;
@@ -333,12 +462,16 @@ export const useGatewayStore = create<GatewayState>()(
   persist(
     (set, get) => ({
       settings: {
-        serverUrl: process.env.EXPO_PUBLIC_GATEWAY_URL ?? "",
-        bearerToken: process.env.EXPO_PUBLIC_GATEWAY_TOKEN ?? "",
+        serverUrl: process.env.EXPO_PUBLIC_GATEWAY_URL ?? inferDefaultServerUrl(),
+        bearerToken: process.env.EXPO_PUBLIC_GATEWAY_TOKEN ?? "dev-token",
         modelQueue: [],
         autoCompact: true,
         streamingEnabled: true,
         darkMode: "system",
+        accentTheme: "lavender",
+        autoCompactThreshold: 70,
+        telemetryEnabled: true,
+        autoContinueEnabled: true,
       },
       threads: [],
       messages: {},
@@ -347,6 +480,7 @@ export const useGatewayStore = create<GatewayState>()(
       permissionRequests: {},
       compacting: {},
       runPhase: {},
+      runStartedAt: {},
       streams: {},
       loadingThreads: false,
       activeThreadId: undefined,
@@ -363,6 +497,19 @@ export const useGatewayStore = create<GatewayState>()(
               autoCompact: input.autoCompact ?? state.settings.autoCompact ?? true,
               streamingEnabled: input.streamingEnabled ?? state.settings.streamingEnabled ?? true,
               darkMode: input.darkMode ?? state.settings.darkMode ?? "system",
+              accentTheme: input.accentTheme ?? state.settings.accentTheme ?? "lavender",
+              autoCompactThreshold:
+                input.autoCompactThreshold ??
+                state.settings.autoCompactThreshold ??
+                70,
+              telemetryEnabled:
+                input.telemetryEnabled ??
+                state.settings.telemetryEnabled ??
+                true,
+              autoContinueEnabled:
+                input.autoContinueEnabled ??
+                state.settings.autoContinueEnabled ??
+                true,
             },
           })),
 
@@ -450,6 +597,8 @@ export const useGatewayStore = create<GatewayState>()(
               body: JSON.stringify({
                 content,
                 autoCompact: state.settings.autoCompact ?? true,
+                autoCompactThreshold: state.settings.autoCompactThreshold ?? 70,
+                autoContinueEnabled: state.settings.autoContinueEnabled ?? true,
                 streamingEnabled: state.settings.streamingEnabled ?? true,
                 modelQueue: (() => {
                   const q = (state.settings.modelQueue ?? []).filter((m) => m.enabled);
@@ -505,6 +654,16 @@ export const useGatewayStore = create<GatewayState>()(
             let payload: any;
             try { payload = JSON.parse(data); } catch { return; }
 
+            // Mirror every received SSE event to the events table so
+            // backend emission vs. client reception can be diffed later.
+            // Content strings are truncated to 400 chars server-side, so we
+            // can safely log the whole payload here.
+            logClientEvent({
+              type: "client_sse_received",
+              threadId,
+              payload: { eventName, ...payload },
+            });
+
             switch (eventName) {
               case "status": {
                 const sIdle = payload.status === "idle" || payload.status === "error";
@@ -517,10 +676,13 @@ export const useGatewayStore = create<GatewayState>()(
                     runPhase: { ...current.runPhase, [threadId]: "idle" },
                     compacting: { ...current.compacting, [threadId]: false },
                   } : {}),
-                  // Clear tool steps when a new run starts so the live indicator
-                  // only shows steps from the current run, not all historical steps.
+                  // On new run start, stamp the run boundary timestamp so the
+                  // live indicator can filter to only *this* run's tool steps.
+                  // We intentionally do NOT clear `toolSteps` — previous runs'
+                  // bubbles still need their historical badges, filtered by
+                  // messageId inside MessageBubble.
                   ...(isRunning ? {
-                    toolSteps: { ...current.toolSteps, [threadId]: [] },
+                    runStartedAt: { ...current.runStartedAt, [threadId]: Date.now() },
                   } : {}),
                 }));
                 break;
@@ -611,8 +773,13 @@ export const useGatewayStore = create<GatewayState>()(
               case "tool_start":
                 set((current) => {
                   const steps = current.toolSteps[threadId] ?? [];
+                  const stepId = payload.id ?? `step-${Date.now()}`;
+                  // Dedupe by id — the backend replay buffer will re-send
+                  // state-mutating events on reconnect, and clients that
+                  // already received the original should not double-add.
+                  if (steps.some((s) => s.id === stepId)) return current;
                   const newStep: ToolStep = {
-                    id: payload.id ?? `step-${Date.now()}`,
+                    id: stepId,
                     tool: payload.tool ?? "unknown",
                     label: payload.label ?? payload.tool ?? "Working…",
                     status: "running",
@@ -877,7 +1044,41 @@ export const useGatewayStore = create<GatewayState>()(
       name: "gateway-settings",
       storage: createJSONStorage(() => fileStorage),
       partialize: (state) => ({ settings: state.settings }),
-      onRehydrateStorage: () => () => {
+      onRehydrateStorage: () => (state) => {
+        // Prefer EXPO_PUBLIC_GATEWAY_URL / EXPO_PUBLIC_GATEWAY_TOKEN when set
+        // — these are baked into the bundle by scripts/dev-tunnel.mjs and must
+        // override stale persisted values so each Metro restart auto-updates
+        // the app's server URL. Fall back to persisted, then inferred defaults.
+        if (state) {
+          const s = state.settings;
+          const patch: Partial<typeof s> = {};
+          const envUrl = process.env.EXPO_PUBLIC_GATEWAY_URL;
+          const envToken = process.env.EXPO_PUBLIC_GATEWAY_TOKEN;
+          if (envUrl && envUrl !== s.serverUrl) {
+            patch.serverUrl = envUrl;
+          } else if (!s.serverUrl) {
+            const inferred = inferDefaultServerUrl();
+            if (inferred) patch.serverUrl = inferred;
+          }
+          if (envToken && envToken !== s.bearerToken) {
+            patch.bearerToken = envToken;
+          } else if (!s.bearerToken) {
+            patch.bearerToken = "dev-token";
+          }
+          // Backfill fields that didn't exist on earlier installs. Without
+          // this, `if (!state.settings.telemetryEnabled) return;` in the
+          // flush path silently drops every client event because the
+          // persisted blob pre-dates the field.
+          if (s.telemetryEnabled === undefined) patch.telemetryEnabled = true;
+          if (s.autoCompactThreshold === undefined) patch.autoCompactThreshold = 70;
+          if (s.accentTheme === undefined) patch.accentTheme = "lavender";
+          if (s.autoContinueEnabled === undefined) patch.autoContinueEnabled = true;
+          if (Object.keys(patch).length) {
+            useGatewayStore.setState({
+              settings: { ...s, ...patch },
+            });
+          }
+        }
         useGatewayStore.setState({ _hasHydrated: true });
       },
     }

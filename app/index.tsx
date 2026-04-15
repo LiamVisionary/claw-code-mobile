@@ -11,7 +11,6 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { useFocusEffect } from "expo-router";
-import * as AC from "@bacons/apple-colors";
 import ReanimatedSwipeable from "react-native-gesture-handler/ReanimatedSwipeable";
 import Reanimated, {
   SharedValue,
@@ -25,6 +24,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { IconSymbol } from "@/components/ui/IconSymbol";
 import { Stack } from "expo-router";
 import DirectoryBrowser from "@/components/DirectoryBrowser";
+import { usePalette } from "@/hooks/usePalette";
+import type { Palette } from "@/constants/palette";
 
 // ─── Right-side swipe actions (Delete + Duplicate) ───────────────────────────
 
@@ -33,11 +34,13 @@ function RightActions({
   drag,
   onDelete,
   onDuplicate,
+  palette,
 }: {
   prog: SharedValue<number>;
   drag: SharedValue<number>;
   onDelete: () => void;
   onDuplicate: () => void;
+  palette: Palette;
 }) {
   const TOTAL_WIDTH = 152; // 76 per button
 
@@ -54,7 +57,7 @@ function RightActions({
           style={{
             width: 76,
             flex: 1,
-            backgroundColor: AC.systemBlue as any,
+            backgroundColor: palette.accent,
             alignItems: "center",
             justifyContent: "center",
             gap: 4,
@@ -71,7 +74,7 @@ function RightActions({
           style={{
             width: 76,
             flex: 1,
-            backgroundColor: AC.systemRed as any,
+            backgroundColor: palette.danger,
             alignItems: "center",
             justifyContent: "center",
             gap: 4,
@@ -97,6 +100,7 @@ export default function ChatListScreen() {
   const [error, setError] = useState<string | null>(null);
   const [showBrowser, setShowBrowser] = useState(false);
   const { bottom } = useSafeAreaInsets();
+  const palette = usePalette();
 
   useEffect(() => {
     if (!_hasHydrated) return;
@@ -176,7 +180,7 @@ export default function ChatListScreen() {
               <View
                 style={{
                   padding: 8,
-                  backgroundColor: AC.label,
+                  backgroundColor: palette.text,
                   borderRadius: 12,
                   opacity: creating ? 0.5 : 1,
                   flexDirection: "row",
@@ -185,8 +189,8 @@ export default function ChatListScreen() {
                 }}
               >
                 {creating
-                  ? <ActivityIndicator color={AC.systemBackground} size="small" />
-                  : <IconSymbol name="plus" color={AC.systemBackground} size={16} />}
+                  ? <ActivityIndicator color={palette.bg} size="small" />
+                  : <IconSymbol name="plus" color={palette.bg} size={16} />}
               </View>
             </TouchableBounce>
           ),
@@ -195,13 +199,13 @@ export default function ChatListScreen() {
       <View
         style={{
           flex: 1,
-          backgroundColor: AC.systemGroupedBackground,
+          backgroundColor: palette.bg,
           paddingTop: 12,
           paddingBottom: bottom + 16,
         }}
       >
         {error && (
-          <Text style={{ color: AC.systemRed, fontSize: 13, marginBottom: 12, paddingHorizontal: 16 }}>
+          <Text style={{ color: palette.danger, fontSize: 13, marginBottom: 12, paddingHorizontal: 16 }}>
             {error}
           </Text>
         )}
@@ -224,6 +228,7 @@ export default function ChatListScreen() {
                 }}
                 onDelete={() => handleDelete(item)}
                 onDuplicate={() => handleDuplicate(item)}
+                palette={palette}
               />
             )}
             ListEmptyComponent={() => (
@@ -235,21 +240,21 @@ export default function ChatListScreen() {
                   gap: 12,
                 }}
               >
-                <IconSymbol name="bubble.left.and.bubble.right" color={AC.systemGray3} size={40} />
-                <Text style={{ color: AC.systemGray, fontSize: 16, fontWeight: "600" }}>
+                <IconSymbol name="bubble.left.and.bubble.right" color={palette.textSoft} size={40} />
+                <Text style={{ color: palette.textMuted, fontSize: 16, fontWeight: "600" }}>
                   No chats yet
                 </Text>
                 <TouchableBounce sensory onPress={handleNewChat} disabled={creating}>
                   <View
                     style={{
                       marginTop: 4,
-                      backgroundColor: AC.label,
+                      backgroundColor: palette.text,
                       paddingHorizontal: 24,
                       paddingVertical: 12,
                       borderRadius: 14,
                     }}
                   >
-                    <Text style={{ color: AC.systemBackground, fontWeight: "600" }}>
+                    <Text style={{ color: palette.bg, fontWeight: "600" }}>
                       Start a chat
                     </Text>
                   </View>
@@ -276,11 +281,13 @@ function SwipeableChatRow({
   onPress,
   onDelete,
   onDuplicate,
+  palette,
 }: {
   thread: Thread;
   onPress: () => void;
   onDelete: () => void;
   onDuplicate: () => void;
+  palette: Palette;
 }) {
   const swipeRef = useRef<any>(null);
 
@@ -298,10 +305,11 @@ function SwipeableChatRow({
           drag={drag}
           onDelete={() => { close(); onDelete(); }}
           onDuplicate={() => { close(); onDuplicate(); }}
+          palette={palette}
         />
       )}
     >
-      <ChatRow thread={thread} onPress={onPress} />
+      <ChatRow thread={thread} onPress={onPress} palette={palette} />
     </ReanimatedSwipeable>
   );
 }
@@ -318,30 +326,30 @@ function timeAgo(dateStr: string) {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
-function ChatRow({ thread, onPress }: { thread: Thread; onPress: () => void }) {
+function ChatRow({ thread, onPress, palette }: { thread: Thread; onPress: () => void; palette: Palette }) {
   const isRunning = thread.status === "running";
   const dirName = thread.workDir ? thread.workDir.split("/").filter(Boolean).pop() : null;
   return (
     <Pressable onPress={onPress} style={({ pressed }) => ({ opacity: pressed ? 0.72 : 1 })}>
       <View
         style={{
-          backgroundColor: AC.secondarySystemGroupedBackground,
+          backgroundColor: palette.surface,
           borderRadius: 16,
           padding: 16,
-          borderColor: AC.separator,
+          borderColor: palette.divider,
           borderWidth: 1,
           gap: 6,
         }}
       >
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-          <Text style={{ color: AC.label, fontSize: 15, fontWeight: "600", flex: 1 }} numberOfLines={1}>
+          <Text style={{ color: palette.text, fontSize: 15, fontWeight: "600", flex: 1 }} numberOfLines={1}>
             {thread.title}
           </Text>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
             {isRunning && (
-              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: AC.systemBlue }} />
+              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: palette.accent }} />
             )}
-            <Text style={{ color: AC.systemGray2, fontSize: 12 }}>
+            <Text style={{ color: palette.textMuted, fontSize: 12 }}>
               {timeAgo(thread.updatedAt)}
             </Text>
           </View>
@@ -351,7 +359,7 @@ function ChatRow({ thread, onPress }: { thread: Thread; onPress: () => void }) {
             <Text style={{ fontSize: 11 }}>📁</Text>
             <Text
               style={{
-                color: AC.systemGray,
+                color: palette.textMuted,
                 fontSize: 12,
                 fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
               }}
@@ -362,11 +370,11 @@ function ChatRow({ thread, onPress }: { thread: Thread; onPress: () => void }) {
           </View>
         )}
         {thread.lastMessagePreview ? (
-          <Text style={{ color: AC.systemGray, fontSize: 14 }} numberOfLines={2}>
+          <Text style={{ color: palette.textMuted, fontSize: 14 }} numberOfLines={2}>
             {thread.lastMessagePreview}
           </Text>
         ) : (
-          <Text style={{ color: AC.systemGray2, fontSize: 14, fontStyle: "italic" }}>
+          <Text style={{ color: palette.textSoft, fontSize: 14, fontStyle: "italic" }}>
             No messages yet
           </Text>
         )}

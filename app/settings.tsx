@@ -1,30 +1,272 @@
-import * as AC from "@bacons/apple-colors";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
-  KeyboardAvoidingView,
-  Platform,
   ScrollView,
   Switch,
   Text,
   TextInput,
   View,
+  useColorScheme,
 } from "react-native";
+import { Stack } from "expo-router";
 import TouchableBounce from "@/components/ui/TouchableBounce";
 import { type ModelEntry, useGatewayStore } from "@/store/gatewayStore";
 
-const PROVIDERS = [
-  { key: "claude" as const, label: "Claude", color: "#0066FF" },
-  { key: "openrouter" as const, label: "OpenRouter", color: "#7B3FE4" },
-  { key: "local" as const, label: "Local", color: "#16A34A" },
+// ─── Design tokens ───────────────────────────────────────────────────────────
+// Warm, low-contrast palette from DESIGN_GUIDELINES.md.
+
+const LIGHT = {
+  bg: "#F6F2EA",
+  surface: "#FBF8F1",
+  surfaceAlt: "#F0EADE",
+  text: "#2B2823",
+  textMuted: "#78736A",
+  textSoft: "#A9A397",
+  divider: "#E6DFD1",
+  accent: "#B85742",
+  danger: "#A6463A",
+  success: "#6B8F5E",
+};
+
+const DARK = {
+  bg: "#1B1917",
+  surface: "#242120",
+  surfaceAlt: "#2E2A27",
+  text: "#EDE7DA",
+  textMuted: "#9E978A",
+  textSoft: "#6E685E",
+  divider: "#332F2B",
+  accent: "#D97A63",
+  danger: "#D97A63",
+  success: "#9EBB90",
+};
+
+type Palette = typeof LIGHT;
+
+// ─── Accent themes ───────────────────────────────────────────────────────────
+// The original warm terracotta ("claude") is preserved as one option; lavender
+// is the default so the app doesn't read as Claude-branded at a glance.
+
+const ACCENTS = {
+  claude:   { light: "#B85742", dark: "#D97A63" },
+  lavender: { light: "#7B6CA8", dark: "#B9A6DB" },
+} as const;
+
+type AccentTheme = keyof typeof ACCENTS;
+
+const ACCENT_OPTIONS: { key: AccentTheme; label: string }[] = [
+  { key: "lavender", label: "Lavender" },
+  { key: "claude", label: "Terracotta" },
 ];
 
-const providerMeta = (key: ModelEntry["provider"]) =>
-  PROVIDERS.find((p) => p.key === key) ?? PROVIDERS[0];
+// ─── Providers ───────────────────────────────────────────────────────────────
 
-const makeId = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
+const PROVIDERS = [
+  { key: "claude" as const, label: "Claude" },
+  { key: "openrouter" as const, label: "OpenRouter" },
+  { key: "local" as const, label: "Local" },
+];
 
-// ─── Queue Row ──────────────────────────────────────────────────────────────
+type OpenRouterModel = { id: string; label: string };
+
+const OPENROUTER_TOP_ENDPOINT =
+  "https://openrouter.ai/api/frontend/models/find?category=programming&order=top-weekly";
+
+const OPENROUTER_FALLBACK: OpenRouterModel[] = [
+  { id: "anthropic/claude-sonnet-4", label: "Claude Sonnet 4" },
+  { id: "anthropic/claude-opus-4", label: "Claude Opus 4" },
+  { id: "openai/gpt-4o", label: "GPT-4o" },
+  { id: "deepseek/deepseek-chat", label: "DeepSeek V3" },
+  { id: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+];
+
+let openRouterTopCache: {
+  models: OpenRouterModel[];
+  fetchedAt: number;
+} | null = null;
+const OPENROUTER_CACHE_TTL_MS = 1000 * 60 * 60;
+
+async function fetchOpenRouterTopCoding(): Promise<OpenRouterModel[]> {
+  if (
+    openRouterTopCache &&
+    Date.now() - openRouterTopCache.fetchedAt < OPENROUTER_CACHE_TTL_MS
+  ) {
+    return openRouterTopCache.models;
+  }
+  const res = await fetch(OPENROUTER_TOP_ENDPOINT);
+  if (!res.ok) throw new Error(`OpenRouter ${res.status}`);
+  const json = (await res.json()) as {
+    data?: { models?: { slug?: string; short_name?: string; name?: string }[] };
+  };
+  const raw = json.data?.models ?? [];
+  const models: OpenRouterModel[] = raw
+    .slice(0, 10)
+    .filter((m): m is { slug: string; short_name?: string; name?: string } =>
+      typeof m.slug === "string" && m.slug.length > 0
+    )
+    .map((m) => ({
+      id: m.slug,
+      label: m.short_name || m.name || m.slug,
+    }));
+  if (models.length === 0) throw new Error("OpenRouter returned empty list");
+  openRouterTopCache = { models, fetchedAt: Date.now() };
+  return models;
+}
+
+const makeId = () =>
+  Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+// ─── Small reusable primitives ───────────────────────────────────────────────
+
+function SectionHeader({ title, palette }: { title: string; palette: Palette }) {
+  return (
+    <Text
+      style={{
+        color: palette.textMuted,
+        fontSize: 12,
+        fontWeight: "600",
+        letterSpacing: 1.4,
+        textTransform: "uppercase",
+        marginBottom: 14,
+        marginLeft: 4,
+      }}
+    >
+      {title}
+    </Text>
+  );
+}
+
+function Hairline({ palette, inset = 0 }: { palette: Palette; inset?: number }) {
+  return (
+    <View
+      style={{
+        height: 1,
+        backgroundColor: palette.divider,
+        marginLeft: inset,
+      }}
+    />
+  );
+}
+
+function Caption({
+  children,
+  palette,
+}: {
+  children: React.ReactNode;
+  palette: Palette;
+}) {
+  return (
+    <Text
+      style={{
+        color: palette.textMuted,
+        fontSize: 13,
+        lineHeight: 19,
+        marginTop: 10,
+        marginLeft: 4,
+        marginRight: 4,
+      }}
+    >
+      {children}
+    </Text>
+  );
+}
+
+// ─── Segmented control ──────────────────────────────────────────────────────
+
+function Segmented<T extends string>({
+  options,
+  value,
+  onChange,
+  palette,
+}: {
+  options: { key: T; label: string }[];
+  value: T;
+  onChange: (v: T) => void;
+  palette: Palette;
+}) {
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        backgroundColor: palette.surfaceAlt,
+        borderRadius: 12,
+        padding: 3,
+      }}
+    >
+      {options.map((opt) => {
+        const selected = value === opt.key;
+        return (
+          <View key={opt.key} style={{ flex: 1 }}>
+            <TouchableBounce sensory onPress={() => onChange(opt.key)}>
+              <View
+                style={{
+                  paddingVertical: 10,
+                  borderRadius: 9,
+                  alignItems: "center",
+                  backgroundColor: selected ? palette.surface : "transparent",
+                }}
+              >
+                <Text
+                  style={{
+                    fontSize: 13,
+                    fontWeight: selected ? "600" : "500",
+                    color: selected ? palette.text : palette.textMuted,
+                    letterSpacing: 0.1,
+                  }}
+                >
+                  {opt.label}
+                </Text>
+              </View>
+            </TouchableBounce>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+// ─── Input ───────────────────────────────────────────────────────────────────
+
+function Field({
+  placeholder,
+  value,
+  onChangeText,
+  palette,
+  secureTextEntry,
+  keyboardType,
+  autoCapitalize = "none",
+}: {
+  placeholder: string;
+  value: string;
+  onChangeText: (s: string) => void;
+  palette: Palette;
+  secureTextEntry?: boolean;
+  keyboardType?: "default" | "url";
+  autoCapitalize?: "none" | "sentences";
+}) {
+  return (
+    <TextInput
+      placeholder={placeholder}
+      placeholderTextColor={palette.textSoft}
+      value={value}
+      onChangeText={onChangeText}
+      autoCapitalize={autoCapitalize}
+      keyboardType={keyboardType}
+      secureTextEntry={secureTextEntry}
+      style={{
+        backgroundColor: palette.surfaceAlt,
+        borderRadius: 12,
+        paddingHorizontal: 16,
+        paddingVertical: 14,
+        color: palette.text,
+        fontSize: 15,
+        fontWeight: "500",
+      }}
+    />
+  );
+}
+
+// ─── Queue row ───────────────────────────────────────────────────────────────
 
 function QueueRow({
   entry,
@@ -34,6 +276,7 @@ function QueueRow({
   onDelete,
   onMoveUp,
   onMoveDown,
+  palette,
 }: {
   entry: ModelEntry;
   index: number;
@@ -42,111 +285,151 @@ function QueueRow({
   onDelete: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
+  palette: Palette;
 }) {
-  const meta = providerMeta(entry.provider);
   const isFirst = index === 0;
   const isLast = index === total - 1;
+  const providerLabel = PROVIDERS.find((p) => p.key === entry.provider)?.label ?? "";
 
   return (
     <View
       style={{
         flexDirection: "row",
         alignItems: "center",
-        gap: 10,
-        paddingVertical: 10,
-        paddingHorizontal: 12,
-        borderRadius: 12,
-        backgroundColor: AC.systemBackground,
-        borderWidth: 1,
-        borderColor: AC.separator,
+        paddingVertical: 14,
+        paddingHorizontal: 18,
+        gap: 14,
         opacity: entry.enabled ? 1 : 0.5,
       }}
     >
-      {/* Order arrows */}
-      <View style={{ gap: 2 }}>
+      <View style={{ gap: 4 }}>
         <TouchableBounce onPress={onMoveUp} disabled={isFirst}>
-          <Text style={{ fontSize: 16, color: isFirst ? AC.systemGray4 : AC.label }}>▲</Text>
+          <Text
+            style={{
+              fontSize: 11,
+              color: isFirst ? palette.textSoft : palette.textMuted,
+            }}
+          >
+            ▲
+          </Text>
         </TouchableBounce>
         <TouchableBounce onPress={onMoveDown} disabled={isLast}>
-          <Text style={{ fontSize: 16, color: isLast ? AC.systemGray4 : AC.label }}>▼</Text>
+          <Text
+            style={{
+              fontSize: 11,
+              color: isLast ? palette.textSoft : palette.textMuted,
+            }}
+          >
+            ▼
+          </Text>
         </TouchableBounce>
       </View>
 
-      {/* Provider badge */}
-      <View
-        style={{
-          backgroundColor: meta.color + "22",
-          borderRadius: 8,
-          paddingHorizontal: 8,
-          paddingVertical: 3,
-          borderWidth: 1,
-          borderColor: meta.color + "55",
-        }}
-      >
-        <Text style={{ color: meta.color, fontSize: 11, fontWeight: "700" }}>
-          {meta.label}
-        </Text>
-      </View>
-
-      {/* Model name */}
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text
-          style={{ color: AC.label, fontSize: 14, fontWeight: "600" }}
+          style={{
+            color: palette.text,
+            fontSize: 15,
+            fontWeight: "600",
+            letterSpacing: 0.1,
+          }}
           numberOfLines={1}
         >
-          {entry.name || "(unnamed)"}
+          {entry.name || "Unnamed model"}
         </Text>
-        {entry.apiKey ? (
-          <Text style={{ color: AC.secondaryLabel, fontSize: 12 }}>
-            Key: ···{entry.apiKey.slice(-4)}
-          </Text>
-        ) : entry.provider !== "local" ? (
-          <Text style={{ color: AC.systemOrange, fontSize: 12 }}>No API key</Text>
-        ) : null}
+        <Text
+          style={{
+            color: palette.textMuted,
+            fontSize: 12,
+            marginTop: 3,
+            fontWeight: "500",
+          }}
+          numberOfLines={1}
+        >
+          {providerLabel}
+          {entry.apiKey
+            ? `  ·  ···${entry.apiKey.slice(-4)}`
+            : entry.provider !== "local"
+            ? "  ·  no key"
+            : ""}
+        </Text>
       </View>
 
-      {/* Toggle */}
       <Switch
         value={entry.enabled}
         onValueChange={onToggle}
-        trackColor={{ true: AC.systemGreen as string, false: AC.systemGray4 as string }}
-        thumbColor="#fff"
+        trackColor={{ true: palette.text, false: palette.surfaceAlt }}
+        thumbColor={palette.surface}
+        ios_backgroundColor={palette.surfaceAlt}
         style={{ transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] }}
       />
 
-      {/* Delete */}
       <TouchableBounce sensory onPress={onDelete}>
-        <View
+        <Text
           style={{
-            width: 26,
-            height: 26,
-            borderRadius: 13,
-            backgroundColor: AC.systemRed + "22",
-            alignItems: "center",
-            justifyContent: "center",
+            color: palette.textSoft,
+            fontSize: 20,
+            fontWeight: "300",
+            paddingHorizontal: 4,
           }}
         >
-          <Text style={{ color: AC.systemRed, fontSize: 14, fontWeight: "700" }}>×</Text>
-        </View>
+          ×
+        </Text>
       </TouchableBounce>
     </View>
   );
 }
 
-// ─── Add Model Form ──────────────────────────────────────────────────────────
+// ─── Add model form ─────────────────────────────────────────────────────────
 
 function AddModelForm({
   existingEntries,
   onAdd,
+  palette,
 }: {
   existingEntries: ModelEntry[];
   onAdd: (entry: ModelEntry) => void;
+  palette: Palette;
 }) {
   const [provider, setProvider] = useState<ModelEntry["provider"]>("claude");
   const [name, setName] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [expanded, setExpanded] = useState(false);
   const height = useRef(new Animated.Value(0)).current;
+
+  const [openRouterTop, setOpenRouterTop] = useState<OpenRouterModel[] | null>(
+    openRouterTopCache?.models ?? null
+  );
+  const [openRouterLoading, setOpenRouterLoading] = useState(false);
+  const [openRouterError, setOpenRouterError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (provider !== "openrouter") return;
+    if (openRouterTopCache && openRouterTopCache.models.length > 0) {
+      setOpenRouterTop(openRouterTopCache.models);
+      return;
+    }
+    let cancelled = false;
+    setOpenRouterLoading(true);
+    setOpenRouterError(null);
+    fetchOpenRouterTopCoding()
+      .then((models) => {
+        if (!cancelled) setOpenRouterTop(models);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setOpenRouterError(err?.message ?? "Failed to load");
+          setOpenRouterTop(OPENROUTER_FALLBACK);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setOpenRouterLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [provider]);
 
   useEffect(() => {
     Animated.spring(height, {
@@ -157,7 +440,6 @@ function AddModelForm({
     }).start();
   }, [expanded]);
 
-  // Auto-fill API key when provider changes (from existing entries)
   const onProviderChange = (p: ModelEntry["provider"]) => {
     setProvider(p);
     const existing = existingEntries.find((e) => e.provider === p && e.apiKey);
@@ -178,30 +460,25 @@ function AddModelForm({
     setExpanded(false);
   };
 
-  const meta = providerMeta(provider);
-
   return (
     <View>
       <TouchableBounce sensory onPress={() => setExpanded((e) => !e)}>
         <View
           style={{
-            flexDirection: "row",
+            paddingVertical: 16,
+            paddingHorizontal: 18,
             alignItems: "center",
-            gap: 6,
-            paddingVertical: 10,
-            paddingHorizontal: 14,
-            borderRadius: 12,
-            borderWidth: 1.5,
-            borderColor: AC.systemBlue + "66",
-            borderStyle: "dashed",
-            justifyContent: "center",
           }}
         >
-          <Text style={{ color: AC.systemBlue, fontSize: 16, fontWeight: "700" }}>
-            {expanded ? "−" : "+"}
-          </Text>
-          <Text style={{ color: AC.systemBlue, fontSize: 15, fontWeight: "600" }}>
-            {expanded ? "Cancel" : "Add model"}
+          <Text
+            style={{
+              color: palette.accent,
+              fontSize: 14,
+              fontWeight: "600",
+              letterSpacing: 0.2,
+            }}
+          >
+            {expanded ? "Cancel" : "Add a model"}
           </Text>
         </View>
       </TouchableBounce>
@@ -209,84 +486,133 @@ function AddModelForm({
       <Animated.View
         style={{
           overflow: "hidden",
-          maxHeight: height.interpolate({ inputRange: [0, 1], outputRange: [0, 400] }),
+          maxHeight: height.interpolate({
+            inputRange: [0, 1],
+            outputRange: [0, 560],
+          }),
           opacity: height,
         }}
       >
-        <View style={{ paddingTop: 12, gap: 10 }}>
-          {/* Provider tabs */}
-          <View style={{ flexDirection: "row", gap: 6 }}>
-            {PROVIDERS.map((p) => (
-              <TouchableBounce
-                key={p.key}
-                sensory
-                onPress={() => onProviderChange(p.key)}
-                style={{ flex: 1 }}
-              >
-                <View
-                  style={{
-                    paddingVertical: 8,
-                    borderRadius: 10,
-                    alignItems: "center",
-                    backgroundColor: provider === p.key ? p.color : AC.systemGray6,
-                    borderWidth: 1,
-                    borderColor: provider === p.key ? p.color : AC.separator,
-                  }}
-                >
-                  <Text
-                    style={{
-                      fontSize: 13,
-                      fontWeight: "700",
-                      color: provider === p.key ? "#fff" : AC.secondaryLabel,
-                    }}
-                  >
-                    {p.label}
-                  </Text>
-                </View>
-              </TouchableBounce>
-            ))}
-          </View>
-
-          {/* Model name */}
-          <TextInput
-            placeholder={
-              provider === "claude"
-                ? "Model name  (e.g. claude-opus-4-5)"
-                : provider === "openrouter"
-                ? "Model name  (e.g. anthropic/claude-3.5-sonnet)"
-                : "Model name or path"
-            }
-            placeholderTextColor={AC.systemGray}
-            value={name}
-            onChangeText={setName}
-            autoCapitalize="none"
-            style={inputStyle}
+        <View style={{ padding: 18, paddingTop: 4, gap: 14 }}>
+          <Segmented
+            options={PROVIDERS}
+            value={provider}
+            onChange={onProviderChange}
+            palette={palette}
           />
 
-          {/* API key (hidden for local) */}
+          {provider === "openrouter" && (
+            <View style={{ gap: 10 }}>
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+              >
+                <Text
+                  style={{
+                    fontSize: 11,
+                    fontWeight: "600",
+                    color: palette.textMuted,
+                    textTransform: "uppercase",
+                    letterSpacing: 1.2,
+                  }}
+                >
+                  Top coding models this week
+                </Text>
+                {openRouterLoading && (
+                  <Text style={{ fontSize: 11, color: palette.textSoft }}>
+                    loading
+                  </Text>
+                )}
+                {openRouterError && (
+                  <Text style={{ fontSize: 11, color: palette.textSoft }}>
+                    offline
+                  </Text>
+                )}
+              </View>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ gap: 8, paddingRight: 8 }}
+              >
+                {(openRouterTop ?? []).map((m) => {
+                  const selected = name === m.id;
+                  return (
+                    <TouchableBounce
+                      key={m.id}
+                      sensory
+                      onPress={() => setName(m.id)}
+                    >
+                      <View
+                        style={{
+                          paddingVertical: 9,
+                          paddingHorizontal: 14,
+                          borderRadius: 999,
+                          backgroundColor: selected
+                            ? palette.text
+                            : palette.surfaceAlt,
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontSize: 13,
+                            fontWeight: "600",
+                            color: selected ? palette.surface : palette.text,
+                          }}
+                        >
+                          {m.label}
+                        </Text>
+                      </View>
+                    </TouchableBounce>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          )}
+
+          <Field
+            placeholder={
+              provider === "claude"
+                ? "Model name, e.g. claude-opus-4-5"
+                : provider === "openrouter"
+                ? "Model name, e.g. anthropic/claude-3.5-sonnet"
+                : "Model name or path"
+            }
+            value={name}
+            onChangeText={setName}
+            palette={palette}
+          />
+
           {provider !== "local" && (
-            <TextInput
+            <Field
               placeholder={
-                provider === "claude" ? "Anthropic API key  (sk-ant-…)" : "OpenRouter API key  (sk-or-…)"
+                provider === "claude"
+                  ? "Anthropic API key"
+                  : "OpenRouter API key"
               }
-              placeholderTextColor={AC.systemGray}
               value={apiKey}
               onChangeText={setApiKey}
-              autoCapitalize="none"
+              palette={palette}
               secureTextEntry
-              style={inputStyle}
             />
           )}
 
-          {/* Add button */}
           <TouchableBounce sensory onPress={handleAdd}>
             <View
-              style={[
-                buttonStyle,
-                { backgroundColor: name.trim() ? meta.color : AC.systemGray4 },
-              ]}
+              style={{
+                borderRadius: 12,
+                paddingVertical: 14,
+                alignItems: "center",
+                backgroundColor: name.trim() ? palette.text : palette.surfaceAlt,
+                marginTop: 4,
+              }}
             >
-              <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>
+              <Text
+                style={{
+                  color: name.trim() ? palette.surface : palette.textSoft,
+                  fontWeight: "600",
+                  fontSize: 15,
+                  letterSpacing: 0.2,
+                }}
+              >
                 Add to queue
               </Text>
             </View>
@@ -297,9 +623,89 @@ function AddModelForm({
   );
 }
 
-// ─── Main Screen ─────────────────────────────────────────────────────────────
+// ─── Card ───────────────────────────────────────────────────────────────────
+
+function Card({
+  children,
+  palette,
+}: {
+  children: React.ReactNode;
+  palette: Palette;
+}) {
+  return (
+    <View
+      style={{
+        backgroundColor: palette.surface,
+        borderRadius: 16,
+      }}
+    >
+      {children}
+    </View>
+  );
+}
+
+// ─── Toggle row ─────────────────────────────────────────────────────────────
+
+function ToggleRow({
+  title,
+  description,
+  value,
+  onValueChange,
+  palette,
+}: {
+  title: string;
+  description: string;
+  value: boolean;
+  onValueChange: (v: boolean) => void;
+  palette: Palette;
+}) {
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        paddingVertical: 16,
+        paddingHorizontal: 20,
+        gap: 14,
+      }}
+    >
+      <View style={{ flex: 1 }}>
+        <Text
+          style={{
+            color: palette.text,
+            fontSize: 15,
+            fontWeight: "600",
+            letterSpacing: 0.1,
+          }}
+        >
+          {title}
+        </Text>
+        <Text
+          style={{
+            color: palette.textMuted,
+            fontSize: 13,
+            marginTop: 4,
+            lineHeight: 18,
+          }}
+        >
+          {description}
+        </Text>
+      </View>
+      <Switch
+        value={value}
+        onValueChange={onValueChange}
+        trackColor={{ true: palette.text, false: palette.surfaceAlt }}
+        thumbColor={palette.surface}
+        ios_backgroundColor={palette.surfaceAlt}
+      />
+    </View>
+  );
+}
+
+// ─── Main screen ────────────────────────────────────────────────────────────
 
 export default function SettingsScreen() {
+  const scheme = useColorScheme();
   const { settings, _hasHydrated } = useGatewayStore();
   const actions = useGatewayStore((s) => s.actions);
 
@@ -308,22 +714,53 @@ export default function SettingsScreen() {
   const [connStatus, setConnStatus] = useState<"idle" | "ok" | "error">("idle");
   const [connMessage, setConnMessage] = useState<string | null>(null);
   const [autoCompact, setAutoCompact] = useState(settings.autoCompact ?? true);
-  const [streamingEnabled, setStreamingEnabled] = useState(settings.streamingEnabled ?? true);
-  const [darkMode, setDarkMode] = useState<"system" | "light" | "dark">(settings.darkMode ?? "system");
+  const [streamingEnabled, setStreamingEnabled] = useState(
+    settings.streamingEnabled ?? true
+  );
+  const [darkMode, setDarkMode] = useState<"system" | "light" | "dark">(
+    settings.darkMode ?? "system"
+  );
+  const [accentTheme, setAccentTheme] = useState<AccentTheme>(
+    settings.accentTheme ?? "lavender"
+  );
+  const [autoCompactThreshold, setAutoCompactThreshold] = useState<number>(
+    settings.autoCompactThreshold ?? 70
+  );
+  const [telemetryEnabled, setTelemetryEnabled] = useState(
+    settings.telemetryEnabled ?? true
+  );
+  const [autoContinueEnabled, setAutoContinueEnabled] = useState(
+    settings.autoContinueEnabled ?? true
+  );
   const [saved, setSaved] = useState(false);
+
+  const effectiveScheme =
+    darkMode === "system" ? scheme ?? "light" : darkMode;
+  const palette = useMemo<Palette>(() => {
+    const base = effectiveScheme === "dark" ? DARK : LIGHT;
+    const accent =
+      ACCENTS[accentTheme][effectiveScheme === "dark" ? "dark" : "light"];
+    return { ...base, accent };
+  }, [effectiveScheme, accentTheme]);
 
   const buildQueue = (s: typeof settings): ModelEntry[] => {
     if (s.modelQueue && s.modelQueue.length > 0) return s.modelQueue;
     if (s.model) {
-      return [{ id: makeId(), provider: s.model.provider, name: s.model.name, apiKey: s.model.apiKey, enabled: true }];
+      return [
+        {
+          id: makeId(),
+          provider: s.model.provider,
+          name: s.model.name,
+          apiKey: s.model.apiKey,
+          enabled: true,
+        },
+      ];
     }
     return [];
   };
 
   const [queue, setQueue] = useState<ModelEntry[]>(() => buildQueue(settings));
 
-  // Once the store finishes reading from disk, sync all local fields.
-  // This handles the case where the settings screen mounts before hydration completes.
   useEffect(() => {
     if (!_hasHydrated) return;
     setServerUrl(settings.serverUrl);
@@ -331,8 +768,12 @@ export default function SettingsScreen() {
     setAutoCompact(settings.autoCompact ?? true);
     setStreamingEnabled(settings.streamingEnabled ?? true);
     setDarkMode(settings.darkMode ?? "system");
+    setAccentTheme(settings.accentTheme ?? "lavender");
+    setAutoCompactThreshold(settings.autoCompactThreshold ?? 70);
+    setTelemetryEnabled(settings.telemetryEnabled ?? true);
+    setAutoContinueEnabled(settings.autoContinueEnabled ?? true);
     setQueue(buildQueue(settings));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [_hasHydrated]);
 
   const save = () => {
@@ -343,6 +784,10 @@ export default function SettingsScreen() {
       autoCompact,
       streamingEnabled,
       darkMode,
+      accentTheme,
+      autoCompactThreshold,
+      telemetryEnabled,
+      autoContinueEnabled,
     });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
@@ -387,7 +832,9 @@ export default function SettingsScreen() {
     });
 
   const toggleEntry = (i: number) =>
-    setQueue((q) => q.map((e, idx) => (idx === i ? { ...e, enabled: !e.enabled } : e)));
+    setQueue((q) =>
+      q.map((e, idx) => (idx === i ? { ...e, enabled: !e.enabled } : e))
+    );
 
   const deleteEntry = (i: number) =>
     setQueue((q) => q.filter((_, idx) => idx !== i));
@@ -397,258 +844,335 @@ export default function SettingsScreen() {
   const enabledCount = queue.filter((e) => e.enabled).length;
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 88 : 0}
-    >
+    <>
+      <Stack.Screen
+        options={{
+          title: "Settings",
+          headerTransparent: false,
+          headerLargeTitle: false,
+          headerShadowVisible: false,
+          headerStyle: { backgroundColor: palette.bg },
+          headerTitleStyle: { color: palette.text, fontWeight: "600" },
+          headerTintColor: palette.accent,
+          contentStyle: { backgroundColor: palette.bg },
+        }}
+      />
       <ScrollView
-        style={{ flex: 1, backgroundColor: AC.systemGroupedBackground }}
-        contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 60 }}
+        style={{ backgroundColor: palette.bg }}
+        contentContainerStyle={{
+          paddingHorizontal: 22,
+          paddingTop: 20,
+          paddingBottom: 60,
+        }}
         keyboardShouldPersistTaps="handled"
-        automaticallyAdjustKeyboardInsets
+        contentInsetAdjustmentBehavior="automatic"
       >
-      {/* ── Connection ────────────────────────────────────────── */}
-      <View style={cardStyle}>
-        <Text style={sectionTitle}>VPS Connection</Text>
-        <TextInput
-          placeholder="Server URL  (e.g. https://your-vps.io)"
-          placeholderTextColor={AC.systemGray}
-          value={serverUrl}
-          onChangeText={setServerUrl}
-          autoCapitalize="none"
-          keyboardType="url"
-          style={inputStyle}
-        />
-        <TextInput
-          placeholder="Bearer token"
-          placeholderTextColor={AC.systemGray}
-          value={bearerToken}
-          onChangeText={setBearerToken}
-          autoCapitalize="none"
-          secureTextEntry
-          style={inputStyle}
-        />
-        <TouchableBounce sensory onPress={testConnection}>
-          <View style={[buttonStyle, { backgroundColor: AC.systemGray5 }]}>
-            <Text style={{ color: AC.label, fontWeight: "600" }}>Test connection</Text>
-          </View>
-        </TouchableBounce>
-        {connMessage && (
-          <Text style={{ color: connStatus === "ok" ? AC.systemGreen : AC.systemRed, fontSize: 13 }}>
-            {connMessage}
-          </Text>
-        )}
-      </View>
+        <Text
+          style={{
+            color: palette.textMuted,
+            fontSize: 14,
+            lineHeight: 20,
+            marginBottom: 28,
+            marginLeft: 4,
+            marginRight: 4,
+          }}
+        >
+          Connection, models, and the small preferences that shape how Claw
+          behaves.
+        </Text>
 
-      {/* ── Appearance ───────────────────────────────────────────── */}
-      <View style={cardStyle}>
-        <Text style={sectionTitle}>Appearance</Text>
-
-        <View style={{ flexDirection: "row", gap: 6 }}>
-          {([
-            { key: "system" as const, label: "System", icon: "⚙️" },
-            { key: "light" as const, label: "Light", icon: "☀️" },
-            { key: "dark" as const, label: "Dark", icon: "🌙" },
-          ]).map((opt) => (
-            <TouchableBounce
-              key={opt.key}
-              sensory
-              onPress={() => setDarkMode(opt.key)}
-              style={{ flex: 1 }}
-            >
+        {/* ── Connection ───────────────────────────────────────── */}
+        <SectionHeader title="Connection" palette={palette} />
+        <Card palette={palette}>
+          <View style={{ padding: 18, gap: 12 }}>
+            <Field
+              placeholder="Server URL"
+              value={serverUrl}
+              onChangeText={setServerUrl}
+              palette={palette}
+              keyboardType="url"
+            />
+            <Field
+              placeholder="Bearer token"
+              value={bearerToken}
+              onChangeText={setBearerToken}
+              palette={palette}
+              secureTextEntry
+            />
+            <TouchableBounce sensory onPress={testConnection}>
               <View
                 style={{
-                  paddingVertical: 8,
-                  borderRadius: 10,
+                  borderRadius: 12,
+                  paddingVertical: 13,
                   alignItems: "center",
-                  backgroundColor: darkMode === opt.key ? AC.label : AC.systemGray6,
-                  borderWidth: 1,
-                  borderColor: darkMode === opt.key ? AC.label : AC.separator,
+                  backgroundColor: palette.surfaceAlt,
                 }}
               >
                 <Text
                   style={{
-                    fontSize: 13,
-                    fontWeight: "700",
-                    color: darkMode === opt.key ? AC.systemBackground : AC.secondaryLabel,
+                    color: palette.text,
+                    fontWeight: "600",
+                    fontSize: 14,
+                    letterSpacing: 0.2,
                   }}
                 >
-                  {opt.icon} {opt.label}
+                  Test connection
                 </Text>
               </View>
             </TouchableBounce>
-          ))}
-        </View>
-
-        <Text style={{ color: AC.secondaryLabel, fontSize: 13 }}>
-          {darkMode === "system"
-            ? "Follows your device's appearance setting automatically"
-            : darkMode === "dark"
-            ? "Always use dark background with light text"
-            : "Always use light background with dark text"}
-        </Text>
-      </View>
-
-      {/* ── Model Queue ───────────────────────────────────────── */}
-      <View style={cardStyle}>
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-          <Text style={sectionTitle}>Model Queue</Text>
-          {queue.length > 0 && (
-            <View
-              style={{
-                backgroundColor: enabledCount > 0 ? AC.systemBlue + "22" : AC.systemGray5,
-                borderRadius: 10,
-                paddingHorizontal: 10,
-                paddingVertical: 3,
-              }}
-            >
+            {connMessage && (
               <Text
                 style={{
-                  fontSize: 12,
-                  fontWeight: "700",
-                  color: enabledCount > 0 ? AC.systemBlue : AC.secondaryLabel,
+                  color:
+                    connStatus === "ok" ? palette.success : palette.danger,
+                  fontSize: 13,
+                  marginTop: 2,
                 }}
               >
-                {enabledCount}/{queue.length} active
+                {connMessage}
               </Text>
+            )}
+          </View>
+        </Card>
+
+        <View style={{ height: 32 }} />
+
+        {/* ── Appearance ───────────────────────────────────────── */}
+        <SectionHeader title="Appearance" palette={palette} />
+        <Card palette={palette}>
+          <View style={{ padding: 18, gap: 14 }}>
+            <Segmented
+              options={[
+                { key: "system", label: "System" },
+                { key: "light", label: "Light" },
+                { key: "dark", label: "Dark" },
+              ]}
+              value={darkMode}
+              onChange={(k) => setDarkMode(k as "system" | "light" | "dark")}
+              palette={palette}
+            />
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 12,
+              }}
+            >
+              <View style={{ flex: 1 }}>
+                <Segmented
+                  options={ACCENT_OPTIONS}
+                  value={accentTheme}
+                  onChange={setAccentTheme}
+                  palette={palette}
+                />
+              </View>
+              <View
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: 14,
+                  backgroundColor: palette.accent,
+                }}
+              />
             </View>
+          </View>
+        </Card>
+        <Caption palette={palette}>
+          {darkMode === "system"
+            ? "Follows your device's appearance automatically."
+            : darkMode === "dark"
+            ? "Always use a dark background with light text."
+            : "Always use a light background with dark text."}
+          {" "}
+          {accentTheme === "lavender"
+            ? "Lavender accent."
+            : "Terracotta accent — the original warm tone."}
+        </Caption>
+
+        <View style={{ height: 32 }} />
+
+        {/* ── Model Queue ──────────────────────────────────────── */}
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 14,
+            marginLeft: 4,
+            marginRight: 4,
+          }}
+        >
+          <Text
+            style={{
+              color: palette.textMuted,
+              fontSize: 12,
+              fontWeight: "600",
+              letterSpacing: 1.4,
+              textTransform: "uppercase",
+            }}
+          >
+            Models
+          </Text>
+          {queue.length > 0 && (
+            <Text
+              style={{
+                color: palette.textMuted,
+                fontSize: 12,
+                fontWeight: "500",
+                letterSpacing: 0.4,
+              }}
+            >
+              {enabledCount} of {queue.length} active
+            </Text>
           )}
         </View>
 
-        <Text style={{ color: AC.secondaryLabel, fontSize: 13 }}>
-          Models are tried top-to-bottom, automatically falling back if one fails.
-        </Text>
-
-        {queue.length === 0 && (
-          <View
-            style={{
-              paddingVertical: 20,
-              alignItems: "center",
-              borderRadius: 12,
-              borderWidth: 1,
-              borderColor: AC.separator,
-              backgroundColor: AC.systemGray6,
-            }}
-          >
-            <Text style={{ color: AC.tertiaryLabel, fontSize: 14 }}>
-              No models — add one below
-            </Text>
-          </View>
-        )}
-
-        {queue.map((entry, i) => (
-          <QueueRow
-            key={entry.id}
-            entry={entry}
-            index={i}
-            total={queue.length}
-            onToggle={() => toggleEntry(i)}
-            onDelete={() => deleteEntry(i)}
-            onMoveUp={() => moveUp(i)}
-            onMoveDown={() => moveDown(i)}
+        <Card palette={palette}>
+          {queue.length === 0 ? (
+            <View style={{ paddingVertical: 32, alignItems: "center" }}>
+              <Text
+                style={{
+                  color: palette.textSoft,
+                  fontSize: 14,
+                  fontWeight: "500",
+                }}
+              >
+                No models yet
+              </Text>
+            </View>
+          ) : (
+            queue.map((entry, i) => (
+              <View key={entry.id}>
+                {i > 0 && <Hairline palette={palette} inset={18} />}
+                <QueueRow
+                  entry={entry}
+                  index={i}
+                  total={queue.length}
+                  onToggle={() => toggleEntry(i)}
+                  onDelete={() => deleteEntry(i)}
+                  onMoveUp={() => moveUp(i)}
+                  onMoveDown={() => moveDown(i)}
+                  palette={palette}
+                />
+              </View>
+            ))
+          )}
+          {queue.length > 0 && <Hairline palette={palette} inset={18} />}
+          <AddModelForm
+            existingEntries={queue}
+            onAdd={addEntry}
+            palette={palette}
           />
-        ))}
+        </Card>
+        <Caption palette={palette}>
+          Models are tried top to bottom. If one fails, the next takes over
+          automatically.
+        </Caption>
 
-        <AddModelForm existingEntries={queue} onAdd={addEntry} />
-      </View>
+        <View style={{ height: 32 }} />
 
-      {/* ── Behaviour ─────────────────────────────────────────── */}
-      <View style={cardStyle}>
-        <Text style={sectionTitle}>Behaviour</Text>
-
-        {/* Auto-compact toggle */}
-        <View style={toggleRowStyle}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: AC.label, fontSize: 15, fontWeight: "600" }}>
-              Auto-compact
-            </Text>
-            <Text style={{ color: AC.secondaryLabel, fontSize: 13, marginTop: 2 }}>
-              Summarise the conversation when the context window fills up and retry automatically
-            </Text>
-          </View>
-          <Switch
+        {/* ── Behaviour ────────────────────────────────────────── */}
+        <SectionHeader title="Behaviour" palette={palette} />
+        <Card palette={palette}>
+          <ToggleRow
+            title="Auto-compact"
+            description="Summarise the conversation when the context window fills up and retry automatically."
             value={autoCompact}
             onValueChange={setAutoCompact}
-            trackColor={{ true: AC.systemGreen as string, false: AC.systemGray4 as string }}
-            thumbColor="#fff"
+            palette={palette}
           />
-        </View>
-
-        {/* Stream responses toggle */}
-        <View style={toggleRowStyle}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: AC.label, fontSize: 15, fontWeight: "600" }}>
-              Stream responses
-            </Text>
-            <Text style={{ color: AC.secondaryLabel, fontSize: 13, marginTop: 2 }}>
-              Show words appearing as they arrive — turn off to display the full reply instantly
-            </Text>
-          </View>
-          <Switch
+          {autoCompact && (
+            <>
+              <Hairline palette={palette} inset={20} />
+              <View style={{ padding: 18, gap: 12 }}>
+                <View style={{ gap: 4 }}>
+                  <Text
+                    style={{
+                      color: palette.text,
+                      fontSize: 15,
+                      fontWeight: "600",
+                      letterSpacing: 0.1,
+                    }}
+                  >
+                    Compact threshold
+                  </Text>
+                  <Text
+                    style={{
+                      color: palette.textMuted,
+                      fontSize: 13,
+                      lineHeight: 18,
+                    }}
+                  >
+                    Compact the conversation when the last turn used at least
+                    this much of the model's context window.
+                  </Text>
+                </View>
+                <Segmented
+                  options={[
+                    { key: "50", label: "50%" },
+                    { key: "60", label: "60%" },
+                    { key: "70", label: "70%" },
+                    { key: "80", label: "80%" },
+                    { key: "90", label: "90%" },
+                  ]}
+                  value={String(autoCompactThreshold)}
+                  onChange={(k) => setAutoCompactThreshold(parseInt(k, 10))}
+                  palette={palette}
+                />
+              </View>
+            </>
+          )}
+          <Hairline palette={palette} inset={20} />
+          <ToggleRow
+            title="Stream responses"
+            description="Show words as they arrive. Turn off to display the full reply at once."
             value={streamingEnabled}
             onValueChange={setStreamingEnabled}
-            trackColor={{ true: AC.systemBlue as string, false: AC.systemGray4 as string }}
-            thumbColor="#fff"
+            palette={palette}
           />
-        </View>
-      </View>
+          <Hairline palette={palette} inset={20} />
+          <ToggleRow
+            title="Auto-continue truncated replies"
+            description="When a turn ends mid-sentence (ends with “:” or “,” etc.), automatically fire one “continue” so the model can finish. Helps with GLM and other models that give up early after tool-heavy turns."
+            value={autoContinueEnabled}
+            onValueChange={setAutoContinueEnabled}
+            palette={palette}
+          />
+          <Hairline palette={palette} inset={20} />
+          <ToggleRow
+            title="Diagnostic telemetry"
+            description="Mirror every SSE event the client receives to the backend events table. Used to diff what the server sent against what the client rendered."
+            value={telemetryEnabled}
+            onValueChange={setTelemetryEnabled}
+            palette={palette}
+          />
+        </Card>
 
-      {/* ── Save ──────────────────────────────────────────────── */}
-      <TouchableBounce sensory onPress={save}>
-        <View style={[buttonStyle, { backgroundColor: AC.label }]}>
-          <Text style={{ color: AC.systemBackground, fontWeight: "700", fontSize: 16 }}>
-            {saved ? "Saved ✓" : "Save settings"}
-          </Text>
-        </View>
-      </TouchableBounce>
+        <View style={{ height: 40 }} />
+
+        {/* ── Save ─────────────────────────────────────────────── */}
+        <TouchableBounce sensory onPress={save}>
+          <View
+            style={{
+              borderRadius: 14,
+              paddingVertical: 16,
+              alignItems: "center",
+              backgroundColor: palette.text,
+            }}
+          >
+            <Text
+              style={{
+                color: palette.bg,
+                fontWeight: "600",
+                fontSize: 15,
+                letterSpacing: 0.3,
+              }}
+            >
+              {saved ? "Saved" : "Save settings"}
+            </Text>
+          </View>
+        </TouchableBounce>
       </ScrollView>
-    </KeyboardAvoidingView>
+    </>
   );
 }
-
-// ─── Shared styles ────────────────────────────────────────────────────────────
-
-const cardStyle = {
-  backgroundColor: AC.secondarySystemGroupedBackground,
-  borderRadius: 16,
-  padding: 16,
-  gap: 12,
-  borderWidth: 1,
-  borderColor: AC.separator,
-} as const;
-
-const sectionTitle = {
-  color: AC.label,
-  fontSize: 17,
-  fontWeight: "700",
-} as const;
-
-const inputStyle = {
-  backgroundColor: AC.systemBackground,
-  borderRadius: 12,
-  paddingHorizontal: 12,
-  paddingVertical: 11,
-  borderColor: AC.separator,
-  borderWidth: 1,
-  color: AC.label,
-  fontSize: 15,
-} as const;
-
-const buttonStyle = {
-  borderRadius: 14,
-  paddingVertical: 13,
-  alignItems: "center",
-} as const;
-
-const toggleRowStyle = {
-  flexDirection: "row",
-  alignItems: "center",
-  backgroundColor: AC.systemBackground,
-  borderRadius: 12,
-  borderWidth: 1,
-  borderColor: AC.separator,
-  paddingHorizontal: 14,
-  paddingVertical: 12,
-  gap: 12,
-} as const;
