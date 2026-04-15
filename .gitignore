@@ -22,6 +22,7 @@ expo-env.d.ts
 /ios
 /android
 
+.env
 .env.local
 .env.production
 .env.development

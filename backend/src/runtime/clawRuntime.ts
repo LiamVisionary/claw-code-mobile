@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { logger } from "../utils/logger";
+import { eventsService } from "../services/eventsService";
 import { messageService } from "../services/messageService";
 import { streamService } from "../services/streamService";
 import { threadService } from "../services/threadService";
@@ -12,10 +13,15 @@ import { createId } from "../utils/ids";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const CLAW_BINARY = path.resolve(
-  __dirname,
-  "../../../claw-code/rust/target/debug/claw"
-);
+// Binary lives in an out-of-project cache dir so Metro's file watcher never
+// sees cargo's transient build artifacts. Kept in sync with scripts/build-claw.sh.
+const CLAW_BINARY =
+  process.env.CLAW_BINARY ||
+  path.join(
+    process.env.CLAW_TARGET_DIR ||
+      path.join(process.env.HOME || "", ".cache/claw-code-mobile/target"),
+    "debug/claw"
+  );
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const WORKSPACES_DIR = path.resolve(__dirname, "../../data/workspaces");
@@ -40,10 +46,15 @@ type ActiveRun = {
   streamedText: boolean;
   /** Accumulated thinking content from real-time [stream] thinking_delta events. */
   streamedThinking: string;
-  /** The message ID for the current agentic turn bubble. Rotates on each text-after-tool transition. */
+  /**
+   * The message ID for the current agentic turn bubble. Rotates on the
+   * first text_delta that follows one or more tool calls — so each chat
+   * bubble contains one "thought + the actions it drove". The tools
+   * stay attached to the bubble whose text initiated them, not the
+   * bubble that reports results afterwards.
+   */
   currentMessageId: string;
-  /** True once a tool_start has been seen since the last text_delta — signals that the next
-   *  text_delta should open a new chat bubble rather than continuing the current one. */
+  /** True once a tool_start has been seen since the last text_delta. */
   hadToolSinceLastText: boolean;
   /** All message IDs created during this run (initial + any new bubbles), for finalization. */
   allMessageIds: string[];
@@ -294,13 +305,15 @@ function parseStreamEvent(
       const text = payload.text as string | undefined;
       if (!text) break;
 
-      // If we've already produced text in a prior turn AND a tool was used since
-      // then, rotate to a fresh message bubble for this new agentic turn.
+      // Bubble rotation: if we've already streamed text AND the model
+      // fired at least one tool since, this text is a NEW thought block
+      // — open a fresh bubble for it so each "thought + its actions"
+      // pair gets its own row in the chat.
       if (active.hadToolSinceLastText && active.streamedText) {
         const newMsgId = createId("msg");
         active.currentMessageId = newMsgId;
         active.allMessageIds.push(newMsgId);
-        active.streamedThinking = ""; // fresh thinking slate for new bubble
+        active.streamedThinking = "";
       }
       active.hadToolSinceLastText = false;
       active.streamedText = true;
@@ -316,14 +329,13 @@ function parseStreamEvent(
     case "thinking_delta": {
       const thinking = payload.thinking as string | undefined;
       if (!thinking) break;
-      // If a tool was used since the last text, the model is now thinking for a new
-      // turn — open a fresh bubble so the thinking is scoped to the right message.
+      // Same rotation as text_delta: first thinking block after a tool
+      // run is a new thought cycle.
       if (active.hadToolSinceLastText && active.streamedText) {
         const newMsgId = createId("msg");
         active.currentMessageId = newMsgId;
         active.allMessageIds.push(newMsgId);
-        active.streamedThinking = ""; // fresh slate for new turn
-        // Reset here so text_delta for this same turn doesn't open yet another bubble
+        active.streamedThinking = "";
         active.hadToolSinceLastText = false;
       }
       active.streamedThinking += thinking;
@@ -344,8 +356,16 @@ function parseStreamEvent(
         : rawInput != null ? JSON.stringify(rawInput) : "";
       const stepId = `step-${name}-${id}`;
       const label = toolLabel(name, payload.input) || input || name;
-      // Mark that a tool was used — next text_delta will open a new bubble
+
+      // Mark that a tool fired — the NEXT text_delta will rotate to a
+      // fresh bubble (see text_delta handler above).
       active.hadToolSinceLastText = true;
+
+      // A tool call means the model is reasoning / acting, not streaming
+      // a user-facing response. Flip the indicator label back to
+      // "thinking" so the UI oscillates correctly between tool cycles.
+      setRunPhase(threadId, "thinking");
+
       streamService.publish(threadId, {
         type: "tool_start",
         id: stepId,
@@ -385,7 +405,13 @@ function parseHookEvent(
     if (openSteps.has(toolName)) return;
     const stepId = `step-${toolName}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const label = command || toolName;
+
+    // Mark the tool firing so the next text/thinking delta rotates.
     active.hadToolSinceLastText = true;
+    // Tool call means the model is reasoning / acting — flip label back
+    // to "thinking" so the indicator oscillates correctly.
+    setRunPhase(threadId, "thinking");
+
     streamService.publish(threadId, {
       type: "tool_start",
       id: stepId,
@@ -658,15 +684,27 @@ async function processSuccess(
     );
 
     if (alreadyEmitted) {
-      // Tool was already shown in real-time — just emit terminal debug line
-      emitTerminal(threadId, `[${toolName}] ${JSON.stringify(tu.input).slice(0, 200)}`);
-      // Remove the used step ID so we don't match it again for the same tool name
+      // Tool was already shown in real-time. Close the matching step so
+      // the client badge transitions from "running" to "done" — claw's
+      // stream feed only emits tool_start, never tool_end, so without this
+      // publish the badge stays in "running" state forever on the client
+      // and the ThinkingIndicator ends up with a pile of spinning badges.
+      let matchedStepId: string | null = null;
       for (const id of active.realtimeStepIds) {
         if (id.startsWith(`step-${toolName}-`)) {
+          matchedStepId = id;
           active.realtimeStepIds.delete(id);
           break;
         }
       }
+      if (matchedStepId) {
+        streamService.publish(threadId, {
+          type: "tool_end",
+          id: matchedStepId,
+          messageId,
+        });
+      }
+      emitTerminal(threadId, `[${toolName}] ${JSON.stringify(tu.input).slice(0, 200)}`);
       continue;
     }
 
@@ -741,6 +779,272 @@ async function processSuccess(
   }
 }
 
+/**
+ * Best-effort map from model identifier → advertised context window (in
+ * tokens). Falls back to 128K for unknown models. Used together with the
+ * user-configurable `autoCompactThreshold` (a percentage) to decide when
+ * to proactively summarize a conversation before the next turn fails.
+ */
+function getModelContextWindow(modelName?: string): number {
+  if (!modelName) return 128_000;
+  const m = modelName.toLowerCase();
+  // 1M+ context
+  if (m.includes("gemini-2") || m.includes("gemini-1.5")) return 1_000_000;
+  if (m.includes("gpt-4.1")) return 1_000_000;
+  // 200K
+  if (
+    m.includes("claude") ||
+    m.includes("glm-5") ||
+    m.includes("glm-4.6") ||
+    m.includes("sonnet") ||
+    m.includes("opus") ||
+    m.includes("haiku")
+  ) {
+    return 200_000;
+  }
+  // 128K
+  if (m.includes("gpt-4o") || m.includes("deepseek") || m.includes("mistral")) {
+    return 128_000;
+  }
+  return 128_000;
+}
+
+/**
+ * Scan the claw session directory and return the largest `input_tokens`
+ * value reported by the most recent assistant turn. Returns 0 when no
+ * session file exists yet (fresh thread) or when no usage info has been
+ * written yet.
+ *
+ * The session jsonl is the authoritative record of the conversation claw
+ * sends to the model, so the `usage` field it persists is the ground
+ * truth for "how many tokens did the model see on the last turn".
+ */
+function readLastInputTokens(sessionDir: string): number {
+  try {
+    const sessionsRoot = path.join(sessionDir, "sessions");
+    if (!fs.existsSync(sessionsRoot)) return 0;
+    // Find the newest .jsonl under any subdir (claw groups sessions by a hash).
+    let newestFile: string | null = null;
+    let newestMtime = 0;
+    for (const sub of fs.readdirSync(sessionsRoot)) {
+      const subPath = path.join(sessionsRoot, sub);
+      const stat = fs.statSync(subPath);
+      if (!stat.isDirectory()) continue;
+      for (const entry of fs.readdirSync(subPath)) {
+        if (!entry.endsWith(".jsonl")) continue;
+        const entryPath = path.join(subPath, entry);
+        const entryStat = fs.statSync(entryPath);
+        if (entryStat.mtimeMs > newestMtime) {
+          newestMtime = entryStat.mtimeMs;
+          newestFile = entryPath;
+        }
+      }
+    }
+    if (!newestFile) return 0;
+    // Walk backwards through lines looking for the last assistant message
+    // with a usage.input_tokens field. The jsonl is small (a few MB at most)
+    // so reading it whole is fine.
+    const content = fs.readFileSync(newestFile, "utf8");
+    const lines = content.split("\n");
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i];
+      if (!line) continue;
+      try {
+        const parsed = JSON.parse(line) as Record<string, unknown>;
+        const message = parsed["message"] as Record<string, unknown> | undefined;
+        if (!message || message["role"] !== "assistant") continue;
+        const usage = message["usage"] as Record<string, unknown> | undefined;
+        if (!usage) continue;
+        const tokens = usage["input_tokens"];
+        if (typeof tokens === "number" && tokens > 0) return tokens;
+      } catch { /* skip malformed lines */ }
+    }
+  } catch (err) {
+    logger.warn({ err, sessionDir }, "readLastInputTokens failed");
+  }
+  return 0;
+}
+
+/**
+ * Rough per-category byte accounting of the most recent claw session file.
+ * Used after each run to log what's consuming the context window — if one
+ * tool result accounts for 60% of the prompt, that's worth knowing.
+ *
+ * Tokens are not directly counted (would require a tokenizer per model);
+ * bytes are a reasonable proxy for relative size within JSON-encoded
+ * English text (~3-4 bytes per token).
+ */
+function analyzeSessionBreakdown(sessionDir: string): {
+  totalBytes: number;
+  lineCount: number;
+  byCategory: Record<string, { bytes: number; count: number }>;
+  topEntries: Array<{ line: number; category: string; bytes: number; preview: string }>;
+} | null {
+  try {
+    const sessionsRoot = path.join(sessionDir, "sessions");
+    if (!fs.existsSync(sessionsRoot)) return null;
+    let newestFile: string | null = null;
+    let newestMtime = 0;
+    for (const sub of fs.readdirSync(sessionsRoot)) {
+      const subPath = path.join(sessionsRoot, sub);
+      if (!fs.statSync(subPath).isDirectory()) continue;
+      for (const entry of fs.readdirSync(subPath)) {
+        if (!entry.endsWith(".jsonl")) continue;
+        const entryPath = path.join(subPath, entry);
+        const stat = fs.statSync(entryPath);
+        if (stat.mtimeMs > newestMtime) {
+          newestMtime = stat.mtimeMs;
+          newestFile = entryPath;
+        }
+      }
+    }
+    if (!newestFile) return null;
+
+    const content = fs.readFileSync(newestFile, "utf8");
+    const lines = content.split("\n").filter((l) => l.length > 0);
+    const byCategory: Record<string, { bytes: number; count: number }> = {};
+    const topEntries: Array<{ line: number; category: string; bytes: number; preview: string }> = [];
+    let totalBytes = 0;
+
+    lines.forEach((line, idx) => {
+      totalBytes += line.length;
+      const category = categorizeSessionLine(line);
+      byCategory[category] ??= { bytes: 0, count: 0 };
+      byCategory[category].bytes += line.length;
+      byCategory[category].count += 1;
+      topEntries.push({
+        line: idx + 1,
+        category,
+        bytes: line.length,
+        preview: line.slice(0, 120),
+      });
+    });
+
+    topEntries.sort((a, b) => b.bytes - a.bytes);
+    return {
+      totalBytes,
+      lineCount: lines.length,
+      byCategory,
+      topEntries: topEntries.slice(0, 8),
+    };
+  } catch (err) {
+    logger.warn({ err, sessionDir }, "analyzeSessionBreakdown failed");
+    return null;
+  }
+}
+
+function categorizeSessionLine(line: string): string {
+  try {
+    const parsed = JSON.parse(line) as Record<string, unknown>;
+    if (parsed["type"] === "session_meta") return "session_meta";
+    const msg = parsed["message"] as Record<string, unknown> | undefined;
+    if (!msg) return "other";
+    const role = msg["role"];
+    const blocks = (msg["blocks"] ?? []) as Array<Record<string, unknown>>;
+    // Pick the dominant block type for this message.
+    if (blocks.some((b) => b["type"] === "tool_result")) return "tool_result";
+    if (blocks.some((b) => b["type"] === "tool_use")) return "assistant_tool_use";
+    if (blocks.some((b) => b["type"] === "thinking")) return "assistant_thinking";
+    if (role === "user") return "user_text";
+    if (role === "assistant") return "assistant_text";
+    return String(role ?? "other");
+  } catch {
+    return "parse_error";
+  }
+}
+
+/**
+ * Inspect the newest session file and decide whether the last assistant
+ * turn ended cleanly or was truncated mid-sentence. This runs AFTER the
+ * run's stream has closed — we only care about the final committed
+ * state, not anything still streaming — so there's no risk of firing
+ * during a live text delta burst.
+ *
+ * Heuristic: the turn is considered truncated only when the LAST block
+ * of the most recent assistant message is a text block AND its trimmed
+ * content ends with a "clearly mid-sentence" character (colon, comma,
+ * em-dash, opening bracket/quote, etc.). Turns that end with a
+ * tool_use, a period, a question mark, an exclamation, or a closing
+ * paren/quote are considered complete.
+ */
+function detectTruncatedTail(sessionDir: string): {
+  truncated: boolean;
+  reason: string;
+  tailPreview: string;
+} {
+  try {
+    const sessionsRoot = path.join(sessionDir, "sessions");
+    if (!fs.existsSync(sessionsRoot)) return { truncated: false, reason: "no-session-root", tailPreview: "" };
+    let newestFile: string | null = null;
+    let newestMtime = 0;
+    for (const sub of fs.readdirSync(sessionsRoot)) {
+      const subPath = path.join(sessionsRoot, sub);
+      if (!fs.statSync(subPath).isDirectory()) continue;
+      for (const entry of fs.readdirSync(subPath)) {
+        if (!entry.endsWith(".jsonl")) continue;
+        const entryPath = path.join(subPath, entry);
+        const stat = fs.statSync(entryPath);
+        if (stat.mtimeMs > newestMtime) {
+          newestMtime = stat.mtimeMs;
+          newestFile = entryPath;
+        }
+      }
+    }
+    if (!newestFile) return { truncated: false, reason: "no-session-file", tailPreview: "" };
+
+    const content = fs.readFileSync(newestFile, "utf8");
+    const lines = content.split("\n").filter((l) => l.length > 0);
+    // Walk backward to the most recent assistant message.
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const parsed = JSON.parse(lines[i]) as Record<string, unknown>;
+        const msg = parsed["message"] as Record<string, unknown> | undefined;
+        if (!msg || msg["role"] !== "assistant") continue;
+        const blocks = (msg["blocks"] ?? []) as Array<Record<string, unknown>>;
+        if (blocks.length === 0) {
+          return { truncated: true, reason: "empty-blocks", tailPreview: "" };
+        }
+        const last = blocks[blocks.length - 1];
+        if (last["type"] === "tool_use") {
+          return { truncated: false, reason: "ended-in-tool_use", tailPreview: "" };
+        }
+        if (last["type"] !== "text") {
+          return { truncated: false, reason: `last-block-is-${String(last["type"])}`, tailPreview: "" };
+        }
+        const text = ((last["text"] as string) ?? "").trim();
+        if (!text) return { truncated: true, reason: "empty-text", tailPreview: "" };
+        const lastChar = text[text.length - 1];
+        const MID_SENTENCE = new Set([":", ",", ";", "—", "-", "(", "[", "{", "\"", "'", "`"]);
+        if (MID_SENTENCE.has(lastChar)) {
+          return {
+            truncated: true,
+            reason: `ends-with-"${lastChar}"`,
+            tailPreview: text.slice(-80),
+          };
+        }
+        return { truncated: false, reason: "clean-terminator", tailPreview: text.slice(-40) };
+      } catch {
+        // skip malformed line
+      }
+    }
+    return { truncated: false, reason: "no-assistant", tailPreview: "" };
+  } catch (err) {
+    logger.warn({ err, sessionDir }, "detectTruncatedTail failed");
+    return { truncated: false, reason: "error", tailPreview: "" };
+  }
+}
+
+/** User-readable error-text heuristic: "the model gave up with an empty stream". */
+function isEmptyResponse(text: string): boolean {
+  const lower = text.toLowerCase();
+  return (
+    lower.includes("stream produced no content") ||
+    lower.includes("assistant stream produced no content") ||
+    lower.includes("empty response") ||
+    lower.includes("no content")
+  );
+}
+
 export const clawRuntime = {
   async sendMessage(
     threadId: string,
@@ -748,7 +1052,9 @@ export const clawRuntime = {
     messageId: string,
     models: ModelConfig[],
     autoCompact = true,
-    streamingEnabled = true
+    streamingEnabled = true,
+    autoCompactThreshold = 70,
+    autoContinueEnabled = true
   ): Promise<string> {
     const thread = threadService.get(threadId);
     if (!thread) return "";
@@ -756,13 +1062,24 @@ export const clawRuntime = {
     if (!fs.existsSync(CLAW_BINARY)) {
       const errMsg = "claw binary not found. Run `bash scripts/build-claw.sh` first.";
       logger.error(errMsg);
+      // Persist immediately so a re-fetch (e.g. re-entering the thread) shows
+      // the error even if the live SSE stream missed the events.
       messageService.ensureAssistantMessage(threadId, messageId);
       messageService.appendAssistantDelta(threadId, messageId, errMsg);
       messageService.finalizeAssistant(threadId, messageId);
-      streamService.publish(threadId, { type: "delta", messageId, chunk: errMsg });
-      streamService.publish(threadId, { type: "done", messageId });
       threadService.setStatus(threadId, "idle");
-      streamService.publish(threadId, { type: "status", status: "idle" });
+      // Defer the SSE publish by one tick. The route handler returns 202
+      // right before invoking this method, so the client's SSE subscriber
+      // may still be completing its XHR connect when we would otherwise
+      // publish synchronously — publish() silently drops events when the
+      // subscriber set is empty, leaving the UI stuck on "thinking…" until
+      // the user manually refreshes.
+      setTimeout(() => {
+        streamService.publish(threadId, { type: "delta", messageId, chunk: errMsg });
+        streamService.publish(threadId, { type: "done", messageId });
+        streamService.publish(threadId, { type: "status", status: "idle" });
+        setRunPhase(threadId, "idle");
+      }, 400);
       return "";
     }
 
@@ -801,6 +1118,112 @@ export const clawRuntime = {
     let finalSuccess = false;
     let compactAttempted = false; // only compact once per sendMessage call
 
+    eventsService.record({
+      source: "runtime",
+      type: "run_start",
+      threadId,
+      runId: run.id,
+      payload: {
+        messageId,
+        contentLength: content.length,
+        contentPreview: content.slice(0, 200),
+        modelQueue: queue.map((m) => ({ provider: m?.provider, name: m?.name })),
+        autoCompact,
+        autoCompactThreshold,
+        streamingEnabled,
+      },
+    });
+
+    // ── Proactive compaction ──────────────────────────────────────
+    // Before spawning claw for this user message, check the last assistant
+    // turn's reported input_tokens. If we're already above the user's
+    // configured threshold (default 70% of the primary model's advertised
+    // context window), compact now — waiting for the next turn to fail
+    // would waste an API call and often produces a confusing empty-response
+    // error rather than a clean overflow.
+    if (autoCompact && !active.stopped) {
+      const primary = queue[0];
+      const contextSize = getModelContextWindow(primary?.name);
+      const lastTokens = readLastInputTokens(sessionDir);
+      const thresholdTokens = Math.floor((autoCompactThreshold / 100) * contextSize);
+      eventsService.record({
+        source: "runtime",
+        type: "compact_threshold_check",
+        threadId,
+        runId: run.id,
+        payload: {
+          lastTokens,
+          thresholdTokens,
+          contextSize,
+          thresholdPct: autoCompactThreshold,
+          model: primary?.name,
+          triggered: lastTokens > 0 && lastTokens >= thresholdTokens,
+        },
+      });
+      if (lastTokens > 0 && lastTokens >= thresholdTokens) {
+        logger.info(
+          { threadId, lastTokens, thresholdTokens, contextSize, model: primary?.name },
+          "proactive compact (threshold reached)"
+        );
+        eventsService.record({
+          source: "runtime",
+          type: "compact_start",
+          threadId,
+          runId: run.id,
+          payload: {
+            reason: "proactive_threshold",
+            lastTokens,
+            thresholdTokens,
+            contextSize,
+          },
+        });
+        compactAttempted = true;
+        setRunPhase(threadId, "compacting");
+        emitTerminal(
+          threadId,
+          `↻ Proactively compacting — last turn used ${lastTokens.toLocaleString()} tokens (≥ ${autoCompactThreshold}% of ${contextSize.toLocaleString()})`
+        );
+        streamService.publish(threadId, { type: "compact_start" });
+        const { succeeded: ok, stopped: cs, stdoutBuf: compactOut } = await spawnOnce(
+          threadId, "", cwd, sessionDir, primary, active, true /* isCompact */
+        );
+        if (cs) {
+          // run was stopped during compact — bail out cleanly
+          activeRuns.delete(threadId);
+          threadService.setStatus(threadId, "idle");
+          streamService.publish(threadId, { type: "status", status: "idle" });
+          setRunPhase(threadId, "idle");
+          return "";
+        }
+        if (ok) {
+          const info = parseCompactResult(compactOut);
+          emitTerminal(
+            threadId,
+            `✓ Context compacted — removed ${info.removedMessages} messages, kept ${info.keptMessages}`
+          );
+          streamService.publish(threadId, { type: "compact_end", ...info });
+          eventsService.record({
+            source: "runtime",
+            type: "compact_end",
+            threadId,
+            runId: run.id,
+            payload: { reason: "proactive_threshold", succeeded: true, ...info },
+          });
+        } else {
+          emitTerminal(threadId, "⚠ Proactive compact failed — proceeding anyway");
+          streamService.publish(threadId, { type: "compact_end", removedMessages: 0, keptMessages: 0 });
+          eventsService.record({
+            source: "runtime",
+            type: "compact_end",
+            threadId,
+            runId: run.id,
+            payload: { reason: "proactive_threshold", succeeded: false },
+          });
+        }
+        setRunPhase(threadId, "thinking");
+      }
+    }
+
     for (let i = 0; i < queue.length; i++) {
       if (active.stopped) break;
 
@@ -809,9 +1232,47 @@ export const clawRuntime = {
 
       if (i > 0) emitTerminal(threadId, `↻ Trying fallback: ${label}`);
 
+      const spawnStartTs = Date.now();
+      eventsService.record({
+        source: "runtime",
+        type: "spawn_start",
+        threadId,
+        runId: run.id,
+        payload: {
+          attempt: i + 1,
+          model: model?.name,
+          provider: model?.provider,
+          contentLength: content.length,
+        },
+      });
+
       const { succeeded, stdoutBuf, stderrBuf, stopped } = await spawnOnce(
         threadId, content, cwd, sessionDir, model, active, false, messageId
       );
+
+      // Read tokens from the session immediately after the spawn so we
+      // can record them regardless of which branch we take below.
+      const tokensAfter = readLastInputTokens(sessionDir);
+      eventsService.record({
+        source: "runtime",
+        type: "spawn_end",
+        threadId,
+        runId: run.id,
+        payload: {
+          attempt: i + 1,
+          model: model?.name,
+          succeeded,
+          stopped,
+          durationMs: Date.now() - spawnStartTs,
+          stdoutBytes: stdoutBuf.length,
+          stderrBytes: stderrBuf.length,
+          inputTokens: tokensAfter,
+          contextSize: getModelContextWindow(model?.name),
+          contextPct: tokensAfter > 0
+            ? Math.round((tokensAfter / getModelContextWindow(model?.name)) * 100)
+            : 0,
+        },
+      });
 
       if (stopped) break;
 
@@ -866,10 +1327,62 @@ export const clawRuntime = {
       const errText = extractClawError(stdoutBuf, stderrBuf);
       logger.error({ stderrBuf: stderrBuf.slice(-200), model: label }, "claw attempt failed");
 
-      if (isContextOverflow(errText) && autoCompact && !compactAttempted && !active.stopped) {
+      eventsService.record({
+        source: "runtime",
+        type: "runtime_error",
+        threadId,
+        runId: run.id,
+        payload: {
+          attempt: i + 1,
+          model: model?.name,
+          errorPreview: errText.slice(0, 500),
+          isOverflow: isContextOverflow(errText),
+          isEmptyResponse: isEmptyResponse(errText),
+        },
+      });
+
+      // Broaden the compact trigger: explicit overflow (Anthropic-style)
+      // OR an empty-response failure. Some providers (notably GLM via
+      // OpenRouter) return a silent empty stream instead of raising a
+      // proper overflow error — and they do it well below the advertised
+      // context window. We saw a failure at 110K tokens (55%) on a 200K
+      // model, so we no longer gate the empty-response retry on the
+      // user's compact threshold — any empty response with autoCompact
+      // on gets one shot at compact+retry.
+      const contextSize = getModelContextWindow(model?.name);
+      const lastTokens = readLastInputTokens(sessionDir);
+      const thresholdTokens = Math.floor((autoCompactThreshold / 100) * contextSize);
+      const empty = isEmptyResponse(errText);
+      const shouldCompact =
+        (isContextOverflow(errText) || empty) &&
+        autoCompact &&
+        !compactAttempted &&
+        !active.stopped;
+
+      if (shouldCompact) {
+        eventsService.record({
+          source: "runtime",
+          type: "compact_start",
+          threadId,
+          runId: run.id,
+          payload: {
+            reason: empty ? "empty_response" : "context_overflow",
+            lastTokens,
+            thresholdTokens,
+            contextSize,
+            model: model?.name,
+          },
+        });
         compactAttempted = true;
         setRunPhase(threadId, "compacting");
-        emitTerminal(threadId, "↻ Auto-compacting context…");
+        if (empty) {
+          emitTerminal(
+            threadId,
+            `↻ Empty response at ${lastTokens.toLocaleString()} tokens — auto-compacting and retrying`
+          );
+        } else {
+          emitTerminal(threadId, "↻ Auto-compacting context…");
+        }
         streamService.publish(threadId, { type: "compact_start" });
         const { succeeded: ok, stopped: cs, stdoutBuf: compactOut } = await spawnOnce(
           threadId, "", cwd, sessionDir, model, active, true /* isCompact */
@@ -901,6 +1414,73 @@ export const clawRuntime = {
       streamService.publish(threadId, { type: "message_error", messageId: errMsgId, text: safeText });
     }
 
+    // ── Auto-continue on truncated tail ────────────────────────────
+    // Some providers (notably GLM via OpenRouter) emit very short
+    // responses that end mid-sentence and then voluntarily stop —
+    // 14 output tokens ending in ":" is the canonical example we hit.
+    // When the run has otherwise succeeded AND the last assistant text
+    // block ends with clearly mid-sentence punctuation, we fire ONE
+    // synthetic "continue" spawn so the model can finish its thought.
+    // This only runs once per sendMessage call. Gated by the
+    // `autoContinueEnabled` setting so users can turn it off.
+    let autoContinueFired = false;
+    if (
+      finalSuccess &&
+      autoContinueEnabled &&
+      !active.stopped &&
+      models.length > 0
+    ) {
+      const tail = detectTruncatedTail(sessionDir);
+      if (tail.truncated) {
+        autoContinueFired = true;
+        eventsService.record({
+          source: "runtime",
+          type: "auto_continue",
+          threadId,
+          runId: run.id,
+          payload: { reason: tail.reason, tailPreview: tail.tailPreview },
+        });
+        emitTerminal(
+          threadId,
+          `↻ Turn ended mid-sentence (${tail.reason}) — auto-continuing`
+        );
+        setRunPhase(threadId, "thinking");
+        streamService.publish(threadId, { type: "status", status: "running" });
+        const primary = queue[0];
+        try {
+          const {
+            succeeded: contOk,
+            stdoutBuf: contStdout,
+            stopped: contStopped,
+          } = await spawnOnce(
+            threadId,
+            "continue",
+            cwd,
+            sessionDir,
+            primary,
+            active,
+            false,
+            active.currentMessageId
+          );
+          if (!contStopped && contOk) {
+            try {
+              await processSuccess(
+                threadId,
+                active.currentMessageId,
+                contStdout,
+                active,
+                streamingEnabled
+              );
+            } catch (err) {
+              logger.warn({ err }, "auto-continue processSuccess failed");
+            }
+          }
+        } catch (err) {
+          logger.warn({ err }, "auto-continue spawn failed");
+        }
+      }
+    }
+
     activeRuns.delete(threadId);
     setRunPhase(threadId, "idle");
 
@@ -925,6 +1505,24 @@ export const clawRuntime = {
       runService.markStatus(run.id, "error");
       streamService.publish(threadId, { type: "status", status: "error" });
     }
+
+    // Final diagnostics for the run: token breakdown by session line
+    // category, final tokens, which bubbles got created, and overall status.
+    const breakdown = analyzeSessionBreakdown(sessionDir);
+    const finalTokens = readLastInputTokens(sessionDir);
+    eventsService.record({
+      source: "runtime",
+      type: "run_end",
+      threadId,
+      runId: run.id,
+      payload: {
+        succeeded: finalSuccess,
+        stopped: active.stopped,
+        finalInputTokens: finalTokens,
+        bubbleIds: active.allMessageIds,
+        sessionBreakdown: breakdown,
+      },
+    });
 
     return run.id;
   },

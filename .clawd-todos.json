@@ -1,1 +1,22 @@
-[]
+[
+  {
+    "content": "Update index screen to use usePalette instead of @bacons/apple-colors",
+    "activeForm": "Updating index screen to use usePalette instead of @bacons/apple-colors",
+    "status": "in_progress"
+  },
+  {
+    "content": "Update thread screen to use usePalette instead of @bacons/apple-colors",
+    "activeForm": "Updating thread screen to use usePalette instead of @bacons/apple-colors",
+    "status": "pending"
+  },
+  {
+    "content": "Update ThemeProvider to use palette accent for React Navigation primary",
+    "activeForm": "Updating ThemeProvider to use palette accent for React Navigation primary",
+    "status": "pending"
+  },
+  {
+    "content": "Update _layout.tsx to use palette for header colors",
+    "activeForm": "Updating _layout.tsx to use palette for header colors",
+    "status": "pending"
+  }
+]

@@ -1,8 +1,8 @@
 import cors from "cors";
 import express from "express";
 import { db } from "./db/sqlite";
-import { applyMigrations } from "./db/schema";
 import { authMiddleware } from "./middleware/auth";
+import { eventsRouter } from "./routes/events";
 import { fsRouter } from "./routes/fs";
 import { healthRouter } from "./routes/health";
 import { openAppRouter } from "./routes/openApp";
@@ -13,7 +13,8 @@ import { threadsRouter } from "./routes/threads";
 import { HttpError } from "./utils/errors";
 import { logger } from "./utils/logger";
 
-applyMigrations();
+// Schema migrations run automatically from db/sqlite.ts so services can
+// prepare statements at import time.
 
 const stuckCount = db
   .prepare(`UPDATE threads SET status = 'error' WHERE status IN ('running', 'waiting')`)
@@ -35,6 +36,7 @@ app.use(fsRouter);
 app.use(messagesRouter);
 app.use(streamRouter);
 app.use(terminalRouter);
+app.use(eventsRouter);
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: any) => {
   const status = err instanceof HttpError ? err.status : 500;

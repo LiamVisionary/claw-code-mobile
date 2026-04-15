@@ -1,4 +1,3 @@
-import * as AC from "@bacons/apple-colors";
 import {
   DarkTheme,
   DefaultTheme,
@@ -7,44 +6,35 @@ import {
 } from "@react-navigation/native";
 import { useColorScheme } from "react-native";
 import { useGatewayStore } from "@/store/gatewayStore";
-
-// Use exact native P3 colors and equivalents on Android/web.
-// This lines up well with React Navigation.
-const BaconDefaultTheme: Theme = {
-  dark: false,
-  colors: {
-    // ...DefaultTheme.colors,
-    primary: AC.systemBlue,
-    background: AC.systemGroupedBackground,
-    card: AC.secondarySystemGroupedBackground,
-    text: AC.label,
-    border: AC.separator,
-    notification: AC.systemRed,
-  },
-  fonts: DefaultTheme.fonts,
-};
-
-const BaconDarkTheme: Theme = {
-  dark: true,
-  colors: {
-    ...BaconDefaultTheme.colors,
-  },
-  fonts: DarkTheme.fonts,
-};
+import { buildPalette, type AccentTheme } from "@/constants/palette";
 
 export default function ThemeProvider(props: { children: React.ReactNode }) {
   const systemColorScheme = useColorScheme();
   const darkMode = useGatewayStore((s) => s.settings.darkMode);
+  const accentTheme = useGatewayStore(
+    (s) => (s.settings.accentTheme as AccentTheme | undefined) ?? "lavender"
+  );
 
   const isDark =
     darkMode === "dark" || (darkMode === "system" && systemColorScheme === "dark");
 
+  const palette = buildPalette(isDark, accentTheme);
+
+  const navTheme: Theme = {
+    dark: isDark,
+    colors: {
+      primary: palette.accent,
+      background: palette.bg,
+      card: palette.surface,
+      text: palette.text,
+      border: palette.divider,
+      notification: palette.danger,
+    },
+    fonts: isDark ? DarkTheme.fonts : DefaultTheme.fonts,
+  };
+
   return (
-    <RNTheme
-      // This isn't needed on iOS or web, but it's required on Android since the dynamic colors are broken
-      // https://github.com/facebook/react-native/issues/32823
-      value={isDark ? BaconDarkTheme : BaconDefaultTheme}
-    >
+    <RNTheme value={navTheme}>
       {props.children}
     </RNTheme>
   );
