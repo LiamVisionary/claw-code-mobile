@@ -1,4 +1,4 @@
-import { execSync, spawn, ChildProcess } from "child_process";
+import { execSync, execFileSync, spawn, ChildProcess } from "child_process";
 import fs from "fs";
 import path from "path";
 import os from "os";
@@ -178,9 +178,15 @@ export async function login(
   mfa?: string
 ): Promise<{ ok: boolean; message: string }> {
   try {
+    // Use execFileSync with args array to avoid shell interpretation
+    // of special characters in email/password.
     const args = [`login`, `--email`, email, `--password`, password];
     if (mfa) args.push(`--mfa`, mfa);
-    const out = obExec(args.join(" "), { timeout: 30_000 });
+    const out = execFileSync(obBin(), args, {
+      encoding: "utf8",
+      timeout: 30_000,
+      env: obEnv(),
+    });
     return { ok: true, message: out.trim() || "Logged in" };
   } catch (err: any) {
     // ob dumps stack traces and error objects — extract just the human message
@@ -267,7 +273,7 @@ export async function setupSync(
     const args = [
       `sync-setup`,
       `--vault`,
-      `"${vaultIdOrName}"`,
+      vaultIdOrName,
       `--path`,
       resolved,
     ];
@@ -275,7 +281,11 @@ export async function setupSync(
     if (deviceName) args.push(`--device-name`, deviceName);
     else args.push(`--device-name`, `claw-code-mobile`);
 
-    const out = obExec(args.join(" "), { timeout: 30_000 });
+    const out = execFileSync(obBin(), args, {
+      encoding: "utf8",
+      timeout: 30_000,
+      env: obEnv(),
+    });
     return { ok: true, message: out.trim() || "Sync configured" };
   } catch (err: any) {
     return {
