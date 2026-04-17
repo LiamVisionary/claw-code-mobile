@@ -241,6 +241,28 @@ function getBinary(model?: ModelConfig): string {
  *
  * Returns the path to the standalone config for --mcp-config.
  */
+function cleanupMcpVaultConfig(cwd: string) {
+  const paths = [
+    path.join(cwd, ".claw", "settings.json"),
+    path.join(cwd, ".claude", "settings.local.json"),
+    path.join(cwd, ".mcp-vault-config.json"),
+  ];
+  for (const p of paths) {
+    try {
+      const data = JSON.parse(fs.readFileSync(p, "utf8"));
+      if (data.mcpServers?.obsidian) {
+        delete data.mcpServers.obsidian;
+        if (Object.keys(data.mcpServers).length === 0) delete data.mcpServers;
+        if (Object.keys(data).length === 0) {
+          fs.unlinkSync(p);
+        } else {
+          fs.writeFileSync(p, JSON.stringify(data, null, 2));
+        }
+      }
+    } catch { /* file doesn't exist or isn't JSON */ }
+  }
+}
+
 function writeMcpVaultConfig(cwd: string, vaultPath: string): string {
   const mcpConfig = {
     mcpServers: {
@@ -1818,7 +1840,9 @@ export const clawRuntime = {
       } catch (err) {
         logger.warn({ err, threadId }, "Obsidian preamble build failed");
       }
-      // Write MCP vault config so the agent gets rich vault tools
+      // Write MCP vault config so the agent gets rich vault tools.
+      // Config is written before spawn and cleaned up after so it
+      // doesn't persist and slow down non-vault threads.
       if (obsidianVault.useMcpVault !== false) {
         try {
           mcpConfigPath = writeMcpVaultConfig(cwd, obsidianVault.path);
@@ -2261,6 +2285,9 @@ export const clawRuntime = {
       runService.markStatus(run.id, "error");
       streamService.publish(threadId, { type: "status", status: "error" });
     }
+
+    // Clean up MCP config files so they don't slow down non-vault threads
+    if (mcpConfigPath) cleanupMcpVaultConfig(cwd);
 
     // Final diagnostics for the run: token breakdown by session line
     // category, final tokens, which bubbles got created, and overall status.
