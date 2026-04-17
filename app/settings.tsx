@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   Switch,
   Text,
@@ -1890,6 +1892,11 @@ export default function SettingsScreen() {
 
 
   return (
+    <KeyboardAvoidingView
+      style={{ flex: 1, backgroundColor: palette.bg }}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 100 : 0}
+    >
     <ScrollView
       style={{ backgroundColor: palette.bg }}
       contentContainerStyle={{
@@ -2557,5 +2564,6 @@ export default function SettingsScreen() {
           </GlassButton>
         )}
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
