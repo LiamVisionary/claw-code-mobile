@@ -14,40 +14,58 @@ type Props = {
   streaming?: boolean;
 };
 
-function StreamingTextBase({ content, style, streaming }: Props) {
-  const prevContentRef = useRef("");
-  const progress = useSharedValue(1);
-
-  const prevContent = prevContentRef.current;
-  const isNew = content !== prevContent;
+/**
+ * Animated letter component — each letter fades in and rises from below.
+ */
+function AnimatedLetter({ char, delay }: { char: string; delay: number }) {
+  const progress = useSharedValue(0);
 
   useEffect(() => {
-    if (isNew && streaming) {
-      progress.value = 0;
-      progress.value = withTiming(1, {
-        duration: 600,
-        easing: Easing.bezier(0.25, 0.1, 0.25, 1),
-      });
-    }
-    prevContentRef.current = content;
-  }, [content, streaming]);
+    progress.value = withTiming(1, {
+      duration: 350,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, []);
 
-  const animatedStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(progress.value, [0, 0.4, 1], [0, 0.6, 1]),
+  const style = useAnimatedStyle(() => ({
+    opacity: interpolate(progress.value, [0, 0.5, 1], [0, 0.7, 1]),
+    transform: [
+      { translateY: interpolate(progress.value, [0, 1], [8, 0]) },
+    ],
   }));
 
-  if (!streaming) {
-    return (
-      <Text style={style} selectable>
-        {content}
-      </Text>
-    );
+  // Whitespace doesn't need animation
+  if (char === " " || char === "\n") {
+    return <Text>{char}</Text>;
   }
 
-  const oldPart = prevContent;
-  const newPart = content.slice(oldPart.length);
+  return <Animated.Text style={style}>{char}</Animated.Text>;
+}
 
-  if (!newPart) {
+/**
+ * Streaming text with per-letter blur-in-up animation.
+ *
+ * Words that have already been rendered are plain text.
+ * When a new word finishes streaming in, each of its letters
+ * animates individually — starting slightly below and transparent,
+ * rising to final position and full opacity with a stagger.
+ */
+function StreamingTextBase({ content, style, streaming }: Props) {
+  const prevWordCountRef = useRef(0);
+  const prevContentRef = useRef("");
+
+  // Split into words (preserving whitespace as separate tokens)
+  const tokens = content.split(/(\s+)/);
+
+  const prevWordCount = prevWordCountRef.current;
+
+  useEffect(() => {
+    prevWordCountRef.current = tokens.length;
+    prevContentRef.current = content;
+  }, [content]);
+
+  // Completed messages: plain text, no animation
+  if (!streaming) {
     return (
       <Text style={style} selectable>
         {content}
@@ -57,8 +75,30 @@ function StreamingTextBase({ content, style, streaming }: Props) {
 
   return (
     <Text style={style} selectable>
-      {oldPart}
-      <Animated.Text style={animatedStyle}>{newPart}</Animated.Text>
+      {tokens.map((token, wordIdx) => {
+        // Already rendered words — plain text
+        if (wordIdx < prevWordCount) {
+          return <Text key={wordIdx}>{token}</Text>;
+        }
+
+        // Whitespace token
+        if (/^\s+$/.test(token)) {
+          return <Text key={wordIdx}>{token}</Text>;
+        }
+
+        // New word — animate each letter
+        return (
+          <Text key={wordIdx}>
+            {token.split("").map((char, charIdx) => (
+              <AnimatedLetter
+                key={`${wordIdx}-${charIdx}`}
+                char={char}
+                delay={charIdx * 25}
+              />
+            ))}
+          </Text>
+        );
+      })}
     </Text>
   );
 }
