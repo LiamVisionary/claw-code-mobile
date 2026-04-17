@@ -264,11 +264,15 @@ function cleanupMcpVaultConfig(cwd: string) {
 }
 
 function writeMcpVaultConfig(cwd: string, vaultPath: string): string {
+  // The claw binary uses Content-Length framed MCP (LSP-style) but the
+  // MCP JS SDK (used by mcpvault) uses newline-delimited JSON. The
+  // framing adapter translates between them.
+  const adapterPath = path.join(__dirname, "../../scripts/mcp-framing-adapter.mjs");
   const mcpConfig = {
     mcpServers: {
       obsidian: {
-        command: "mcpvault",
-        args: [vaultPath],
+        command: "node",
+        args: [adapterPath, "mcpvault", vaultPath],
       },
     },
   };
