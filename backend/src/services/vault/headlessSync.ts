@@ -21,10 +21,57 @@ let syncProcess: ChildProcess | null = null;
 let syncVaultName: string | null = null;
 let syncVaultPath: string | null = null;
 
+/** Build an env object that puts Node 22+ first on PATH so `ob` uses it. */
+function obEnv(): Record<string, string> {
+  const node22 = node22Bin();
+  const env = { ...process.env } as Record<string, string>;
+  if (node22) {
+    env.PATH = `${node22}:${env.PATH ?? ""}`;
+  }
+  return env;
+}
+
+/** Run an `ob` command synchronously with the correct Node version. */
+function obExec(
+  args: string,
+  opts: { timeout?: number; stdio?: any } = {}
+): string {
+  const bin = obBin();
+  return execSync(`${bin} ${args}`, {
+    encoding: "utf8",
+    timeout: opts.timeout ?? 15_000,
+    env: obEnv(),
+    ...(opts.stdio ? { stdio: opts.stdio } : {}),
+  });
+}
+
 function obBin(): string {
-  // Prefer local npx, fall back to global
+  // obsidian-headless requires Node 22+. Find the ob binary, preferring
+  // Node 22+ installations over whatever the current process uses.
+  const candidates = [
+    // Explicit Node 22 nvm path
+    path.join(os.homedir(), ".nvm/versions/node", "v22.22.2", "bin/ob"),
+    // Generic: scan nvm for any Node >=22
+    ...(() => {
+      try {
+        const nvmDir = path.join(os.homedir(), ".nvm/versions/node");
+        const dirs = require("fs").readdirSync(nvmDir).filter((d: string) => {
+          const m = d.match(/^v(\d+)\./);
+          return m && parseInt(m[1], 10) >= 22;
+        }).sort().reverse();
+        return dirs.map((d: string) => path.join(nvmDir, d, "bin/ob"));
+      } catch { return []; }
+    })(),
+  ];
+  for (const c of candidates) {
+    try {
+      require("fs").accessSync(c, require("fs").constants.X_OK);
+      return c;
+    } catch { /* not found */ }
+  }
+  // Fall back to PATH
   try {
-    return execSync("which ob", { encoding: "utf8" }).trim();
+    return execSync("which ob", { encoding: "utf8", timeout: 3000 }).trim();
   } catch {
     return "ob";
   }
@@ -33,19 +80,70 @@ function obBin(): string {
 /** Check if obsidian-headless is installed. */
 export function isInstalled(): boolean {
   try {
-    execSync("ob --help", { stdio: "ignore", timeout: 5_000 });
+    const bin = obBin();
+    execSync(`${bin} --help`, { stdio: "ignore", timeout: 5_000, env: obEnv() });
     return true;
   } catch {
-    return false;
+    // ob --help may exit non-zero; check if the binary exists at all
+    try {
+      require("fs").accessSync(obBin(), require("fs").constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
   }
+}
+
+/** Find a Node 22+ binary for obsidian-headless. */
+function node22Bin(): string | null {
+  try {
+    const nvmDir = path.join(os.homedir(), ".nvm/versions/node");
+    const dirs = require("fs").readdirSync(nvmDir).filter((d: string) => {
+      const m = d.match(/^v(\d+)\./);
+      return m && parseInt(m[1], 10) >= 22;
+    }).sort().reverse();
+    if (dirs.length > 0) {
+      return path.join(nvmDir, dirs[0], "bin");
+    }
+  } catch { /* nvm not present */ }
+  // Check if current node is 22+
+  const major = parseInt(process.versions.node.split(".")[0], 10);
+  if (major >= 22) return path.dirname(process.execPath);
+  return null;
 }
 
 /** Install obsidian-headless globally via npm. */
 export async function install(): Promise<{ ok: boolean; message: string }> {
   try {
-    execSync("npm install -g obsidian-headless", {
+    // First ensure Node 22 is available
+    let node22 = node22Bin();
+    if (!node22) {
+      // Try to install Node 22 via nvm
+      try {
+        execSync(
+          'bash -c "source ~/.nvm/nvm.sh && nvm install 22"',
+          { encoding: "utf8", timeout: 120_000 }
+        );
+        node22 = node22Bin();
+      } catch {
+        return {
+          ok: false,
+          message: "obsidian-headless requires Node.js 22+. Install it with: nvm install 22",
+        };
+      }
+    }
+    if (!node22) {
+      return {
+        ok: false,
+        message: "Could not find Node.js 22+. Install it with: nvm install 22",
+      };
+    }
+    // Install obsidian-headless using Node 22's npm
+    const npmBin = path.join(node22, "npm");
+    execSync(`${npmBin} install -g obsidian-headless`, {
       encoding: "utf8",
       timeout: 120_000,
+      env: { ...process.env, PATH: `${node22}:${process.env.PATH}` },
     });
     return { ok: true, message: "obsidian-headless installed" };
   } catch (err: any) {
@@ -61,11 +159,7 @@ export function getLoginStatus(): string | null {
   try {
     // Use sync-list-remote as a login probe — it fails fast if not logged in
     // and doesn't prompt for credentials like `ob login` does.
-    const out = execSync(`${obBin()} sync-list-remote`, {
-      encoding: "utf8",
-      timeout: 10_000,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const out = obExec("sync-list-remote", { timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] });
     // If we get output (even empty list), we're logged in
     return "logged-in";
   } catch (err: any) {
@@ -85,10 +179,7 @@ export async function login(
   try {
     const args = [`login`, `--email`, email, `--password`, password];
     if (mfa) args.push(`--mfa`, mfa);
-    const out = execSync(`${obBin()} ${args.join(" ")}`, {
-      encoding: "utf8",
-      timeout: 30_000,
-    });
+    const out = obExec(args.join(" "), { timeout: 30_000 });
     return { ok: true, message: out.trim() || "Logged in" };
   } catch (err: any) {
     const msg =
@@ -100,7 +191,7 @@ export async function login(
 /** Log out of Obsidian account. */
 export function logout(): { ok: boolean; message: string } {
   try {
-    execSync(`${obBin()} logout`, { encoding: "utf8", timeout: 10_000 });
+    obExec("logout", { timeout: 10_000 });
     return { ok: true, message: "Logged out" };
   } catch (err: any) {
     return { ok: false, message: err?.message || "Logout failed" };
@@ -110,10 +201,7 @@ export function logout(): { ok: boolean; message: string } {
 /** List remote vaults available to the logged-in account. */
 export function listRemoteVaults(): RemoteVault[] {
   try {
-    const out = execSync(`${obBin()} sync-list-remote`, {
-      encoding: "utf8",
-      timeout: 15_000,
-    });
+    const out = obExec("sync-list-remote", { timeout: 15_000 });
     // Parse output — each line typically has vault info
     const vaults: RemoteVault[] = [];
     for (const line of out.split("\n")) {
@@ -176,10 +264,7 @@ export async function setupSync(
     if (deviceName) args.push(`--device-name`, deviceName);
     else args.push(`--device-name`, `claw-code-mobile`);
 
-    const out = execSync(`${obBin()} ${args.join(" ")}`, {
-      encoding: "utf8",
-      timeout: 30_000,
-    });
+    const out = obExec(args.join(" "), { timeout: 30_000 });
     return { ok: true, message: out.trim() || "Sync configured" };
   } catch (err: any) {
     return {
@@ -195,10 +280,7 @@ export async function syncOnce(
 ): Promise<{ ok: boolean; message: string }> {
   try {
     const resolved = path.resolve(localPath.replace(/^~/, os.homedir()));
-    const out = execSync(`${obBin()} sync --path "${resolved}"`, {
-      encoding: "utf8",
-      timeout: 120_000,
-    });
+    const out = obExec(`sync --path "${resolved}"`, { timeout: 120_000 });
     return { ok: true, message: out.trim() || "Sync complete" };
   } catch (err: any) {
     return {
@@ -223,6 +305,7 @@ export function startContinuousSync(
     const resolved = path.resolve(localPath.replace(/^~/, os.homedir()));
     syncProcess = spawn(obBin(), ["sync", "--continuous", "--path", resolved], {
       stdio: "ignore",
+      env: obEnv(),
       detached: true,
     });
     syncProcess.unref();
@@ -279,10 +362,7 @@ export function getSyncStatus(): SyncStatus {
 
   // Check if there's a configured vault
   try {
-    const out = execSync(`${obBin()} sync-list-local`, {
-      encoding: "utf8",
-      timeout: 10_000,
-    });
+    const out = obExec("sync-list-local", { timeout: 10_000 });
     if (out.trim() && !out.includes("No ")) {
       const firstLine = out.trim().split("\n")[0];
       return { state: "idle", vault: firstLine, path: "" };
