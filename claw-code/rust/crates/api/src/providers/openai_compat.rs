@@ -14,6 +14,7 @@ use crate::types::{
     ToolChoice, ToolDefinition, ToolResultContentBlock, Usage,
 };
 
+use super::text_format::{DemuxEvent, FormatDemuxer, TextFormat};
 use super::{preflight_message_request, Provider, ProviderFuture};
 
 pub const DEFAULT_XAI_BASE_URL: &str = "https://api.x.ai/v1";
@@ -432,6 +433,14 @@ impl OpenAiSseParser {
     }
 }
 
+/// Block indices reserved for demuxer-synthesized content blocks.
+/// Real OpenAI tool_calls use `openai_index + 1` (i.e. 1..N); we need
+/// fixed, high indices for text/thinking and a distinct range for any
+/// tool calls we synthesize from text-channel markup.
+const TEXT_BLOCK_INDEX: u32 = 0;
+const THINKING_BLOCK_INDEX: u32 = 999;
+const SYNTHETIC_TOOL_BASE_INDEX: u32 = 1000;
+
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug)]
 struct StreamState {
@@ -439,23 +448,118 @@ struct StreamState {
     message_started: bool,
     text_started: bool,
     text_finished: bool,
+    thinking_started: bool,
+    thinking_finished: bool,
     finished: bool,
     stop_reason: Option<String>,
     usage: Option<Usage>,
     tool_calls: BTreeMap<u32, ToolCallState>,
+    /// Demuxer for Harmony / Hermes-XML tool calls embedded in `content`.
+    demuxer: FormatDemuxer,
+    /// Monotonic counter for synthetic tool_call block indices (one per
+    /// demuxed tool call, distinct from real OpenAI `tool_calls` indices).
+    next_synthetic_tool_index: u32,
+    /// Synthetic tool calls in the order they were emitted, for finalize.
+    synthetic_tool_blocks: Vec<u32>,
 }
 
 impl StreamState {
     fn new(model: String) -> Self {
+        let format = TextFormat::detect_from_model(&model);
         Self {
             model,
             message_started: false,
             text_started: false,
             text_finished: false,
+            thinking_started: false,
+            thinking_finished: false,
             finished: false,
             stop_reason: None,
             usage: None,
             tool_calls: BTreeMap::new(),
+            demuxer: FormatDemuxer::new(format),
+            next_synthetic_tool_index: SYNTHETIC_TOOL_BASE_INDEX,
+            synthetic_tool_blocks: Vec::new(),
+        }
+    }
+
+    fn ensure_text_started(&mut self, events: &mut Vec<StreamEvent>) {
+        if !self.text_started {
+            self.text_started = true;
+            events.push(StreamEvent::ContentBlockStart(ContentBlockStartEvent {
+                index: TEXT_BLOCK_INDEX,
+                content_block: OutputContentBlock::Text {
+                    text: String::new(),
+                },
+            }));
+        }
+    }
+
+    fn ensure_thinking_started(&mut self, events: &mut Vec<StreamEvent>) {
+        if !self.thinking_started {
+            self.thinking_started = true;
+            events.push(StreamEvent::ContentBlockStart(ContentBlockStartEvent {
+                index: THINKING_BLOCK_INDEX,
+                content_block: OutputContentBlock::Thinking {
+                    thinking: String::new(),
+                    signature: None,
+                },
+            }));
+        }
+    }
+
+    fn emit_demux_events(
+        &mut self,
+        demuxed: Vec<DemuxEvent>,
+        events: &mut Vec<StreamEvent>,
+    ) {
+        for evt in demuxed {
+            match evt {
+                DemuxEvent::Text(text) if text.is_empty() => {}
+                DemuxEvent::Text(text) => {
+                    self.ensure_text_started(events);
+                    events.push(StreamEvent::ContentBlockDelta(ContentBlockDeltaEvent {
+                        index: TEXT_BLOCK_INDEX,
+                        delta: ContentBlockDelta::TextDelta { text },
+                    }));
+                }
+                DemuxEvent::Thinking(thinking) if thinking.is_empty() => {}
+                DemuxEvent::Thinking(thinking) => {
+                    self.ensure_thinking_started(events);
+                    events.push(StreamEvent::ContentBlockDelta(ContentBlockDeltaEvent {
+                        index: THINKING_BLOCK_INDEX,
+                        delta: ContentBlockDelta::ThinkingDelta { thinking },
+                    }));
+                }
+                DemuxEvent::ToolCall { name, arguments } => {
+                    let block_index = self.next_synthetic_tool_index;
+                    self.next_synthetic_tool_index += 1;
+                    self.synthetic_tool_blocks.push(block_index);
+                    let id = format!("synth_tool_{}", block_index - SYNTHETIC_TOOL_BASE_INDEX);
+                    events.push(StreamEvent::ContentBlockStart(ContentBlockStartEvent {
+                        index: block_index,
+                        content_block: OutputContentBlock::ToolUse {
+                            id,
+                            name,
+                            input: json!({}),
+                        },
+                    }));
+                    if !arguments.is_empty() {
+                        events.push(StreamEvent::ContentBlockDelta(ContentBlockDeltaEvent {
+                            index: block_index,
+                            delta: ContentBlockDelta::InputJsonDelta {
+                                partial_json: arguments,
+                            },
+                        }));
+                    }
+                    events.push(StreamEvent::ContentBlockStop(ContentBlockStopEvent {
+                        index: block_index,
+                    }));
+                    // Stop reason defaults to `end_turn`; upgrade it so the
+                    // agent loop actually runs the synthesized call.
+                    self.stop_reason = Some("tool_use".to_string());
+                }
+            }
         }
     }
 
@@ -494,19 +598,8 @@ impl StreamState {
 
         for choice in chunk.choices {
             if let Some(content) = choice.delta.content.filter(|value| !value.is_empty()) {
-                if !self.text_started {
-                    self.text_started = true;
-                    events.push(StreamEvent::ContentBlockStart(ContentBlockStartEvent {
-                        index: 0,
-                        content_block: OutputContentBlock::Text {
-                            text: String::new(),
-                        },
-                    }));
-                }
-                events.push(StreamEvent::ContentBlockDelta(ContentBlockDeltaEvent {
-                    index: 0,
-                    delta: ContentBlockDelta::TextDelta { text: content },
-                }));
+                let demuxed = self.demuxer.push(&content);
+                self.emit_demux_events(demuxed, &mut events);
             }
 
             for tool_call in choice.delta.tool_calls {
@@ -557,10 +650,23 @@ impl StreamState {
         self.finished = true;
 
         let mut events = Vec::new();
+
+        // Flush any tail buffered in the demuxer (e.g. model ended mid-token
+        // or without a closing marker) so no text is silently dropped.
+        let demuxed = self.demuxer.finish();
+        self.emit_demux_events(demuxed, &mut events);
+
         if self.text_started && !self.text_finished {
             self.text_finished = true;
             events.push(StreamEvent::ContentBlockStop(ContentBlockStopEvent {
-                index: 0,
+                index: TEXT_BLOCK_INDEX,
+            }));
+        }
+
+        if self.thinking_started && !self.thinking_finished {
+            self.thinking_finished = true;
+            events.push(StreamEvent::ContentBlockStop(ContentBlockStopEvent {
+                index: THINKING_BLOCK_INDEX,
             }));
         }
 
