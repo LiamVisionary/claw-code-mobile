@@ -3,6 +3,7 @@ import { Text } from "react-native";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
+  withDelay,
   withTiming,
   Easing,
   interpolate,
@@ -21,10 +22,13 @@ function AnimatedLetter({ char, delay }: { char: string; delay: number }) {
   const progress = useSharedValue(0);
 
   useEffect(() => {
-    progress.value = withTiming(1, {
-      duration: 350,
-      easing: Easing.out(Easing.cubic),
-    });
+    progress.value = withDelay(
+      delay,
+      withTiming(1, {
+        duration: 300,
+        easing: Easing.out(Easing.cubic),
+      })
+    );
   }, []);
 
   const style = useAnimatedStyle(() => ({
