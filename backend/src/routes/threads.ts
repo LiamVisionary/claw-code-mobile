@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { threadService } from "../services/threadService";
+import { shellService } from "../services/shellService";
 import { streamService } from "../services/streamService";
 import { HttpError } from "../utils/errors";
 
@@ -48,6 +49,7 @@ threadsRouter.delete("/threads/:threadId", (req, res, next) => {
   try {
     const thread = threadService.get(req.params.threadId);
     if (!thread) throw new HttpError(404, "Thread not found");
+    shellService.kill(req.params.threadId);
     threadService.delete(req.params.threadId);
     res.json({ ok: true });
   } catch (err) {

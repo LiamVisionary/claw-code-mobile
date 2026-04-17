@@ -39,6 +39,7 @@ import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import SlashCommandPicker from "@/components/SlashCommandPicker";
 import DirectoryBrowser from "@/components/DirectoryBrowser";
+import TerminalSheet from "@/components/terminal-sheet";
 import { useGatewayStore } from "@/store/gatewayStore";
 import type { Attachment, Message, ToolStep, PermissionRequest, ThreadStatus, ModelEntry } from "@/store/gatewayStore";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -78,6 +79,7 @@ export default function ThreadScreen() {
   const [slashPickerVisible, setSlashPickerVisible] = useState(false);
   const [copiedConvo, setCopiedConvo] = useState(false);
   const [showDirBrowser, setShowDirBrowser] = useState(false);
+  const [showTerminal, setShowTerminal] = useState(false);
   const [queuedMessage, setQueuedMessage] = useState<string | null>(null);
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
@@ -161,6 +163,10 @@ export default function ThreadScreen() {
     const sub = AppState.addEventListener("change", (nextState) => {
       if (nextState === "active" && id) {
         actions.refreshThread(id).catch(() => {});
+        // Terminal chunks are not in the SSE replay buffer — re-fetch
+        // history from SQLite so any output that landed while we were
+        // backgrounded shows up in the terminal sheet.
+        actions.loadTerminal(id).catch(() => {});
       }
     });
     return () => sub.remove();
@@ -590,15 +596,22 @@ export default function ThreadScreen() {
             />
           ),
           headerRight: () => (
-            <TouchableBounce sensory onPress={copyConversation} disabled={messages.length === 0}>
-              <View style={{ width: 34, height: 34, alignItems: "center", justifyContent: "center", opacity: messages.length > 0 ? 1 : 0.3 }}>
-                <IconSymbol
-                  name={copiedConvo ? "checkmark" : "doc.on.doc"}
-                  color={copiedConvo ? palette.success : palette.textMuted}
-                  size={16}
-                />
-              </View>
-            </TouchableBounce>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
+              <TouchableBounce sensory onPress={() => setShowTerminal(true)}>
+                <View style={{ width: 34, height: 34, alignItems: "center", justifyContent: "center" }}>
+                  <IconSymbol name="terminal" color={palette.textMuted} size={16} />
+                </View>
+              </TouchableBounce>
+              <TouchableBounce sensory onPress={copyConversation} disabled={messages.length === 0}>
+                <View style={{ width: 34, height: 34, alignItems: "center", justifyContent: "center", opacity: messages.length > 0 ? 1 : 0.3 }}>
+                  <IconSymbol
+                    name={copiedConvo ? "checkmark" : "doc.on.doc"}
+                    color={copiedConvo ? palette.success : palette.textMuted}
+                    size={16}
+                  />
+                </View>
+              </TouchableBounce>
+            </View>
           ),
           headerBackVisible: true,
           headerTransparent: true,
@@ -1004,6 +1017,17 @@ export default function ThreadScreen() {
         }}
         onCancel={() => setShowDirBrowser(false)}
       />
+
+      {id && (
+        <TerminalSheet
+          threadId={id}
+          visible={showTerminal}
+          onClose={() => setShowTerminal(false)}
+          onSendToClaw={(text) =>
+            setInput((prev) => (prev ? `${prev}\n\n${text}` : text))
+          }
+        />
+      )}
 
       {/* Scroll-to-bottom FAB — simple down arrow like iMessage. */}
       {showGoToLatest && (
