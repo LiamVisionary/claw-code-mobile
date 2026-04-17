@@ -472,16 +472,23 @@ export default function ThreadScreen() {
   // bubble boundary, so previous cycle's badges stay visible only on
   // their own MessageBubble (via the per-bubble messageId filter there),
   // not in the live indicator below the list.
+  const runStartedAt = useGatewayStore((s) => s.runStartedAt[id ?? ""] ?? 0);
   const liveCycleSteps = useMemo(() => {
     if (toolSteps.length === 0) return EMPTY_STEPS;
-    const latestMsgId = toolSteps[toolSteps.length - 1].messageId;
-    const out: typeof toolSteps = [];
-    for (let i = toolSteps.length - 1; i >= 0; i--) {
-      if (toolSteps[i].messageId === latestMsgId) out.unshift(toolSteps[i]);
+    // Only show steps from the current run — prevents previous turn's
+    // badges from lingering during the "thinking" phase of a new turn.
+    const currentRunSteps = runStartedAt
+      ? toolSteps.filter((s) => (s.startedAt ?? 0) >= runStartedAt)
+      : toolSteps;
+    if (currentRunSteps.length === 0) return EMPTY_STEPS;
+    const latestMsgId = currentRunSteps[currentRunSteps.length - 1].messageId;
+    const out: typeof currentRunSteps = [];
+    for (let i = currentRunSteps.length - 1; i >= 0; i--) {
+      if (currentRunSteps[i].messageId === latestMsgId) out.unshift(currentRunSteps[i]);
       else break;
     }
     return out;
-  }, [toolSteps]);
+  }, [toolSteps, runStartedAt]);
 
   const listFooterElem = useMemo(() => {
     const lastMsg = messages[messages.length - 1];
@@ -1471,7 +1478,7 @@ function MessageBubble({
             }}
           >
             {visibleStepBadges.map((step) => {
-              const meta = TOOL_META[step.tool] ?? TOOL_META.unknown;
+              const meta = resolveToolMeta(step);
               const isActive = tappedBadgeId === step.id;
               const isErr = step.status === "error";
               return (
@@ -1538,7 +1545,7 @@ function MessageBubble({
           {tappedBadgeId && (() => {
             const step = msgSteps.find((s) => s.id === tappedBadgeId);
             if (!step) return null;
-            const meta = TOOL_META[step.tool] ?? TOOL_META.unknown;
+            const meta = resolveToolMeta(step);
             return (
               <View style={{
                 backgroundColor: isDark ? "#1c1c1e" : "#fff",
@@ -1586,7 +1593,7 @@ function MessageBubble({
               }}
             >
               {msgSteps.map((step) => {
-                const meta = TOOL_META[step.tool] ?? TOOL_META.unknown;
+                const meta = resolveToolMeta(step);
                 const isErr = step.status === "error";
                 return (
                   <View key={step.id} style={{ gap: 2 }}>
@@ -2647,11 +2654,27 @@ const TOOL_META: Record<string, { icon: string; color: string }> = {
   rm:                 { icon: "trash",                         color: "#EF4444" },
   delete_file:        { icon: "trash",                         color: "#EF4444" },
   mkdir:              { icon: "folder.badge.plus",             color: "#22C55E" },
+  // ── Obsidian vault ────────────────────────────────────────────────────
+  vault_read:         { icon: "eye",                           color: "#7C3AED" },
+  vault_write:        { icon: "pencil.and.outline",            color: "#7C3AED" },
   // ── Thinking ─────────────────────────────────────────────────────────
   think:              { icon: "brain.head.profile",            color: "#14B8A6" },
   // ── Fallback ─────────────────────────────────────────────────────────
   unknown:            { icon: "hammer",                        color: "#6B7280" },
 };
+
+/** Resolve tool meta, detecting Obsidian vault file operations. */
+function resolveToolMeta(step: { tool: string; label?: string; detail?: string }) {
+  // Check if this tool targets a vault path (label or detail contains vault indicators)
+  const target = (step.label ?? "") + " " + (step.detail ?? "");
+  const isVault = /obsidian|\.obsidian|claw-code\/memory/i.test(target)
+    || /\/Obsidian\//i.test(target);
+  if (isVault) {
+    const isWrite = /edit|write|create|append|mkdir/i.test(step.tool);
+    return isWrite ? TOOL_META.vault_write : TOOL_META.vault_read;
+  }
+  return resolveToolMeta(step);
+}
 
 const THINKING_PHRASES = [
   "thinking",
@@ -2863,7 +2886,7 @@ function ThinkingIndicator({
             appearing at all means the tool invocation was started; its
             mere presence is the live-progress indicator. */}
         {visibleBadges.map((step) => {
-          const meta     = TOOL_META[step.tool] ?? TOOL_META.unknown;
+          const meta     = resolveToolMeta(step);
           const isError  = step.status === "error";
           const isActive = tappedBadgeId === step.id;
           return (
@@ -2927,7 +2950,7 @@ function ThinkingIndicator({
             backgroundColor: bubbleBg,
             borderRadius: BORDER_RADIUS.md,
             borderWidth: 1,
-            borderColor: `${(TOOL_META[tappedStep.tool] ?? TOOL_META.unknown).color}33`,
+            borderColor: `${(resolveToolMeta(tappedStep)).color}33`,
             paddingHorizontal: 10,
             paddingVertical: 6,
             flexDirection: "row",
@@ -2937,7 +2960,7 @@ function ThinkingIndicator({
           }}
         >
           {(() => {
-            const meta = TOOL_META[tappedStep.tool] ?? TOOL_META.unknown;
+            const meta = resolveToolMeta(tappedStep);
             return (
               <>
                 <View style={{
@@ -2979,7 +3002,7 @@ function ThinkingIndicator({
           }}
         >
           {toolSteps.map((step) => {
-            const meta    = TOOL_META[step.tool] ?? TOOL_META.unknown;
+            const meta    = resolveToolMeta(step);
             const isError = step.status === "error";
             return (
               <View key={step.id} style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
@@ -3043,7 +3066,7 @@ function ThinkingIndicator({
 
       {/* ── Permission request cards ───────────────────────── */}
       {permissionRequests.map((req) => {
-        const meta = TOOL_META[req.tool] ?? TOOL_META.unknown;
+        const meta = resolveToolMeta(req);
         return (
           <View
             key={req.id}
