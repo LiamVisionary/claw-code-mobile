@@ -19,6 +19,10 @@ import {
   type AccentTheme,
   type Palette,
 } from "@/constants/palette";
+import {
+  pickVaultDirectory,
+  validateLocalVault,
+} from "@/util/vault/localVault";
 
 // ─── Providers ───────────────────────────────────────────────────────────────
 
@@ -289,13 +293,15 @@ function QueueRow({
           numberOfLines={1}
         >
           {providerLabel}
-          {entry.authMethod === "oauth" && entry.oauthToken
+          {entry.provider === "local"
+            ? entry.endpoint
+              ? `  ·  ${entry.endpoint.replace(/^https?:\/\//, "")}`
+              : "  ·  no endpoint"
+            : entry.authMethod === "oauth" && entry.oauthToken
             ? "  ·  OAuth"
             : entry.apiKey
             ? `  ·  ···${entry.apiKey.slice(-4)}`
-            : entry.provider !== "local"
-            ? "  ·  no key"
-            : ""}
+            : "  ·  no key"}
         </Text>
       </View>
 
@@ -395,6 +401,7 @@ function AddModelForm({
   /** Flipped to true when the user blurs or submits the API key field */
   const [apiKeyBlurred, setApiKeyBlurred] = useState(false);
   const [apiKey, setApiKey] = useState("");
+  const [endpoint, setEndpoint] = useState("http://127.0.0.1:11434/v1");
   const [expanded, setExpanded] = useState(false);
   const [oauthLoading, setOauthLoading] = useState(false);
   // Reuse OAuth token from any existing Claude OAuth entry in the queue
@@ -511,6 +518,10 @@ function AddModelForm({
     // don't bleed into OpenRouter and vice-versa.
     const existing = existingEntries.find((e) => e.provider === p && e.apiKey);
     setApiKey(existing?.apiKey ?? "");
+    if (p === "local") {
+      const existingLocal = existingEntries.find((e) => e.provider === "local" && e.endpoint);
+      if (existingLocal?.endpoint) setEndpoint(existingLocal.endpoint);
+    }
   };
 
   const startOAuthFlow = async () => {
@@ -604,6 +615,7 @@ function AddModelForm({
       // backend can pass both to the claw binary (ApiKeyAndBearer auth).
       authMethod: provider === "claude" && authMethod === "oauth" ? "oauth" : undefined,
       oauthToken: provider === "claude" && authMethod === "oauth" ? oauthToken ?? undefined : undefined,
+      ...(provider === "local" ? { endpoint: endpoint.trim() || "http://127.0.0.1:11434/v1" } : {}),
     });
     setName(CLAUDE_FALLBACK[0]?.id ?? "");
     setApiKey("");
@@ -1122,14 +1134,37 @@ function AddModelForm({
             </>
           )}
 
-          {/* Model name — only for local provider */}
+          {/* Local provider — endpoint URL + model name */}
           {provider === "local" && (
-            <Field
-              placeholder="Model name or path"
-              value={name}
-              onChangeText={setName}
-              palette={palette}
-            />
+            <>
+              <Field
+                placeholder="Endpoint, e.g. http://127.0.0.1:11434/v1"
+                value={endpoint}
+                onChangeText={setEndpoint}
+                palette={palette}
+                keyboardType="url"
+              />
+              <Text
+                style={{
+                  color: palette.textSoft,
+                  fontSize: 12,
+                  lineHeight: 17,
+                  marginTop: -4,
+                  marginLeft: 4,
+                }}
+              >
+                OpenAI-compatible URL for Ollama, LM Studio, llama.cpp, etc.
+                The backend reaches this from its own host — use your Mac's
+                LAN IP (not 127.0.0.1) when the backend runs on a different
+                machine.
+              </Text>
+              <Field
+                placeholder="Model name or path"
+                value={name}
+                onChangeText={setName}
+                palette={palette}
+              />
+            </>
           )}
 
           {/* Add to queue — visible once auth is done and model is selectable */}
@@ -1288,6 +1323,33 @@ export default function SettingsScreen() {
   const [autoContinueEnabled, setAutoContinueEnabled] = useState(
     settings.autoContinueEnabled ?? true
   );
+  const [obsidianEnabled, setObsidianEnabled] = useState(
+    settings.obsidianVault?.enabled ?? false
+  );
+  const [obsidianProvider, setObsidianProvider] = useState<"backend" | "local">(
+    settings.obsidianVault?.provider ?? "backend"
+  );
+  const [obsidianPath, setObsidianPath] = useState(
+    settings.obsidianVault?.path ?? ""
+  );
+  const [obsidianLocalUri, setObsidianLocalUri] = useState(
+    settings.obsidianVault?.localDirectoryUri ?? ""
+  );
+  const [obsidianLocalDisplay, setObsidianLocalDisplay] = useState(
+    settings.obsidianVault?.localDisplayPath ?? ""
+  );
+  const [obsidianUseForMemory, setObsidianUseForMemory] = useState(
+    settings.obsidianVault?.useForMemory ?? true
+  );
+  const [obsidianUseForReference, setObsidianUseForReference] = useState(
+    settings.obsidianVault?.useForReference ?? true
+  );
+  const [obsidianStatus, setObsidianStatus] = useState<"idle" | "ok" | "error">(
+    "idle"
+  );
+  const [obsidianMessage, setObsidianMessage] = useState<string | null>(null);
+  const [obsidianChecking, setObsidianChecking] = useState(false);
+
   const effectiveScheme =
     darkMode === "system" ? scheme ?? "light" : darkMode;
   const palette = useMemo<Palette>(
@@ -1324,6 +1386,13 @@ export default function SettingsScreen() {
     setAutoCompactThreshold(settings.autoCompactThreshold ?? 70);
     setTelemetryEnabled(settings.telemetryEnabled ?? true);
     setAutoContinueEnabled(settings.autoContinueEnabled ?? true);
+    setObsidianEnabled(settings.obsidianVault?.enabled ?? false);
+    setObsidianProvider(settings.obsidianVault?.provider ?? "backend");
+    setObsidianPath(settings.obsidianVault?.path ?? "");
+    setObsidianLocalUri(settings.obsidianVault?.localDirectoryUri ?? "");
+    setObsidianLocalDisplay(settings.obsidianVault?.localDisplayPath ?? "");
+    setObsidianUseForMemory(settings.obsidianVault?.useForMemory ?? true);
+    setObsidianUseForReference(settings.obsidianVault?.useForReference ?? true);
     setQueue(buildQueue(settings));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [_hasHydrated]);
@@ -1334,13 +1403,15 @@ export default function SettingsScreen() {
   const pendingRef = useRef({
     serverUrl, bearerToken, queue, autoCompact, streamingEnabled,
     darkMode, accentTheme, autoCompactThreshold, telemetryEnabled,
-    autoContinueEnabled,
+    autoContinueEnabled, obsidianEnabled, obsidianProvider, obsidianPath,
+    obsidianLocalUri, obsidianLocalDisplay, obsidianUseForMemory, obsidianUseForReference,
   });
   // Keep the ref current without triggering effects
   pendingRef.current = {
     serverUrl, bearerToken, queue, autoCompact, streamingEnabled,
     darkMode, accentTheme, autoCompactThreshold, telemetryEnabled,
-    autoContinueEnabled,
+    autoContinueEnabled, obsidianEnabled, obsidianProvider, obsidianPath,
+    obsidianLocalUri, obsidianLocalDisplay, obsidianUseForMemory, obsidianUseForReference,
   };
   // Flush to store on unmount (modal close)
   useEffect(() => {
@@ -1357,6 +1428,15 @@ export default function SettingsScreen() {
         autoCompactThreshold: s.autoCompactThreshold,
         telemetryEnabled: s.telemetryEnabled,
         autoContinueEnabled: s.autoContinueEnabled,
+        obsidianVault: {
+          enabled: s.obsidianEnabled,
+          provider: s.obsidianProvider,
+          path: s.obsidianPath.trim(),
+          localDirectoryUri: s.obsidianLocalUri,
+          localDisplayPath: s.obsidianLocalDisplay,
+          useForMemory: s.obsidianUseForMemory,
+          useForReference: s.obsidianUseForReference,
+        },
       });
     };
   }, [actions]);
@@ -1374,6 +1454,13 @@ export default function SettingsScreen() {
     autoCompactThreshold: settings.autoCompactThreshold ?? 70,
     telemetryEnabled: settings.telemetryEnabled ?? true,
     autoContinueEnabled: settings.autoContinueEnabled ?? true,
+    obsidianEnabled: settings.obsidianVault?.enabled ?? false,
+    obsidianProvider: (settings.obsidianVault?.provider ?? "backend") as "backend" | "local",
+    obsidianPath: settings.obsidianVault?.path ?? "",
+    obsidianLocalUri: settings.obsidianVault?.localDirectoryUri ?? "",
+    obsidianLocalDisplay: settings.obsidianVault?.localDisplayPath ?? "",
+    obsidianUseForMemory: settings.obsidianVault?.useForMemory ?? true,
+    obsidianUseForReference: settings.obsidianVault?.useForReference ?? true,
   });
 
   const hasChanges =
@@ -1386,6 +1473,7 @@ export default function SettingsScreen() {
     autoCompactThreshold !== initialRef.current.autoCompactThreshold ||
     telemetryEnabled !== initialRef.current.telemetryEnabled ||
     autoContinueEnabled !== initialRef.current.autoContinueEnabled ||
+    obsidianEnabled !== initialRef.current.obsidianEnabled ||
     JSON.stringify(queue.map((q) => q.id)) !==
       JSON.stringify(initialRef.current.queue.map((q) => q.id));
 
@@ -1401,6 +1489,92 @@ export default function SettingsScreen() {
     setAutoCompactThreshold(s.autoCompactThreshold);
     setTelemetryEnabled(s.telemetryEnabled);
     setAutoContinueEnabled(s.autoContinueEnabled);
+    setObsidianEnabled(s.obsidianEnabled);
+    setObsidianProvider(s.obsidianProvider);
+    setObsidianPath(s.obsidianPath);
+    setObsidianLocalUri(s.obsidianLocalUri);
+    setObsidianLocalDisplay(s.obsidianLocalDisplay);
+    setObsidianUseForMemory(s.obsidianUseForMemory);
+    setObsidianUseForReference(s.obsidianUseForReference);
+  };
+
+  const validateObsidianBackend = async () => {
+    if (!serverUrl || !bearerToken) {
+      setObsidianMessage("Set server URL and token first.");
+      setObsidianStatus("error");
+      return;
+    }
+    if (!obsidianPath.trim()) {
+      setObsidianMessage("Enter a vault path first.");
+      setObsidianStatus("error");
+      return;
+    }
+    setObsidianChecking(true);
+    setObsidianStatus("idle");
+    setObsidianMessage(null);
+    try {
+      const res = await fetch(
+        `${serverUrl.replace(/\/+$/, "")}/obsidian/validate`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${bearerToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ path: obsidianPath.trim() }),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        setObsidianMessage(data.reason ?? data.error ?? `Server returned ${res.status}`);
+        setObsidianStatus("error");
+      } else {
+        const n = data.noteCount ?? 0;
+        setObsidianMessage(
+          `Connected — ${n} note${n === 1 ? "" : "s"} found` +
+            (data.resolvedPath ? ` at ${data.resolvedPath}` : "")
+        );
+        setObsidianStatus("ok");
+        setObsidianEnabled(true);
+      }
+    } catch (err: any) {
+      setObsidianMessage(err.message ?? "Validation failed");
+      setObsidianStatus("error");
+    } finally {
+      setObsidianChecking(false);
+    }
+  };
+
+  const pickLocalVault = async () => {
+    setObsidianChecking(true);
+    setObsidianStatus("idle");
+    setObsidianMessage(null);
+    try {
+      const pick = await pickVaultDirectory();
+      if (!pick.ok) {
+        setObsidianMessage(pick.reason);
+        setObsidianStatus("error");
+        return;
+      }
+      const check = await validateLocalVault(pick.directoryUri);
+      if (!check.ok) {
+        setObsidianMessage(check.reason);
+        setObsidianStatus("error");
+        return;
+      }
+      setObsidianLocalUri(pick.directoryUri);
+      setObsidianLocalDisplay(pick.displayPath);
+      setObsidianMessage(
+        `Connected — ${check.noteCount} note${check.noteCount === 1 ? "" : "s"} found at ${pick.displayPath}`
+      );
+      setObsidianStatus("ok");
+      setObsidianEnabled(true);
+    } catch (err: any) {
+      setObsidianMessage(err?.message ?? "Picker failed");
+      setObsidianStatus("error");
+    } finally {
+      setObsidianChecking(false);
+    }
   };
 
   const testConnection = async () => {
@@ -1731,6 +1905,178 @@ export default function SettingsScreen() {
             palette={palette}
           />
         </Card>
+
+        <View style={{ height: 32 }} />
+
+        {/* ── Obsidian vault ──────────────────────────────────── */}
+        <SectionHeader title="Obsidian Vault" palette={palette} />
+        <Card palette={palette}>
+          <View style={{ padding: 18, gap: 14 }}>
+            <Segmented
+              options={[
+                { key: "backend", label: "Backend (VPS)" },
+                { key: "local", label: "This device" },
+              ]}
+              value={obsidianProvider}
+              onChange={(k) => {
+                setObsidianProvider(k as "backend" | "local");
+                setObsidianStatus("idle");
+                setObsidianMessage(null);
+              }}
+              palette={palette}
+            />
+            {obsidianProvider === "backend" ? (
+              <>
+                <Field
+                  placeholder="Vault path (absolute path on your backend host)"
+                  value={obsidianPath}
+                  onChangeText={setObsidianPath}
+                  palette={palette}
+                />
+                <TouchableBounce sensory onPress={validateObsidianBackend}>
+                  <View
+                    style={{
+                      borderRadius: 12,
+                      paddingVertical: 13,
+                      alignItems: "center",
+                      backgroundColor: palette.surfaceAlt,
+                      opacity: obsidianChecking ? 0.6 : 1,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: palette.text,
+                        fontWeight: "600",
+                        fontSize: 14,
+                        letterSpacing: 0.2,
+                      }}
+                    >
+                      {obsidianChecking ? "Checking…" : "Connect vault"}
+                    </Text>
+                  </View>
+                </TouchableBounce>
+              </>
+            ) : (
+              <>
+                {obsidianLocalDisplay ? (
+                  <View
+                    style={{
+                      backgroundColor: palette.surfaceAlt,
+                      borderRadius: 12,
+                      paddingHorizontal: 16,
+                      paddingVertical: 14,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: palette.textMuted,
+                        fontSize: 11,
+                        fontWeight: "600",
+                        letterSpacing: 1.2,
+                        textTransform: "uppercase",
+                        marginBottom: 4,
+                      }}
+                    >
+                      Current folder
+                    </Text>
+                    <Text
+                      style={{ color: palette.text, fontSize: 14, fontWeight: "500" }}
+                      numberOfLines={2}
+                    >
+                      {obsidianLocalDisplay}
+                    </Text>
+                  </View>
+                ) : null}
+                <TouchableBounce sensory onPress={pickLocalVault}>
+                  <View
+                    style={{
+                      borderRadius: 12,
+                      paddingVertical: 13,
+                      alignItems: "center",
+                      backgroundColor: palette.surfaceAlt,
+                      opacity: obsidianChecking ? 0.6 : 1,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: palette.text,
+                        fontWeight: "600",
+                        fontSize: 14,
+                        letterSpacing: 0.2,
+                      }}
+                    >
+                      {obsidianChecking
+                        ? "Checking…"
+                        : obsidianLocalUri
+                        ? "Pick different folder"
+                        : "Pick vault folder"}
+                    </Text>
+                  </View>
+                </TouchableBounce>
+                <Text
+                  style={{
+                    color: palette.textSoft,
+                    fontSize: 12,
+                    lineHeight: 17,
+                  }}
+                >
+                  Read-only: the agent sees your vault as context but can't
+                  write back to this device. For memory write-back, use the
+                  backend provider.
+                </Text>
+              </>
+            )}
+            {obsidianMessage && (
+              <Text
+                style={{
+                  color:
+                    obsidianStatus === "ok" ? palette.success : palette.danger,
+                  fontSize: 13,
+                  marginTop: 2,
+                }}
+              >
+                {obsidianMessage}
+              </Text>
+            )}
+          </View>
+          <Hairline palette={palette} inset={20} />
+          <ToggleRow
+            title="Enable Obsidian integration"
+            description="Let the AI read and write your vault for memory and reference. Auto-enabled once a vault connects; toggle off to pause without losing the path."
+            value={obsidianEnabled}
+            onValueChange={setObsidianEnabled}
+            palette={palette}
+          />
+          {obsidianEnabled && (
+            <>
+              <Hairline palette={palette} inset={20} />
+              <ToggleRow
+                title="Use for memory"
+                description={
+                  obsidianProvider === "backend"
+                    ? "Inject notes from claw-code/memory/ as persistent context, and let the AI add or update memory notes there."
+                    : "Inject notes from claw-code/memory/ as read-only persistent context."
+                }
+                value={obsidianUseForMemory}
+                onValueChange={setObsidianUseForMemory}
+                palette={palette}
+              />
+              <Hairline palette={palette} inset={20} />
+              <ToggleRow
+                title="Use for reference"
+                description="Let the AI read and search any note in your vault when answering."
+                value={obsidianUseForReference}
+                onValueChange={setObsidianUseForReference}
+                palette={palette}
+              />
+            </>
+          )}
+        </Card>
+        <Caption palette={palette}>
+          {obsidianProvider === "backend"
+            ? "Vault lives on your backend host — full read/write. If you have Obsidian Sync, other devices see changes automatically."
+            : "Vault lives on this device — read-only. Pick the folder Obsidian stores its vault in."}
+        </Caption>
 
         <View style={{ height: 40 }} />
 

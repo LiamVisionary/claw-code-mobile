@@ -33,6 +33,7 @@ const modelEntrySchema = z.object({
       scopes: z.array(z.string()).optional(),
     })
     .optional(),
+  endpoint: z.string().optional(),
 });
 
 messagesRouter.post("/threads/:threadId/messages", async (req, res, next) => {
@@ -43,6 +44,14 @@ messagesRouter.post("/threads/:threadId/messages", async (req, res, next) => {
     const body = z
       .object({
         content: z.string().min(1),
+        /**
+         * Alternative prompt text passed to claw. When set, `content` is
+         * stored as the user-visible message and `promptOverride` is what
+         * the model actually sees. Used by the local Obsidian provider to
+         * inject a client-built preamble without polluting the saved
+         * message bubble.
+         */
+        promptOverride: z.string().optional(),
         modelQueue: z.array(modelEntrySchema).optional(),
         model: modelEntrySchema.optional(),
         autoCompact: z.boolean().optional(),
@@ -60,6 +69,14 @@ messagesRouter.post("/threads/:threadId/messages", async (req, res, next) => {
               size: z.number().optional(),
             })
           )
+          .optional(),
+        obsidianVault: z
+          .object({
+            enabled: z.boolean(),
+            path: z.string(),
+            useForMemory: z.boolean(),
+            useForReference: z.boolean(),
+          })
           .optional(),
       })
       .parse(req.body);
@@ -81,14 +98,15 @@ messagesRouter.post("/threads/:threadId/messages", async (req, res, next) => {
     clawRuntime
       .sendMessage(
         thread.id,
-        body.content,
+        body.promptOverride ?? body.content,
         assistantMessageId,
         models,
         body.autoCompact ?? true,
         body.streamingEnabled ?? true,
         body.autoCompactThreshold ?? 70,
         body.autoContinueEnabled ?? true,
-        body.attachments ?? []
+        body.attachments ?? [],
+        body.obsidianVault
       )
       .catch((err: unknown) => {
         logger.error({ err }, "clawRuntime.sendMessage failed");

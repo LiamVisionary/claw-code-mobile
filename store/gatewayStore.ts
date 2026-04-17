@@ -2,6 +2,7 @@ import Constants from "expo-constants";
 import * as FileSystem from "expo-file-system/legacy";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import { buildLocalPreamble } from "@/util/vault/localVault";
 
 /**
  * Infer the gateway server URL from Expo's packager host.
@@ -399,6 +400,35 @@ export type ModelEntry = {
   authMethod?: "apiKey" | "oauth";
   /** Populated when authMethod is "oauth". Contains the Anthropic OAuth tokens. */
   oauthToken?: OAuthTokenSet;
+  /** OpenAI-compatible base URL used when provider === "local"
+   *  (e.g. Ollama: http://127.0.0.1:11434/v1). Ignored for other providers. */
+  endpoint?: string;
+};
+
+export type ObsidianVaultSettings = {
+  /** Master switch. Defaults to true once a vault has been validated. */
+  enabled: boolean;
+  /**
+   * Where the vault lives:
+   *  - "backend" → vault is a directory on the VPS running the backend.
+   *    Memory writes work (the agent has filesystem access there).
+   *  - "local"   → vault is on this device. Read-only: the backend can
+   *    build a prompt preamble from vault contents but can't write back.
+   */
+  provider: "backend" | "local";
+  /** Absolute path on the backend host. Only used when provider === "backend". */
+  path: string;
+  /**
+   * URI returned by the system folder picker (SAF on Android, document
+   * picker on iOS). Only used when provider === "local".
+   */
+  localDirectoryUri: string;
+  /** Human-readable label for the picked folder, shown in settings. */
+  localDisplayPath: string;
+  /** Inject memory notes into the agent's prompt context. */
+  useForMemory: boolean;
+  /** Let the agent read/search the vault for reference material. */
+  useForReference: boolean;
 };
 
 type Settings = {
@@ -433,6 +463,12 @@ type Settings = {
   autoContinueEnabled: boolean;
   /** Last working directory selected — used as the initial path in DirectoryBrowser. */
   lastWorkDir?: string;
+  /**
+   * Obsidian vault integration (scenario 2 — vault on the same VPS as the
+   * backend). When `enabled` and a `path` is set, the backend injects
+   * memory/reference context from the vault into each user message.
+   */
+  obsidianVault: ObsidianVaultSettings;
 };
 
 type GatewayState = {
@@ -467,7 +503,7 @@ type GatewayState = {
   /** True once zustand-persist has finished rehydrating settings from disk */
   _hasHydrated: boolean;
   actions: {
-    setSettings: (input: Omit<Settings, "modelQueue" | "autoCompact" | "streamingEnabled" | "darkMode" | "accentTheme" | "autoCompactThreshold" | "telemetryEnabled" | "autoContinueEnabled"> & { modelQueue?: ModelEntry[]; autoCompact?: boolean; streamingEnabled?: boolean; darkMode?: "system" | "light" | "dark"; accentTheme?: "claude" | "lavender"; autoCompactThreshold?: number; telemetryEnabled?: boolean; autoContinueEnabled?: boolean }) => void;
+    setSettings: (input: Omit<Settings, "modelQueue" | "autoCompact" | "streamingEnabled" | "darkMode" | "accentTheme" | "autoCompactThreshold" | "telemetryEnabled" | "autoContinueEnabled" | "obsidianVault"> & { modelQueue?: ModelEntry[]; autoCompact?: boolean; streamingEnabled?: boolean; darkMode?: "system" | "light" | "dark"; accentTheme?: "claude" | "lavender"; autoCompactThreshold?: number; telemetryEnabled?: boolean; autoContinueEnabled?: boolean; obsidianVault?: ObsidianVaultSettings }) => void;
     loadThreads: () => Promise<void>;
     createThread: (workDir?: string) => Promise<Thread>;
     browseFsDirectory: (path?: string) => Promise<FsListing>;
@@ -609,6 +645,15 @@ export const useGatewayStore = create<GatewayState>()(
         autoCompactThreshold: 70,
         telemetryEnabled: true,
         autoContinueEnabled: true,
+        obsidianVault: {
+          enabled: false,
+          provider: "backend",
+          path: "",
+          localDirectoryUri: "",
+          localDisplayPath: "",
+          useForMemory: true,
+          useForReference: true,
+        },
       },
       threads: [],
       messages: {},
@@ -648,6 +693,17 @@ export const useGatewayStore = create<GatewayState>()(
                 input.autoContinueEnabled ??
                 state.settings.autoContinueEnabled ??
                 true,
+              obsidianVault:
+                input.obsidianVault ??
+                state.settings.obsidianVault ?? {
+                  enabled: false,
+                  provider: "backend",
+                  path: "",
+                  localDirectoryUri: "",
+                  localDisplayPath: "",
+                  useForMemory: true,
+                  useForReference: true,
+                },
             },
           })),
 
@@ -750,6 +806,31 @@ export const useGatewayStore = create<GatewayState>()(
             ({ localUri: _localUri, ...rest }) => rest
           );
 
+          // When the local provider is active, build the memory/reference
+          // preamble on-device. We send the raw `content` (so the bubble
+          // stored in the DB is what the user typed) and a separate
+          // `promptOverride` carrying the preamble-prefixed prompt that
+          // claw actually sees.
+          let promptOverride: string | undefined;
+          const v = state.settings.obsidianVault;
+          if (
+            v?.enabled &&
+            v.provider === "local" &&
+            v.localDirectoryUri &&
+            (v.useForMemory || v.useForReference)
+          ) {
+            try {
+              const preamble = await buildLocalPreamble(
+                v.localDirectoryUri,
+                v.useForMemory,
+                v.useForReference
+              );
+              if (preamble) promptOverride = preamble + content;
+            } catch (err) {
+              console.warn("Local vault preamble failed", err);
+            }
+          }
+
           try {
             const res = await fetch(`${baseUrl}/threads/${threadId}/messages`, {
               method: "POST",
@@ -757,18 +838,34 @@ export const useGatewayStore = create<GatewayState>()(
               body: JSON.stringify({
                 content,
                 attachments: wireAttachments,
+                promptOverride,
                 autoCompact: state.settings.autoCompact ?? true,
                 autoCompactThreshold: state.settings.autoCompactThreshold ?? 70,
                 autoContinueEnabled: state.settings.autoContinueEnabled ?? true,
                 streamingEnabled: state.settings.streamingEnabled ?? true,
                 modelQueue: (() => {
                   const q = (state.settings.modelQueue ?? []).filter((m) => m.enabled);
-                  if (q.length > 0) return q.map(({ provider, name, apiKey, authMethod, oauthToken }) => ({ provider, name, apiKey, authMethod, oauthToken }));
+                  if (q.length > 0) return q.map(({ provider, name, apiKey, authMethod, oauthToken, endpoint }) => ({ provider, name, apiKey, authMethod, oauthToken, endpoint }));
                   if (state.settings.model) {
                     const { provider, name, apiKey } = state.settings.model;
                     return [{ provider, name, apiKey }];
                   }
                   return [];
+                })(),
+                obsidianVault: (() => {
+                  const v = state.settings.obsidianVault;
+                  if (!v || !v.enabled) return undefined;
+                  // Local-provider vaults are already handled client-side
+                  // by the preamble injection above — the backend doesn't
+                  // have filesystem access to the phone.
+                  if (v.provider !== "backend") return undefined;
+                  if (!v.path) return undefined;
+                  return {
+                    enabled: v.enabled,
+                    path: v.path,
+                    useForMemory: v.useForMemory,
+                    useForReference: v.useForReference,
+                  };
                 })(),
               }),
             });
