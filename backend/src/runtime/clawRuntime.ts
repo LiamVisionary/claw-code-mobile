@@ -231,10 +231,9 @@ function getBinary(model?: ModelConfig): string {
 }
 
 /**
- * Write a `.mcp.json` in the working directory so the claw binary
- * discovers mcpvault as an MCP server for the current run.
- * Returns the path to a temporary JSON config file (for Claude CLI's
- * `--mcp-config` flag).
+ * Write MCP vault config so the agent binary discovers mcpvault.
+ * - For claw binary: writes to `.claw/settings.json` (claw's config path)
+ * - For Claude CLI: returns a JSON file path for `--mcp-config`
  */
 function writeMcpVaultConfig(cwd: string, vaultPath: string): string {
   const config = {
@@ -245,9 +244,17 @@ function writeMcpVaultConfig(cwd: string, vaultPath: string): string {
       },
     },
   };
-  // Write .mcp.json for claw binary (reads from cwd)
-  const mcpJsonPath = path.join(cwd, ".mcp.json");
-  fs.writeFileSync(mcpJsonPath, JSON.stringify(config, null, 2));
+  // Write .claw/settings.json for claw binary
+  const clawDir = path.join(cwd, ".claw");
+  fs.mkdirSync(clawDir, { recursive: true });
+  const clawSettings = path.join(clawDir, "settings.json");
+  // Merge with existing settings if present
+  let existing: Record<string, any> = {};
+  try {
+    existing = JSON.parse(fs.readFileSync(clawSettings, "utf8"));
+  } catch { /* doesn't exist yet */ }
+  existing.mcpServers = { ...existing.mcpServers, ...config.mcpServers };
+  fs.writeFileSync(clawSettings, JSON.stringify(existing, null, 2));
   // Also write a standalone config file for Claude CLI --mcp-config
   const tmpConfig = path.join(cwd, ".mcp-vault-config.json");
   fs.writeFileSync(tmpConfig, JSON.stringify(config, null, 2));
