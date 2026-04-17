@@ -128,7 +128,7 @@ export default function ChatListScreen() {
   // no path or URI) don't qualify — the Notes pane would just be empty.
   const showNotesToggle = Boolean(
     obsidianVault?.enabled &&
-      ((obsidianVault.provider === "backend" && obsidianVault.path) ||
+      (((obsidianVault.provider === "backend" || obsidianVault.provider === "sync") && obsidianVault.path) ||
         (obsidianVault.provider === "local" && obsidianVault.localDirectoryUri))
   );
 
