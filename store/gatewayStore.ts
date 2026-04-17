@@ -415,7 +415,7 @@ export type ObsidianVaultSettings = {
    *  - "local"   → vault is on this device. Read-only: the backend can
    *    build a prompt preamble from vault contents but can't write back.
    */
-  provider: "backend" | "local";
+  provider: "sync" | "backend" | "local";
   /** Absolute path on the backend host. Only used when provider === "backend". */
   path: string;
   /**

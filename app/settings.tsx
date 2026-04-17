@@ -1326,8 +1326,8 @@ export default function SettingsScreen() {
   const [obsidianEnabled, setObsidianEnabled] = useState(
     settings.obsidianVault?.enabled ?? false
   );
-  const [obsidianProvider, setObsidianProvider] = useState<"backend" | "local">(
-    settings.obsidianVault?.provider ?? "backend"
+  const [obsidianProvider, setObsidianProvider] = useState<"sync" | "backend" | "local">(
+    settings.obsidianVault?.provider ?? "sync"
   );
   const [obsidianPath, setObsidianPath] = useState(
     settings.obsidianVault?.path ?? ""
@@ -1351,6 +1351,16 @@ export default function SettingsScreen() {
   const [obsidianMessage, setObsidianMessage] = useState<string | null>(null);
   const [obsidianChecking, setObsidianChecking] = useState(false);
   const [detectedVaults, setDetectedVaults] = useState<{ path: string; name: string; noteCount: number }[]>([]);
+  // Headless sync state
+  const [headlessStep, setHeadlessStep] = useState<
+    "checking" | "not_installed" | "not_logged_in" | "pick_vault" | "syncing" | "done"
+  >("checking");
+  const [headlessEmail, setHeadlessEmail] = useState("");
+  const [headlessPassword, setHeadlessPassword] = useState("");
+  const [headlessMfa, setHeadlessMfa] = useState("");
+  const [headlessRemoteVaults, setHeadlessRemoteVaults] = useState<{ id: string; name: string; encryption: string }[]>([]);
+  const [headlessMessage, setHeadlessMessage] = useState<string | null>(null);
+  const [headlessBusy, setHeadlessBusy] = useState(false);
 
   const effectiveScheme =
     darkMode === "system" ? scheme ?? "light" : darkMode;
@@ -1389,7 +1399,7 @@ export default function SettingsScreen() {
     setTelemetryEnabled(settings.telemetryEnabled ?? true);
     setAutoContinueEnabled(settings.autoContinueEnabled ?? true);
     setObsidianEnabled(settings.obsidianVault?.enabled ?? false);
-    setObsidianProvider(settings.obsidianVault?.provider ?? "backend");
+    setObsidianProvider(settings.obsidianVault?.provider ?? "sync");
     setObsidianPath(settings.obsidianVault?.path ?? "");
     setObsidianLocalUri(settings.obsidianVault?.localDirectoryUri ?? "");
     setObsidianLocalDisplay(settings.obsidianVault?.localDisplayPath ?? "");
@@ -1415,6 +1425,14 @@ export default function SettingsScreen() {
     autoContinueEnabled, obsidianEnabled, obsidianProvider, obsidianPath,
     obsidianLocalUri, obsidianLocalDisplay, obsidianUseForMemory, obsidianUseForReference,
   };
+  // Check headless status on mount if sync provider is selected
+  useEffect(() => {
+    if (obsidianProvider === "sync" && serverUrl && bearerToken) {
+      checkHeadlessStatus();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Flush to store on unmount (modal close)
   useEffect(() => {
     return () => {
@@ -1503,6 +1521,141 @@ export default function SettingsScreen() {
     );
     setObsidianMessage(null);
     setDetectedVaults([]);
+    setHeadlessMessage(null);
+    setHeadlessStep("checking");
+  };
+
+  // ── Headless sync helpers ─────────────────────────────────────────
+  const headlessApi = async (
+    path: string,
+    method = "GET",
+    body?: Record<string, unknown>
+  ) => {
+    const res = await fetch(
+      `${serverUrl.replace(/\/+$/, "")}/obsidian/headless${path}`,
+      {
+        method,
+        headers: {
+          Authorization: `Bearer ${bearerToken}`,
+          ...(body ? { "Content-Type": "application/json" } : {}),
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      }
+    );
+    return res.json();
+  };
+
+  const checkHeadlessStatus = async () => {
+    if (!serverUrl || !bearerToken) return;
+    setHeadlessBusy(true);
+    try {
+      const data = await headlessApi("/status");
+      if (data.state === "not_installed") setHeadlessStep("not_installed");
+      else if (data.state === "not_logged_in") setHeadlessStep("not_logged_in");
+      else if (data.state === "syncing") {
+        setHeadlessStep("syncing");
+        setObsidianPath(data.path);
+        setObsidianStatus("ok");
+        setObsidianEnabled(true);
+      } else if (data.state === "idle" || data.state === "no_vault") {
+        setHeadlessStep("pick_vault");
+        await loadRemoteVaults();
+      } else if (data.state === "error") {
+        setHeadlessMessage(data.message);
+        setHeadlessStep("not_logged_in");
+      }
+    } catch (err: any) {
+      setHeadlessMessage(err.message ?? "Cannot reach server");
+    } finally {
+      setHeadlessBusy(false);
+    }
+  };
+
+  const installHeadless = async () => {
+    setHeadlessBusy(true);
+    setHeadlessMessage("Installing obsidian-headless…");
+    try {
+      const data = await headlessApi("/install", "POST");
+      if (data.ok) {
+        setHeadlessMessage("Installed. Log in to continue.");
+        setHeadlessStep("not_logged_in");
+      } else {
+        setHeadlessMessage(data.message);
+      }
+    } catch (err: any) {
+      setHeadlessMessage(err.message ?? "Install failed");
+    } finally {
+      setHeadlessBusy(false);
+    }
+  };
+
+  const headlessLogin = async () => {
+    if (!headlessEmail || !headlessPassword) {
+      setHeadlessMessage("Enter email and password.");
+      return;
+    }
+    setHeadlessBusy(true);
+    setHeadlessMessage(null);
+    try {
+      const data = await headlessApi("/login", "POST", {
+        email: headlessEmail,
+        password: headlessPassword,
+        ...(headlessMfa ? { mfa: headlessMfa } : {}),
+      });
+      if (data.ok) {
+        setHeadlessMessage(null);
+        setHeadlessStep("pick_vault");
+        await loadRemoteVaults();
+      } else {
+        setHeadlessMessage(data.message);
+      }
+    } catch (err: any) {
+      setHeadlessMessage(err.message ?? "Login failed");
+    } finally {
+      setHeadlessBusy(false);
+    }
+  };
+
+  const loadRemoteVaults = async () => {
+    try {
+      const data = await headlessApi("/vaults");
+      setHeadlessRemoteVaults(data.vaults ?? []);
+    } catch {
+      // ignore
+    }
+  };
+
+  const headlessSetupAndSync = async (vaultIdOrName: string) => {
+    setHeadlessBusy(true);
+    setHeadlessMessage("Setting up sync…");
+    try {
+      const setupData = await headlessApi("/setup", "POST", { vault: vaultIdOrName });
+      if (!setupData.ok) {
+        setHeadlessMessage(setupData.message);
+        return;
+      }
+      const localPath = setupData.localPath;
+      setObsidianPath(localPath);
+
+      // Run initial sync
+      setHeadlessMessage("Running initial sync…");
+      await headlessApi("/sync", "POST", { path: localPath });
+
+      // Start continuous sync
+      const startData = await headlessApi("/sync/start", "POST", { path: localPath });
+      if (startData.ok) {
+        setHeadlessStep("syncing");
+        setObsidianStatus("ok");
+        setObsidianEnabled(true);
+        setHeadlessMessage("Syncing — vault is live.");
+      } else {
+        setHeadlessMessage(startData.message);
+      }
+    } catch (err: any) {
+      setHeadlessMessage(err.message ?? "Setup failed");
+    } finally {
+      setHeadlessBusy(false);
+    }
   };
 
   const validateObsidianBackend = async (pathOverride?: string) => {
@@ -2000,19 +2153,143 @@ export default function SettingsScreen() {
           <View style={{ padding: 18, gap: 14 }}>
             <Segmented
               options={[
-                { key: "backend", label: "Backend (VPS)" },
+                { key: "sync", label: "Obsidian Sync" },
+                { key: "backend", label: "Manual path" },
                 { key: "local", label: "This device" },
               ]}
               value={obsidianProvider}
               onChange={(k) => {
-                setObsidianProvider(k as "backend" | "local");
+                setObsidianProvider(k as "sync" | "backend" | "local");
                 setObsidianStatus("idle");
                 setObsidianMessage(null);
                 setDetectedVaults([]);
+                setHeadlessMessage(null);
+                if (k === "sync") checkHeadlessStatus();
               }}
               palette={palette}
             />
-            {obsidianProvider === "backend" ? (
+            {obsidianProvider === "sync" ? (
+              /* ── Obsidian Sync (headless) flow ── */
+              <View style={{ gap: 12 }}>
+                {headlessStep === "checking" && (
+                  <Text style={{ color: palette.textMuted, fontSize: 13, textAlign: "center" }}>
+                    Checking server…
+                  </Text>
+                )}
+
+                {headlessStep === "not_installed" && (
+                  <>
+                    <Text style={{ color: palette.textSoft, fontSize: 13, lineHeight: 18 }}>
+                      Obsidian Headless syncs your vault via Obsidian Sync — same encryption, no desktop app needed. Requires an Obsidian Sync subscription.
+                    </Text>
+                    <TouchableBounce sensory onPress={installHeadless}>
+                      <View style={{
+                        borderRadius: 12, paddingVertical: 13, alignItems: "center",
+                        backgroundColor: palette.accent, opacity: headlessBusy ? 0.6 : 1,
+                      }}>
+                        <Text style={{ color: "#fff", fontWeight: "600", fontSize: 14 }}>
+                          {headlessBusy ? "Installing…" : "Install Obsidian Headless"}
+                        </Text>
+                      </View>
+                    </TouchableBounce>
+                  </>
+                )}
+
+                {headlessStep === "not_logged_in" && (
+                  <>
+                    <Field
+                      placeholder="Obsidian account email"
+                      value={headlessEmail}
+                      onChangeText={setHeadlessEmail}
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                      palette={palette}
+                    />
+                    <Field
+                      placeholder="Password"
+                      value={headlessPassword}
+                      onChangeText={setHeadlessPassword}
+                      secureTextEntry
+                      palette={palette}
+                    />
+                    <Field
+                      placeholder="2FA code (if enabled)"
+                      value={headlessMfa}
+                      onChangeText={setHeadlessMfa}
+                      keyboardType="number-pad"
+                      palette={palette}
+                    />
+                    <TouchableBounce sensory onPress={headlessLogin}>
+                      <View style={{
+                        borderRadius: 12, paddingVertical: 13, alignItems: "center",
+                        backgroundColor: palette.accent, opacity: headlessBusy ? 0.6 : 1,
+                      }}>
+                        <Text style={{ color: "#fff", fontWeight: "600", fontSize: 14 }}>
+                          {headlessBusy ? "Logging in…" : "Sign in"}
+                        </Text>
+                      </View>
+                    </TouchableBounce>
+                  </>
+                )}
+
+                {headlessStep === "pick_vault" && (
+                  <>
+                    {headlessRemoteVaults.length > 0 ? (
+                      <View style={{ gap: 6 }}>
+                        <Text style={{ color: palette.textMuted, fontSize: 12, fontWeight: "600", letterSpacing: 0.8, textTransform: "uppercase" }}>
+                          Your remote vaults
+                        </Text>
+                        {headlessRemoteVaults.map((v) => (
+                          <TouchableBounce
+                            key={v.id}
+                            sensory
+                            onPress={() => headlessSetupAndSync(v.name || v.id)}
+                          >
+                            <View style={{
+                              backgroundColor: palette.surfaceAlt, borderRadius: 10,
+                              paddingHorizontal: 14, paddingVertical: 10,
+                              flexDirection: "row", justifyContent: "space-between", alignItems: "center",
+                            }}>
+                              <Text style={{ color: palette.text, fontSize: 14, fontWeight: "600", flex: 1 }}>{v.name}</Text>
+                              <Text style={{ color: palette.textSoft, fontSize: 11 }}>
+                                {v.encryption === "e2ee" ? "E2E encrypted" : "Standard"}
+                              </Text>
+                            </View>
+                          </TouchableBounce>
+                        ))}
+                      </View>
+                    ) : (
+                      <Text style={{ color: palette.textSoft, fontSize: 13, textAlign: "center" }}>
+                        {headlessBusy ? "Loading vaults…" : "No remote vaults found. Create one in Obsidian first."}
+                      </Text>
+                    )}
+                  </>
+                )}
+
+                {headlessStep === "syncing" && (
+                  <View style={{
+                    backgroundColor: palette.surfaceAlt, borderRadius: 12,
+                    paddingHorizontal: 16, paddingVertical: 14, gap: 4,
+                  }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: palette.success }} />
+                      <Text style={{ color: palette.text, fontSize: 14, fontWeight: "600" }}>
+                        Obsidian Sync active
+                      </Text>
+                    </View>
+                    <Text style={{ color: palette.textMuted, fontSize: 12 }} numberOfLines={1}>
+                      {obsidianPath}
+                    </Text>
+                  </View>
+                )}
+
+                {headlessMessage && (
+                  <Text style={{ color: headlessStep === "syncing" ? palette.success : palette.textSoft, fontSize: 13 }}>
+                    {headlessMessage}
+                  </Text>
+                )}
+              </View>
+            ) : obsidianProvider === "backend" ? (
               <>
                 {/* Show detected vaults as tappable pills */}
                 {detectedVaults.length > 0 && !obsidianPath.trim() && (
@@ -2240,8 +2517,10 @@ export default function SettingsScreen() {
           )}
         </Card>
         <Caption palette={palette}>
-          {obsidianProvider === "backend"
-            ? "Vault lives on your backend host — full read/write. If you have Obsidian Sync, other devices see changes automatically."
+          {obsidianProvider === "sync"
+            ? "Uses Obsidian Sync to keep your vault in sync across all devices. Requires an Obsidian Sync subscription."
+            : obsidianProvider === "backend"
+            ? "Point to an existing vault folder on your server. Use git or Syncthing to sync with other devices."
             : "Vault lives on this device — read-only. Pick the folder Obsidian stores its vault in."}
         </Caption>
 
