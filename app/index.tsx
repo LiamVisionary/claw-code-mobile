@@ -25,6 +25,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Stack } from "expo-router";
 import { IconSymbol } from "@/components/ui/IconSymbol";
 import DirectoryBrowser from "@/components/DirectoryBrowser";
+import { VaultNotesPane } from "@/components/VaultNotesPane";
 import { usePalette } from "@/hooks/usePalette";
 import type { Palette } from "@/constants/palette";
 
@@ -114,11 +115,28 @@ export default function ChatListScreen() {
   const router = useRouter();
   const { threads, loadingThreads, _hasHydrated } = useGatewayStore();
   const actions = useGatewayStore((s) => s.actions);
+  const obsidianVault = useGatewayStore((s) => s.settings.obsidianVault);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showBrowser, setShowBrowser] = useState(false);
+  const [view, setView] = useState<"chats" | "notes">("chats");
   const { top, bottom } = useSafeAreaInsets();
   const palette = usePalette();
+
+  // Only show the Chats/Notes toggle when the user has actually connected
+  // a vault. Enabled-but-unconfigured states (e.g. toggle flipped on with
+  // no path or URI) don't qualify — the Notes pane would just be empty.
+  const showNotesToggle = Boolean(
+    obsidianVault?.enabled &&
+      ((obsidianVault.provider === "backend" && obsidianVault.path) ||
+        (obsidianVault.provider === "local" && obsidianVault.localDirectoryUri))
+  );
+
+  // If the user disables the vault while sitting on the Notes view, fall
+  // back to Chats so the screen doesn't render an empty pane.
+  useEffect(() => {
+    if (!showNotesToggle && view === "notes") setView("chats");
+  }, [showNotesToggle, view]);
 
   useEffect(() => {
     if (!_hasHydrated) return;
@@ -240,6 +258,56 @@ export default function ChatListScreen() {
         }}
       />
       <View style={{ flex: 1, backgroundColor: palette.bg }}>
+        {showNotesToggle && (
+          <View
+            style={{
+              paddingHorizontal: 20,
+              paddingTop: 10,
+              paddingBottom: 6,
+            }}
+          >
+            <View
+              style={{
+                flexDirection: "row",
+                backgroundColor: palette.surfaceAlt,
+                borderRadius: 12,
+                padding: 3,
+              }}
+            >
+              {(["chats", "notes"] as const).map((key) => {
+                const selected = view === key;
+                return (
+                  <View key={key} style={{ flex: 1 }}>
+                    <TouchableBounce sensory onPress={() => setView(key)}>
+                      <View
+                        style={{
+                          paddingVertical: 9,
+                          borderRadius: 9,
+                          alignItems: "center",
+                          backgroundColor: selected
+                            ? palette.surface
+                            : "transparent",
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontSize: 13,
+                            fontWeight: selected ? "600" : "500",
+                            color: selected ? palette.text : palette.textMuted,
+                            letterSpacing: 0.1,
+                          }}
+                        >
+                          {key === "chats" ? "Chats" : "Notes"}
+                        </Text>
+                      </View>
+                    </TouchableBounce>
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+        )}
+
         {error && (
           <Text
             style={{
@@ -254,7 +322,9 @@ export default function ChatListScreen() {
           </Text>
         )}
 
-        {!_hasHydrated || loadingThreads ? (
+        {view === "notes" ? (
+          <VaultNotesPane palette={palette} />
+        ) : !_hasHydrated || loadingThreads ? (
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
             <ActivityIndicator color={palette.textSoft} />
           </View>

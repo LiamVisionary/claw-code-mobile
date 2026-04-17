@@ -16,6 +16,13 @@ import * as FileSystem from "expo-file-system/legacy";
 
 export type LocalNote = { path: string; title: string; content: string };
 
+/**
+ * A listing entry for the Notes pane. `uri` is the opaque identifier used
+ * to re-read the note later (SAF content URI on Android, file:// URL on
+ * iOS). `path` is a display-friendly relative path.
+ */
+export type LocalNoteListing = { uri: string; path: string; title: string };
+
 export type PickResult =
   | { ok: true; directoryUri: string; displayPath: string }
   | { ok: false; reason: string };
@@ -159,6 +166,98 @@ export async function validateLocalVault(directoryUri: string): Promise<LocalVal
   } catch (err: any) {
     return { ok: false, reason: err?.message ?? "Cannot read folder." };
   }
+}
+
+/**
+ * Recursively list every `.md` file reachable from the vault root. Used
+ * by the Notes pane on the chat list screen. Results are returned with a
+ * best-effort vault-relative display path so the UI can show a breadcrumb.
+ */
+export async function listAllLocalNotes(directoryUri: string): Promise<LocalNoteListing[]> {
+  if (!directoryUri) return [];
+  const out: LocalNoteListing[] = [];
+
+  // Android SAF — walk tree URIs recursively.
+  if (Platform.OS === "android" && directoryUri.startsWith("content://")) {
+    type Frame = { uri: string; relParts: string[] };
+    const stack: Frame[] = [{ uri: directoryUri, relParts: [] }];
+    while (stack.length) {
+      const frame = stack.pop()!;
+      let entries: string[];
+      try {
+        entries = await FileSystem.StorageAccessFramework.readDirectoryAsync(frame.uri);
+      } catch {
+        continue;
+      }
+      for (const entryUri of entries) {
+        const decoded = decodeURIComponent(entryUri);
+        const name = decoded.split("/").pop() ?? entryUri;
+        if (name.startsWith(".")) continue;
+        if (name.toLowerCase().endsWith(MD_EXT)) {
+          const relParts = [...frame.relParts, name];
+          const rel = relParts.join("/");
+          out.push({
+            uri: entryUri,
+            path: rel,
+            title: name.replace(/\.md$/i, ""),
+          });
+        } else {
+          // SAF doesn't give us a reliable "isDirectory" flag on the URI
+          // alone, so we try to list it and skip on error. This is the
+          // expo-file-system legacy API's idiomatic way.
+          try {
+            const children = await FileSystem.StorageAccessFramework.readDirectoryAsync(entryUri);
+            // readDirectoryAsync only succeeds on directories.
+            if (children) {
+              stack.push({ uri: entryUri, relParts: [...frame.relParts, name] });
+            }
+          } catch {
+            // not a directory, or unreadable — skip
+          }
+        }
+      }
+    }
+    return out.sort((a, b) => a.path.localeCompare(b.path));
+  }
+
+  // iOS / file:// — standard FS recursion.
+  if (directoryUri.startsWith("file://")) {
+    type Frame = { uri: string; relParts: string[] };
+    const stack: Frame[] = [{ uri: directoryUri, relParts: [] }];
+    while (stack.length) {
+      const frame = stack.pop()!;
+      let names: string[];
+      try {
+        names = await FileSystem.readDirectoryAsync(frame.uri);
+      } catch {
+        continue;
+      }
+      for (const name of names) {
+        if (name.startsWith(".")) continue;
+        const childUri = `${frame.uri.replace(/\/$/, "")}/${name}`;
+        if (name.toLowerCase().endsWith(MD_EXT)) {
+          const rel = [...frame.relParts, name].join("/");
+          out.push({ uri: childUri, path: rel, title: name.replace(/\.md$/i, "") });
+        } else {
+          try {
+            const info = await FileSystem.getInfoAsync(childUri);
+            if (info.exists && info.isDirectory) {
+              stack.push({ uri: childUri, relParts: [...frame.relParts, name] });
+            }
+          } catch {
+            // skip
+          }
+        }
+      }
+    }
+    return out.sort((a, b) => a.path.localeCompare(b.path));
+  }
+
+  return out;
+}
+
+export async function readLocalNoteContent(uri: string): Promise<string> {
+  return FileSystem.readAsStringAsync(uri);
 }
 
 export async function readLocalMemories(directoryUri: string): Promise<LocalNote[]> {

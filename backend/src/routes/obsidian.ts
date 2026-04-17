@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { validate } from "../services/vaultService";
+import { getProvider, validate } from "../services/vaultService";
 import { detectVaults, initializeVault } from "../services/vault/filesystemVault";
 import * as headless from "../services/vault/headlessSync";
 import { saveVaultConfig, clearVaultConfig } from "../services/vault/headlessSync";
@@ -16,6 +16,46 @@ obsidianRouter.post("/obsidian/validate", async (req, res, next) => {
     const body = validateSchema.parse(req.body);
     const result = await validate({ path: body.path });
     res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * List markdown notes in the vault. Returns vault-relative paths sorted
+ * alphabetically so the mobile chat-list screen can show a "Notes" view.
+ */
+obsidianRouter.get("/obsidian/notes", async (req, res, next) => {
+  try {
+    const vaultPath = (req.query.path as string | undefined)?.trim();
+    if (!vaultPath) {
+      res.status(400).json({ error: "path query param required" });
+      return;
+    }
+    const provider = getProvider({ path: vaultPath });
+    const notes = await provider.listNotes();
+    res.json({ notes });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Read a single note by vault-relative path. */
+obsidianRouter.get("/obsidian/notes/read", async (req, res, next) => {
+  try {
+    const vaultPath = (req.query.path as string | undefined)?.trim();
+    const notePath = (req.query.note as string | undefined)?.trim();
+    if (!vaultPath || !notePath) {
+      res.status(400).json({ error: "path and note query params required" });
+      return;
+    }
+    const provider = getProvider({ path: vaultPath });
+    const note = await provider.readNote(notePath);
+    if (!note) {
+      res.status(404).json({ error: "Note not found" });
+      return;
+    }
+    res.json(note);
   } catch (err) {
     next(err);
   }
