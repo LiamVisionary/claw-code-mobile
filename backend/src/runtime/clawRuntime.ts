@@ -230,11 +230,36 @@ function getBinary(model?: ModelConfig): string {
   return CLAW_BINARY;
 }
 
+/**
+ * Write a `.mcp.json` in the working directory so the claw binary
+ * discovers mcpvault as an MCP server for the current run.
+ * Returns the path to a temporary JSON config file (for Claude CLI's
+ * `--mcp-config` flag).
+ */
+function writeMcpVaultConfig(cwd: string, vaultPath: string): string {
+  const config = {
+    mcpServers: {
+      obsidian: {
+        command: "npx",
+        args: ["@bitbonsai/mcpvault@latest", vaultPath],
+      },
+    },
+  };
+  // Write .mcp.json for claw binary (reads from cwd)
+  const mcpJsonPath = path.join(cwd, ".mcp.json");
+  fs.writeFileSync(mcpJsonPath, JSON.stringify(config, null, 2));
+  // Also write a standalone config file for Claude CLI --mcp-config
+  const tmpConfig = path.join(cwd, ".mcp-vault-config.json");
+  fs.writeFileSync(tmpConfig, JSON.stringify(config, null, 2));
+  return tmpConfig;
+}
+
 function buildArgs(
   prompt: string,
   model?: ModelConfig,
   attachments: Attachment[] = [],
-  threadId?: string
+  threadId?: string,
+  mcpConfigPath?: string
 ): string[] {
   const useClaudeCli = isOAuthModel(model) && fs.existsSync(CLAUDE_CLI);
   const args: string[] = ["--output-format", "json"];
@@ -246,6 +271,10 @@ function buildArgs(
     const sessionId = threadId ? claudeCliSessions.get(threadId) : undefined;
     if (sessionId) {
       args.push("--resume", sessionId);
+    }
+    // MCP config for Claude CLI
+    if (mcpConfigPath) {
+      args.push("--mcp-config", mcpConfigPath);
     }
   } else {
     args.push("--permission-mode", "danger-full-access");
@@ -367,13 +396,14 @@ function spawnOnce(
   active: ActiveRun,
   isCompact = false,
   messageId?: string,
-  attachments: Attachment[] = []
+  attachments: Attachment[] = [],
+  mcpConfigPath?: string
 ): Promise<SpawnResult> {
   return new Promise((resolve) => {
     // For the Claude CLI, check if there's an existing session to resume
       const args = isCompact
       ? buildCompactArgs(model)
-      : buildArgs(content, model, attachments, threadId);
+      : buildArgs(content, model, attachments, threadId, mcpConfigPath);
     const env = buildEnv(model, sessionDir);
     const binary = getBinary(model);
     const isClaudeCli = binary === CLAUDE_CLI;
@@ -1758,12 +1788,22 @@ export const clawRuntime = {
     // user-visible message. Preamble build is best-effort; on failure we
     // log and proceed with the raw prompt.
     let effectivePrompt = decoratedPrompt;
+    let mcpConfigPath: string | undefined;
     if (obsidianVault && obsidianVault.enabled && obsidianVault.path) {
       try {
         const preamble = await buildContextPreamble(obsidianVault);
         if (preamble) effectivePrompt = preamble + decoratedPrompt;
       } catch (err) {
         logger.warn({ err, threadId }, "Obsidian preamble build failed");
+      }
+      // Write MCP vault config so the agent gets rich vault tools
+      if (obsidianVault.useMcpVault !== false) {
+        try {
+          mcpConfigPath = writeMcpVaultConfig(cwd, obsidianVault.path);
+          logger.info({ threadId, vaultPath: obsidianVault.path }, "mcpvault MCP config written");
+        } catch (err) {
+          logger.warn({ err, threadId }, "Failed to write mcpvault config");
+        }
       }
     }
 
@@ -1797,7 +1837,7 @@ export const clawRuntime = {
       });
 
       const { succeeded, stdoutBuf, stderrBuf, stopped } = await spawnOnce(
-        threadId, effectivePrompt, cwd, sessionDir, model, active, false, messageId, attachments
+        threadId, effectivePrompt, cwd, sessionDir, model, active, false, messageId, attachments, mcpConfigPath
       );
 
       // Capture whichever model was actually used on this attempt so the

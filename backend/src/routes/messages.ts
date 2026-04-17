@@ -76,6 +76,7 @@ messagesRouter.post("/threads/:threadId/messages", async (req, res, next) => {
             path: z.string(),
             useForMemory: z.boolean(),
             useForReference: z.boolean(),
+            useMcpVault: z.boolean().optional().default(true),
           })
           .optional(),
       })

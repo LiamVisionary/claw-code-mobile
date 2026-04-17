@@ -7,6 +7,9 @@ export type VaultConfig = {
   path: string;
   useForMemory: boolean;
   useForReference: boolean;
+  /** Enable mcpvault MCP server — gives the agent rich vault tools
+   *  (search, frontmatter, tags, etc.) instead of raw file access. */
+  useMcpVault: boolean;
 };
 
 /** Subfolder inside the vault where AI-owned memory notes live. */

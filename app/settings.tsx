@@ -1346,6 +1346,9 @@ export default function SettingsScreen() {
   const [obsidianUseForReference, setObsidianUseForReference] = useState(
     settings.obsidianVault?.useForReference ?? true
   );
+  const [obsidianUseMcpVault, setObsidianUseMcpVault] = useState(
+    settings.obsidianVault?.useMcpVault ?? true
+  );
   const [obsidianStatus, setObsidianStatus] = useState<"idle" | "ok" | "error">(
     // If vault was previously connected and enabled, show as connected
     (settings.obsidianVault?.enabled && (settings.obsidianVault?.path || settings.obsidianVault?.localDirectoryUri)) ? "ok" : "idle"
@@ -1407,6 +1410,7 @@ export default function SettingsScreen() {
     setObsidianLocalDisplay(settings.obsidianVault?.localDisplayPath ?? "");
     setObsidianUseForMemory(settings.obsidianVault?.useForMemory ?? true);
     setObsidianUseForReference(settings.obsidianVault?.useForReference ?? true);
+    setObsidianUseMcpVault(settings.obsidianVault?.useMcpVault ?? true);
     setQueue(buildQueue(settings));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [_hasHydrated]);
@@ -1418,14 +1422,14 @@ export default function SettingsScreen() {
     serverUrl, bearerToken, queue, autoCompact, streamingEnabled,
     darkMode, accentTheme, autoCompactThreshold, telemetryEnabled,
     autoContinueEnabled, obsidianEnabled, obsidianProvider, obsidianPath,
-    obsidianLocalUri, obsidianLocalDisplay, obsidianUseForMemory, obsidianUseForReference,
+    obsidianLocalUri, obsidianLocalDisplay, obsidianUseForMemory, obsidianUseForReference, obsidianUseMcpVault,
   });
   // Keep the ref current without triggering effects
   pendingRef.current = {
     serverUrl, bearerToken, queue, autoCompact, streamingEnabled,
     darkMode, accentTheme, autoCompactThreshold, telemetryEnabled,
     autoContinueEnabled, obsidianEnabled, obsidianProvider, obsidianPath,
-    obsidianLocalUri, obsidianLocalDisplay, obsidianUseForMemory, obsidianUseForReference,
+    obsidianLocalUri, obsidianLocalDisplay, obsidianUseForMemory, obsidianUseForReference, obsidianUseMcpVault,
   };
   // Check headless status on mount if sync provider is selected
   useEffect(() => {
@@ -1458,6 +1462,7 @@ export default function SettingsScreen() {
           localDisplayPath: s.obsidianLocalDisplay,
           useForMemory: s.obsidianUseForMemory,
           useForReference: s.obsidianUseForReference,
+          useMcpVault: s.obsidianUseMcpVault,
         },
       });
     };
@@ -1518,6 +1523,7 @@ export default function SettingsScreen() {
     setObsidianLocalDisplay(s.obsidianLocalDisplay);
     setObsidianUseForMemory(s.obsidianUseForMemory);
     setObsidianUseForReference(s.obsidianUseForReference);
+    setObsidianUseMcpVault(s.obsidianUseMcpVault);
     setObsidianStatus(
       (s.obsidianEnabled && (s.obsidianPath || s.obsidianLocalUri)) ? "ok" : "idle"
     );
@@ -2520,6 +2526,18 @@ export default function SettingsScreen() {
                     onValueChange={setObsidianUseForReference}
                     palette={palette}
                   />
+                  {obsidianProvider !== "local" && (
+                    <>
+                      <Hairline palette={palette} inset={20} />
+                      <ToggleRow
+                        title="Vault tools (MCP)"
+                        description="Give the AI rich vault tools — search with relevance ranking, frontmatter editing, tag management, and more."
+                        value={obsidianUseMcpVault}
+                        onValueChange={setObsidianUseMcpVault}
+                        palette={palette}
+                      />
+                    </>
+                  )}
                 </>
               )}
             </>

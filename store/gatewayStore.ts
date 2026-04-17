@@ -429,6 +429,9 @@ export type ObsidianVaultSettings = {
   useForMemory: boolean;
   /** Let the agent read/search the vault for reference material. */
   useForReference: boolean;
+  /** Give the agent rich vault tools via mcpvault MCP server
+   *  (search, frontmatter, tags, etc.). Defaults to true. */
+  useMcpVault: boolean;
 };
 
 type Settings = {
@@ -653,6 +656,7 @@ export const useGatewayStore = create<GatewayState>()(
           localDisplayPath: "",
           useForMemory: true,
           useForReference: true,
+          useMcpVault: true,
         },
       },
       threads: [],
@@ -703,6 +707,7 @@ export const useGatewayStore = create<GatewayState>()(
                   localDisplayPath: "",
                   useForMemory: true,
                   useForReference: true,
+                  useMcpVault: true,
                 },
             },
           })),
@@ -865,6 +870,7 @@ export const useGatewayStore = create<GatewayState>()(
                     path: v.path,
                     useForMemory: v.useForMemory,
                     useForReference: v.useForReference,
+                    useMcpVault: v.useMcpVault ?? true,
                   };
                 })(),
               }),
