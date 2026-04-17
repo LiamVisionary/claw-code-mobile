@@ -68,7 +68,7 @@ export interface TerminalBuffer {
 export type StreamEvent =
   | { type: "status"; status: ThreadStatus }
   | { type: "delta"; messageId: string; chunk: string }
-  | { type: "terminal"; chunk: string }
+  | { type: "terminal"; chunk: string; cwd?: string; busy?: boolean }
   | { type: "done"; messageId: string }
   | { type: "error"; message: string }
   | { type: "tool_start"; id: string; messageId: string; tool: string; label: string; detail?: string }

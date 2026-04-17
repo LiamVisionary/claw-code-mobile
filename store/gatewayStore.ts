@@ -479,6 +479,10 @@ type GatewayState = {
   threads: Thread[];
   messages: Record<string, Message[]>;
   terminal: Record<string, string[]>;
+  /** Per-thread shell cwd — used for the prompt prefix in the terminal sheet. */
+  terminalCwd: Record<string, string>;
+  /** Per-thread shell busy flag — true from command submit until CWD sentinel. */
+  terminalBusy: Record<string, boolean>;
   /** Per-thread tool steps (activity stream) */
   toolSteps: Record<string, ToolStep[]>;
   /** Per-thread pending permission requests */
@@ -666,6 +670,8 @@ export const useGatewayStore = create<GatewayState>()(
       threads: [],
       messages: {},
       terminal: {},
+      terminalCwd: {},
+      terminalBusy: {},
       toolSteps: {},
       permissionRequests: {},
       compacting: {},
@@ -1066,23 +1072,44 @@ export const useGatewayStore = create<GatewayState>()(
                 });
                 return true; // signal openNativeSSE to stop reconnecting
               case "terminal": {
-                const line = payload.chunk.replace(/\n$/, "");
-                set((current) => ({
-                  terminal: {
-                    ...current.terminal,
-                    [threadId]: [
-                      ...(current.terminal[threadId] ?? []),
-                      line,
-                    ].slice(-400),
-                  },
-                  currentTurnLog: {
-                    ...current.currentTurnLog,
-                    [threadId]: [
-                      ...(current.currentTurnLog[threadId] ?? []),
-                      line,
-                    ].slice(-800),
-                  },
-                }));
+                // A chunk may span many lines (backend batches 30 ms of
+                // stdout into one event). Split on \n so each line becomes
+                // its own entry, and drop the final empty string from a
+                // trailing \n. An event with chunk="" is a metadata-only
+                // ping (cwd/busy update) — skip the line push.
+                const raw = typeof payload.chunk === "string" ? payload.chunk : "";
+                const newLines = raw.length > 0
+                  ? raw.split("\n").slice(0, raw.endsWith("\n") ? -1 : undefined)
+                  : [];
+                const incomingCwd = typeof payload.cwd === "string" ? payload.cwd : undefined;
+                const incomingBusy = typeof payload.busy === "boolean" ? payload.busy : undefined;
+                set((current) => {
+                  const terminal = newLines.length > 0
+                    ? {
+                        ...current.terminal,
+                        [threadId]: [
+                          ...(current.terminal[threadId] ?? []),
+                          ...newLines,
+                        ].slice(-600),
+                      }
+                    : current.terminal;
+                  const currentTurnLog = newLines.length > 0
+                    ? {
+                        ...current.currentTurnLog,
+                        [threadId]: [
+                          ...(current.currentTurnLog[threadId] ?? []),
+                          ...newLines,
+                        ].slice(-800),
+                      }
+                    : current.currentTurnLog;
+                  const terminalCwd = incomingCwd !== undefined
+                    ? { ...current.terminalCwd, [threadId]: incomingCwd }
+                    : current.terminalCwd;
+                  const terminalBusy = incomingBusy !== undefined
+                    ? { ...current.terminalBusy, [threadId]: incomingBusy }
+                    : current.terminalBusy;
+                  return { terminal, currentTurnLog, terminalCwd, terminalBusy };
+                });
                 break;
               }
               case "error":
@@ -1268,6 +1295,10 @@ export const useGatewayStore = create<GatewayState>()(
           const data = await res.json();
           set((current) => ({
             terminal: { ...current.terminal, [threadId]: data.lines as string[] },
+            terminalCwd:
+              typeof data.cwd === "string"
+                ? { ...current.terminalCwd, [threadId]: data.cwd }
+                : current.terminalCwd,
           }));
         },
 

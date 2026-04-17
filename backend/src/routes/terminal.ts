@@ -17,6 +17,7 @@ terminalRouter.get("/threads/:threadId/terminal", (req, res, next) => {
     res.json({
       lines,
       shellActive: shellService.isActive(thread.id),
+      cwd: shellService.getCwd(thread.id) ?? thread.workDir ?? "",
     });
   } catch (err) {
     next(err);
