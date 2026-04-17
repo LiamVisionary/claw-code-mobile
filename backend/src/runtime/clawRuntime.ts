@@ -28,7 +28,7 @@ const CLAW_BINARY =
 // Anthropic's API validates the system prompt and rejects non-official clients
 // for Opus/Sonnet on Max subscriptions. The official binary passes this check.
 const CLAUDE_CLI =
-  process.env.CLAUDE_CLI || "/root/.local/bin/claude";
+  process.env.CLAUDE_CLI || "claude";
 
 // Map thread ID → Claude CLI session ID for conversation continuity.
 // The Claude CLI returns a session_id in its JSON output; we pass it

@@ -63,6 +63,19 @@ The gateway spawns a Claw process for each AI run, pipes its output back to the 
 
 The first `npm run dev` / `npm run dev:tunnel` will clone and compile the Rust `claw` CLI into `~/.cache/claw-code-mobile/target/` (~3–5 min). Subsequent runs are instant.
 
+### iOS Configuration (optional)
+
+If you plan to build for iOS (not required for Expo Go development):
+
+1. Update `app.json` with your own Apple Team ID and bundle identifier:
+   ```json
+   "ios": {
+     "appleTeamId": "YOUR_TEAM_ID",
+     "bundleIdentifier": "com.yourorg.clawcodemobile"
+   }
+   ```
+2. For Claude OAuth sign-in, you'll also need the [Claude CLI](https://github.com/anthropics/claude-code) installed and on your `$PATH` (or set `CLAUDE_CLI=/path/to/claude`).
+
 ### Local (phone + dev machine on the same Wi-Fi) — 1 command
 
 ```bash

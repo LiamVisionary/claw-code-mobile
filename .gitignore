@@ -32,6 +32,16 @@ expo-env.d.ts
 .claw/
 .uploads/
 backend/data/
-claw-code/rust/.claw/
 modules/
 package-lock.json
+
+# Development artifacts
+**/.claude/
+**/.claw/
+**/.clawd-todos.json
+.clawd-todos.json
+.sandbox-tmp/
+.sandbox-home/
+attached_assets/
+replit.md
+scheduled_tasks.lock
