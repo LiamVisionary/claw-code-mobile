@@ -25,6 +25,7 @@ Chat with an AI that can execute code, edit files, and manage projects on your r
 - **Swipe actions** — Swipe to delete or duplicate conversations
 - **Message queuing** — Queue a message while the AI is busy; it sends automatically when the run finishes
 - **Local diagnostic telemetry** — Every SSE emission, tool call, token count, and client render is logged to a local `events` table so you can diff backend-emitted events against what the UI rendered and find token-consumption hot spots. **All telemetry lives on your own machine** — events are written to the same local SQLite database the rest of the app uses, never transmitted off-device. The goal is to enable stronger local data analysis and UX improvements without any data leaving your setup. Toggle it off any time under Settings → Behaviour → "Diagnostic telemetry".
+- **Obsidian vault integration** — Point the agent at an Obsidian vault on your backend host or on the phone itself. Notes in `claw-code/memory/` are injected as persistent context on every turn, and (when the vault lives on the backend) the agent can write new memories back to the vault. Great for preserving project conventions, user preferences, and cross-session context. See [Obsidian vault integration](#obsidian-vault-integration) for setup.
 
 ---
 
@@ -197,6 +198,36 @@ OLLAMA_HOST=0.0.0.0:11434 ollama serve
 
 ---
 
+### Obsidian vault integration
+
+Give the agent persistent memory and let it ground answers in your own notes. Two providers, pick whichever fits your setup:
+
+| Provider          | Where the vault lives                  | Reads | Writes | Obsidian Sync required? |
+|-------------------|----------------------------------------|:-----:|:------:|:-----------------------:|
+| **Backend (VPS)** | Directory on the backend host          | ✅    | ✅     | no                      |
+| **This device**   | Folder picked on the phone via the OS  | ✅    | ❌     | no                      |
+
+Writes only work with the backend provider — the backend can't reach back into the phone's sandboxed filesystem. If you have Obsidian Sync, point the backend at a synced vault and your phone/desktop Obsidian clients will see the agent's memory edits show up automatically; free users get full functionality without Sync.
+
+**Memory convention:** memories live in `<vault>/claw-code/memory/*.md`. Each file is one memory with YAML frontmatter (`name`, `description`, `type`) and markdown body. The agent is told where the folder is on each turn and can create/update files there directly (backend provider only).
+
+**Setup — Backend (VPS) provider**
+
+1. Create a vault directory on the backend host, e.g. `/home/<you>/Obsidian/MyVault`. If you want Obsidian Sync to pick it up on your other devices, place it inside a vault that Sync already watches.
+2. In the app: **Settings → Obsidian Vault → Backend (VPS)**, paste the absolute path, tap **Connect vault**.
+3. A successful connect auto-enables integration and reports the note count. Toggle **Use for memory** / **Use for reference** independently.
+
+**Setup — This device provider**
+
+1. Run `npx expo install expo-file-system expo-document-picker`, then rebuild the native app (`npx expo run:ios` or `npx expo run:android`). Both packages add native modules, so a JS-only reload isn't enough.
+2. On Android, the picker uses the **Storage Access Framework** — grant persistent folder access once and the app remembers it.
+3. On iOS, the picker goes through the **Files app** — your vault must be accessible there (iCloud Drive or "On My iPhone"). Pick the vault folder; iOS security-scoped URLs handle the rest.
+4. In the app: **Settings → Obsidian Vault → This device → Pick vault folder**. On success the integration auto-enables in read-only mode.
+
+**How context gets injected:** on every message, memory notes are prepended to the prompt the agent sees, so the model always starts with up-to-date project/user context. The message in your chat bubble stays exactly as you typed it — the preamble is invisible in the UI.
+
+---
+
 ## Screens
 
 ### Chat List (`app/index.tsx`)
@@ -230,6 +261,7 @@ All routes require `Authorization: Bearer <token>` (except `/health`).
 | `GET` | `/threads/:id/terminal` | Get terminal output |
 | `POST` | `/threads/:id/terminal` | Send a terminal command |
 | `GET` | `/fs/browse` | Browse remote filesystem |
+| `POST` | `/obsidian/validate` | Check a backend-side vault path exists and count its `.md` files |
 
 ### SSE Event Types
 
