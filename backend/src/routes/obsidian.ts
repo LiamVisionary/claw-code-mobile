@@ -3,6 +3,7 @@ import { z } from "zod";
 import { validate } from "../services/vaultService";
 import { detectVaults, initializeVault } from "../services/vault/filesystemVault";
 import * as headless from "../services/vault/headlessSync";
+import { saveVaultConfig, clearVaultConfig } from "../services/vault/headlessSync";
 
 export const obsidianRouter = Router();
 
@@ -82,6 +83,7 @@ obsidianRouter.post("/obsidian/headless/login", async (req, res) => {
 
 /** Log out of Obsidian account. */
 obsidianRouter.post("/obsidian/headless/logout", (_req, res) => {
+  clearVaultConfig();
   res.json(headless.logout());
 });
 
@@ -113,6 +115,9 @@ obsidianRouter.post("/obsidian/headless/setup", async (req, res) => {
       body.password,
       "claw-code-mobile"
     );
+    if (result.ok) {
+      saveVaultConfig(initResult.path);
+    }
     res.status(result.ok ? 200 : 400).json({
       ...result,
       localPath: initResult.path,

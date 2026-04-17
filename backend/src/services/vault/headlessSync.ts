@@ -22,6 +22,51 @@ let syncProcess: ChildProcess | null = null;
 let syncVaultName: string | null = null;
 let syncVaultPath: string | null = null;
 
+const VAULT_CONFIG_PATH = path.join(
+  path.dirname(path.dirname(path.dirname(new URL(import.meta.url).pathname))),
+  "data",
+  "vault-config.json"
+);
+
+/** Persist the vault path so the sync daemon auto-starts on server boot. */
+export function saveVaultConfig(vaultPath: string) {
+  try {
+    fs.mkdirSync(path.dirname(VAULT_CONFIG_PATH), { recursive: true });
+    fs.writeFileSync(VAULT_CONFIG_PATH, JSON.stringify({ path: vaultPath }));
+  } catch { /* best-effort */ }
+}
+
+/** Load persisted vault path. */
+export function loadVaultConfig(): string | null {
+  try {
+    const data = JSON.parse(fs.readFileSync(VAULT_CONFIG_PATH, "utf8"));
+    return data?.path || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Clear persisted vault config (on disconnect). */
+export function clearVaultConfig() {
+  try { fs.unlinkSync(VAULT_CONFIG_PATH); } catch { /* ok */ }
+}
+
+/**
+ * Auto-start the sync daemon if a vault was previously configured.
+ * Called once from app.ts on server startup.
+ */
+export function autoStartSync() {
+  if (!isInstalled()) return;
+  const vaultPath = loadVaultConfig();
+  if (!vaultPath || !fs.existsSync(vaultPath)) return;
+  // Don't start if already running
+  if (syncProcess && !syncProcess.killed) return;
+  const result = startContinuousSync(vaultPath);
+  if (result.ok) {
+    console.log(`[obsidian] Auto-started sync daemon for ${vaultPath} (pid ${result.pid})`);
+  }
+}
+
 /** Build an env object that puts Node 22+ first on PATH so `ob` uses it. */
 function obEnv(): Record<string, string> {
   const node22 = node22Bin();

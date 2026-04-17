@@ -15,6 +15,7 @@ import { uploadsRouter } from "./routes/uploads";
 import { oauthRouter } from "./routes/oauth";
 import { HttpError } from "./utils/errors";
 import { logger } from "./utils/logger";
+import { autoStartSync } from "./services/vault/headlessSync";
 
 // Schema migrations run automatically from db/sqlite.ts so services can
 // prepare statements at import time.
@@ -83,6 +84,9 @@ app.use(eventsRouter);
 app.use(uploadsRouter);
 app.use(oauthRouter);
 app.use(obsidianRouter);
+
+// ── Auto-start Obsidian Sync daemon if previously configured ─────────
+autoStartSync();
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: any) => {
   const status = err instanceof HttpError ? err.status : 500;
