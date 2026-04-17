@@ -858,7 +858,7 @@ export const useGatewayStore = create<GatewayState>()(
                   // Local-provider vaults are already handled client-side
                   // by the preamble injection above — the backend doesn't
                   // have filesystem access to the phone.
-                  if (v.provider !== "backend") return undefined;
+                  if (v.provider === "local") return undefined;
                   if (!v.path) return undefined;
                   return {
                     enabled: v.enabled,
