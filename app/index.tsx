@@ -235,6 +235,48 @@ export default function ChatListScreen() {
     <>
       <Stack.Screen
         options={{
+          headerTitle: showNotesToggle
+            ? () => (
+                <View
+                  style={{
+                    flexDirection: "row",
+                    backgroundColor: palette.surfaceAlt,
+                    borderRadius: 10,
+                    padding: 2,
+                  }}
+                >
+                  {(["chats", "notes"] as const).map((key) => {
+                    const selected = view === key;
+                    return (
+                      <TouchableBounce
+                        key={key}
+                        sensory
+                        onPress={() => setView(key)}
+                      >
+                        <View
+                          style={{
+                            paddingHorizontal: 18,
+                            paddingVertical: 6,
+                            borderRadius: 8,
+                            backgroundColor: selected ? palette.bg : "transparent",
+                          }}
+                        >
+                          <Text
+                            style={{
+                              fontSize: 14,
+                              fontWeight: "600",
+                              color: selected ? palette.text : palette.textMuted,
+                            }}
+                          >
+                            {key === "chats" ? "Chats" : "Notes"}
+                          </Text>
+                        </View>
+                      </TouchableBounce>
+                    );
+                  })}
+                </View>
+              )
+            : undefined,
           headerLeft: () => (
             <Link href="/settings" asChild>
               <TouchableBounce sensory>
@@ -258,56 +300,6 @@ export default function ChatListScreen() {
         }}
       />
       <View style={{ flex: 1, backgroundColor: palette.bg }}>
-        {showNotesToggle && (
-          <View
-            style={{
-              paddingHorizontal: 20,
-              paddingTop: 10,
-              paddingBottom: 6,
-            }}
-          >
-            <View
-              style={{
-                flexDirection: "row",
-                backgroundColor: palette.surfaceAlt,
-                borderRadius: 12,
-                padding: 3,
-              }}
-            >
-              {(["chats", "notes"] as const).map((key) => {
-                const selected = view === key;
-                return (
-                  <View key={key} style={{ flex: 1 }}>
-                    <TouchableBounce sensory onPress={() => setView(key)}>
-                      <View
-                        style={{
-                          paddingVertical: 9,
-                          borderRadius: 9,
-                          alignItems: "center",
-                          backgroundColor: selected
-                            ? palette.surface
-                            : "transparent",
-                        }}
-                      >
-                        <Text
-                          style={{
-                            fontSize: 13,
-                            fontWeight: selected ? "600" : "500",
-                            color: selected ? palette.text : palette.textMuted,
-                            letterSpacing: 0.1,
-                          }}
-                        >
-                          {key === "chats" ? "Chats" : "Notes"}
-                        </Text>
-                      </View>
-                    </TouchableBounce>
-                  </View>
-                );
-              })}
-            </View>
-          </View>
-        )}
-
         {error && (
           <Text
             style={{
