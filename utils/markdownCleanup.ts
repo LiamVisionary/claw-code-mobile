@@ -53,23 +53,13 @@ export function stripMalformedCodeSpans(content: string): string {
 
 /** Run every safe preprocessor over an assistant message before it hits the markdown renderer. */
 /**
- * Convert YAML frontmatter code blocks into a compact readable format.
- * Turns:
- *   ```yaml
- *   ---
- *   name: test-memory
- *   description: A test note
- *   type: project
- *   ---
- *   ```
- * Into:
- *   > **name:** test-memory
- *   > **description:** A test note
- *   > **type:** project
+ * Convert YAML frontmatter code blocks into a compact readable list.
+ * Strips the ```yaml and --- delimiters, formats as bold key-value pairs.
  */
 function formatYamlFrontmatter(content: string): string {
   if (!content) return content;
-  return content.replace(
+  // Match ```yaml\n---\n...\n---\n``` blocks
+  let result = content.replace(
     /```ya?ml\s*\n---\n([\s\S]*?)\n---\s*\n```/g,
     (_match, body: string) => {
       const lines = body
@@ -77,14 +67,34 @@ function formatYamlFrontmatter(content: string): string {
         .filter((l: string) => l.trim())
         .map((l: string) => {
           const m = l.match(/^(\s*[\w-]+):\s*(.*)/);
-          if (m) return `> **${m[1].trim()}:** ${m[2]}`;
-          return `> ${l}`;
+          if (m) return `- **${m[1].trim()}:** ${m[2]}`;
+          return `- ${l}`;
         });
       return lines.join("\n");
     }
   );
+  // Also match bare ---\n...\n--- frontmatter (no code fence)
+  result = result.replace(
+    /^---\n([\s\S]*?)\n---\s*$/gm,
+    (_match, body: string) => {
+      const lines = body
+        .split("\n")
+        .filter((l: string) => l.trim())
+        .map((l: string) => {
+          const m = l.match(/^(\s*[\w-]+):\s*(.*)/);
+          if (m) return `- **${m[1].trim()}:** ${m[2]}`;
+          return `- ${l}`;
+        });
+      return lines.join("\n");
+    }
+  );
+  return result;
 }
 
 export function cleanModelMarkdown(content: string): string {
-  return formatYamlFrontmatter(stripMalformedCodeSpans(fixupStuckHeaders(content)));
+  const result = formatYamlFrontmatter(stripMalformedCodeSpans(fixupStuckHeaders(content)));
+  if (result !== content) {
+    console.log("[markdown] YAML frontmatter cleaned");
+  }
+  return result;
 }
