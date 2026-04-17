@@ -56,6 +56,28 @@ impl InputMessage {
         }
     }
 
+    /// Build a user message from a text prompt plus one or more
+    /// base64-encoded images. Images are emitted before the text so
+    /// providers that stream content in order see the image context
+    /// first.
+    #[must_use]
+    pub fn user_text_with_images(
+        text: impl Into<String>,
+        images: Vec<(String, String)>, // (media_type, base64_data)
+    ) -> Self {
+        let mut content: Vec<InputContentBlock> = Vec::with_capacity(images.len() + 1);
+        for (media_type, data) in images {
+            content.push(InputContentBlock::Image {
+                source: ImageSource::Base64 { media_type, data },
+            });
+        }
+        content.push(InputContentBlock::Text { text: text.into() });
+        Self {
+            role: "user".to_string(),
+            content,
+        }
+    }
+
     #[must_use]
     pub fn user_tool_result(
         tool_use_id: impl Into<String>,
@@ -81,6 +103,9 @@ pub enum InputContentBlock {
     Text {
         text: String,
     },
+    Image {
+        source: ImageSource,
+    },
     ToolUse {
         id: String,
         name: String,
@@ -91,6 +116,17 @@ pub enum InputContentBlock {
         content: Vec<ToolResultContentBlock>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         is_error: bool,
+    },
+}
+
+/// Anthropic-shaped image source. Currently only base64 is supported;
+/// URL-hosted images would add a `Url { url: String }` variant.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ImageSource {
+    Base64 {
+        media_type: String,
+        data: String,
     },
 }
 

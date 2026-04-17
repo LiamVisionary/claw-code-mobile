@@ -6,12 +6,15 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "dev": "tsx src/server.ts",
+    "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
-    "build": "tsc --project tsconfig.json"
+    "build": "tsc --project tsconfig.json",
+    "test": "node --test --import tsx --test-reporter=spec src/utils/lineBuffer.test.ts",
+    "test:live": "node --test --import tsx --test-reporter=spec src/runtime/openrouter.integration.test.ts"
   },
   "dependencies": {
     "better-sqlite3": "^12.9.0",
+    "busboy": "^1.6.0",
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "nanoid": "^5.1.7",
@@ -20,6 +23,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@types/busboy": "^1.5.4",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^25.6.0",

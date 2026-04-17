@@ -1,18 +1,49 @@
 import { db } from "../db/sqlite";
-import type { Message } from "../types/domain";
+import type { Message, MessageMetadata } from "../types/domain";
 import { createId } from "../utils/ids";
 import { threadService } from "./threadService";
 
-const messageColumns = "id, threadId, role, content, createdAt, error";
+const messageColumns =
+  "id, threadId, role, content, createdAt, error, model, tokensIn, tokensOut, costUsd, turnDurationMs, metadata";
 
-const mapRow = (row: any): Message => ({
-  id: row.id,
-  threadId: row.threadId,
-  role: row.role,
-  content: row.content,
-  createdAt: row.createdAt,
-  ...(row.error ? { error: true } : {}),
-});
+const parseMetadata = (raw: unknown): MessageMetadata | undefined => {
+  if (typeof raw !== "string" || raw.length === 0) return undefined;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const mapRow = (row: any): Message => {
+  const metadata = parseMetadata(row.metadata);
+  return {
+    id: row.id,
+    threadId: row.threadId,
+    role: row.role,
+    content: row.content,
+    createdAt: row.createdAt,
+    ...(row.error ? { error: true } : {}),
+    ...(row.model ? { model: row.model as string } : {}),
+    ...(row.tokensIn != null ? { tokensIn: row.tokensIn as number } : {}),
+    ...(row.tokensOut != null ? { tokensOut: row.tokensOut as number } : {}),
+    ...(row.costUsd != null ? { costUsd: row.costUsd as number } : {}),
+    ...(row.turnDurationMs != null
+      ? { turnDurationMs: row.turnDurationMs as number }
+      : {}),
+    ...(metadata ? { metadata } : {}),
+  };
+};
+
+export interface TurnTelemetry {
+  model?: string;
+  tokensIn?: number;
+  tokensOut?: number;
+  costUsd?: number;
+  turnDurationMs?: number;
+  metadata?: MessageMetadata;
+}
 
 export const messageService = {
   list(threadId: string): Message[] {
@@ -32,6 +63,16 @@ export const messageService = {
        VALUES (@id, @threadId, 'user', @content, @createdAt)`
     ).run({ id, threadId, content, createdAt });
     threadService.updatePreview(threadId, content.slice(0, 180));
+    return this.get(id)!;
+  },
+
+  addSystemMessage(threadId: string, content: string): Message {
+    const id = createId("msg");
+    const createdAt = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO messages (id, threadId, role, content, createdAt)
+       VALUES (@id, @threadId, 'system', @content, @createdAt)`
+    ).run({ id, threadId, content, createdAt });
     return this.get(id)!;
   },
 
@@ -70,6 +111,34 @@ export const messageService = {
     }
     threadService.updatePreview(threadId, message.content.slice(-180));
     return message;
+  },
+
+  setTurnTelemetry(messageId: string, telemetry: TurnTelemetry) {
+    const meta = telemetry.metadata;
+    const metaHasAny =
+      !!meta &&
+      (meta.thinking ||
+        (meta.turnLog && meta.turnLog.length > 0) ||
+        (meta.toolSteps && meta.toolSteps.length > 0));
+    const metadataJson = metaHasAny ? JSON.stringify(meta) : null;
+    db.prepare(
+      `UPDATE messages
+       SET model          = @model,
+           tokensIn       = @tokensIn,
+           tokensOut      = @tokensOut,
+           costUsd        = @costUsd,
+           turnDurationMs = @turnDurationMs,
+           metadata       = @metadata
+       WHERE id = @id`
+    ).run({
+      id: messageId,
+      model: telemetry.model ?? null,
+      tokensIn: telemetry.tokensIn ?? null,
+      tokensOut: telemetry.tokensOut ?? null,
+      costUsd: telemetry.costUsd ?? null,
+      turnDurationMs: telemetry.turnDurationMs ?? null,
+      metadata: metadataJson,
+    });
   },
 
   markError(_threadId: string, messageId: string) {

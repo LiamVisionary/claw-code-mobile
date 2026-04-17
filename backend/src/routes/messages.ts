@@ -24,6 +24,15 @@ const modelEntrySchema = z.object({
   provider: z.enum(["claude", "openrouter", "local"]).optional(),
   name: z.string().optional(),
   apiKey: z.string().optional(),
+  authMethod: z.enum(["apiKey", "oauth"]).optional(),
+  oauthToken: z
+    .object({
+      accessToken: z.string(),
+      refreshToken: z.string().optional(),
+      expiresAt: z.number().optional(),
+      scopes: z.array(z.string()).optional(),
+    })
+    .optional(),
 });
 
 messagesRouter.post("/threads/:threadId/messages", async (req, res, next) => {
@@ -40,6 +49,18 @@ messagesRouter.post("/threads/:threadId/messages", async (req, res, next) => {
         autoCompactThreshold: z.number().min(0).max(100).optional(),
         streamingEnabled: z.boolean().optional(),
         autoContinueEnabled: z.boolean().optional(),
+        attachments: z
+          .array(
+            z.object({
+              path: z.string(),
+              fileName: z.string(),
+              relativePath: z.string(),
+              kind: z.enum(["image", "file"]),
+              mimeType: z.string().optional(),
+              size: z.number().optional(),
+            })
+          )
+          .optional(),
       })
       .parse(req.body);
 
@@ -66,7 +87,8 @@ messagesRouter.post("/threads/:threadId/messages", async (req, res, next) => {
         body.autoCompact ?? true,
         body.streamingEnabled ?? true,
         body.autoCompactThreshold ?? 70,
-        body.autoContinueEnabled ?? true
+        body.autoContinueEnabled ?? true,
+        body.attachments ?? []
       )
       .catch((err: unknown) => {
         logger.error({ err }, "clawRuntime.sendMessage failed");

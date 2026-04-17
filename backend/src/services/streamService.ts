@@ -201,14 +201,26 @@ export const streamService = {
     });
     if (!clients || clients.size === 0) return;
     const payload = format(event.type, event);
+    // Critical events (done, status, error) must reach the client
+    // immediately — if they sit in a proxy/tunnel buffer the UI stays
+    // stuck on "responding…" for up to 77s. Write extra padding and
+    // call flush() to push through any intermediary.
+    const isCritical =
+      event.type === "done" ||
+      event.type === "status" ||
+      event.type === "error" ||
+      event.type === "message_error";
     const dead: Client[] = [];
     for (const client of clients) {
       try {
-        const ok = client.res.write(payload);
-        // write() returns false when the buffer is full (back-pressure), but
-        // that's normal and doesn't mean the client is gone. A thrown error
-        // means the socket is actually dead — remove it immediately.
-        void ok;
+        client.res.write(payload);
+        if (isCritical) {
+          // Extra 32 KB nudge to exceed any buffering threshold
+          client.res.write(SSE_PAD + SSE_PAD + "\n");
+          if (typeof (client.res as any).flush === "function") {
+            (client.res as any).flush();
+          }
+        }
       } catch (err) {
         logger.warn({ err, threadId }, "SSE write failed — removing dead subscriber");
         dead.push(client);

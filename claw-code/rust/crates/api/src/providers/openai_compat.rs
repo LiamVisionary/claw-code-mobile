@@ -9,7 +9,7 @@ use crate::error::ApiError;
 use crate::http_client::build_http_client_or_default;
 use crate::types::{
     ContentBlockDelta, ContentBlockDeltaEvent, ContentBlockStartEvent, ContentBlockStopEvent,
-    InputContentBlock, InputMessage, MessageDelta, MessageDeltaEvent, MessageRequest,
+    ImageSource, InputContentBlock, InputMessage, MessageDelta, MessageDeltaEvent, MessageRequest,
     MessageResponse, MessageStartEvent, MessageStopEvent, OutputContentBlock, StreamEvent,
     ToolChoice, ToolDefinition, ToolResultContentBlock, Usage,
 };
@@ -884,7 +884,7 @@ fn translate_message(message: &InputMessage) -> Vec<Value> {
                             "arguments": input.to_string(),
                         }
                     })),
-                    InputContentBlock::ToolResult { .. } => {}
+                    InputContentBlock::Image { .. } | InputContentBlock::ToolResult { .. } => {}
                 }
             }
             if text.is_empty() && tool_calls.is_empty() {
@@ -902,28 +902,96 @@ fn translate_message(message: &InputMessage) -> Vec<Value> {
                 vec![msg]
             }
         }
-        _ => message
-            .content
-            .iter()
-            .filter_map(|block| match block {
-                InputContentBlock::Text { text } => Some(json!({
-                    "role": "user",
-                    "content": text,
-                })),
-                InputContentBlock::ToolResult {
-                    tool_use_id,
-                    content,
-                    is_error,
-                } => Some(json!({
-                    "role": "tool",
-                    "tool_call_id": tool_use_id,
-                    "content": flatten_tool_result_content(content),
-                    "is_error": is_error,
-                })),
-                InputContentBlock::ToolUse { .. } => None,
-            })
-            .collect(),
+        _ => {
+            // User role: group contiguous Text/Image blocks into a single
+            // user message (using the structured content array when any
+            // image is present; falling back to a plain string when the
+            // message is text-only, for backward compat with providers
+            // that prefer the string form). Tool results flush the
+            // pending user parts and become their own `role:"tool"`
+            // messages.
+            let mut out: Vec<Value> = Vec::new();
+            let mut user_parts: Vec<UserPart> = Vec::new();
+
+            fn flush(parts: &mut Vec<UserPart>, out: &mut Vec<Value>) {
+                if parts.is_empty() {
+                    return;
+                }
+                let has_image = parts.iter().any(|p| matches!(p, UserPart::Image { .. }));
+                if !has_image {
+                    // Concatenate text parts into a single string.
+                    let joined: String = parts
+                        .iter()
+                        .filter_map(|p| match p {
+                            UserPart::Text(t) => Some(t.clone()),
+                            _ => None,
+                        })
+                        .collect();
+                    out.push(json!({
+                        "role": "user",
+                        "content": joined,
+                    }));
+                } else {
+                    let content: Vec<Value> = parts
+                        .iter()
+                        .map(|p| match p {
+                            UserPart::Text(t) => json!({
+                                "type": "text",
+                                "text": t,
+                            }),
+                            UserPart::Image { media_type, data } => json!({
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": format!("data:{media_type};base64,{data}"),
+                                },
+                            }),
+                        })
+                        .collect();
+                    out.push(json!({
+                        "role": "user",
+                        "content": content,
+                    }));
+                }
+                parts.clear();
+            }
+
+            for block in &message.content {
+                match block {
+                    InputContentBlock::Text { text } => {
+                        user_parts.push(UserPart::Text(text.clone()));
+                    }
+                    InputContentBlock::Image { source } => {
+                        let ImageSource::Base64 { media_type, data } = source;
+                        user_parts.push(UserPart::Image {
+                            media_type: media_type.clone(),
+                            data: data.clone(),
+                        });
+                    }
+                    InputContentBlock::ToolResult {
+                        tool_use_id,
+                        content,
+                        is_error,
+                    } => {
+                        flush(&mut user_parts, &mut out);
+                        out.push(json!({
+                            "role": "tool",
+                            "tool_call_id": tool_use_id,
+                            "content": flatten_tool_result_content(content),
+                            "is_error": is_error,
+                        }));
+                    }
+                    InputContentBlock::ToolUse { .. } => {}
+                }
+            }
+            flush(&mut user_parts, &mut out);
+            out
+        }
     }
+}
+
+enum UserPart {
+    Text(String),
+    Image { media_type: String, data: String },
 }
 
 /// Remove `role:"tool"` messages from `messages` that have no valid paired

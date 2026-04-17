@@ -1200,6 +1200,7 @@ name = "rusty-claude-cli"
 version = "0.1.0"
 dependencies = [
  "api",
+ "base64",
  "commands",
  "compat-harness",
  "crossterm",

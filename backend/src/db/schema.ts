@@ -61,4 +61,18 @@ export const applyMigrations = () => {
   // Additive migrations — safe to re-run (errors ignored if column already exists)
   try { db.exec(`ALTER TABLE threads ADD COLUMN workDir TEXT NOT NULL DEFAULT ''`); } catch {}
   try { db.exec(`ALTER TABLE messages ADD COLUMN error INTEGER NOT NULL DEFAULT 0`); } catch {}
+  // Queryable turn fields so aggregate reports (tokens/day, cost/model)
+  // don't have to parse every row's JSON blob. NULL until the turn
+  // finalizes.
+  try { db.exec(`ALTER TABLE messages ADD COLUMN model TEXT`); } catch {}
+  try { db.exec(`ALTER TABLE messages ADD COLUMN tokensIn INTEGER`); } catch {}
+  try { db.exec(`ALTER TABLE messages ADD COLUMN tokensOut INTEGER`); } catch {}
+  try { db.exec(`ALTER TABLE messages ADD COLUMN costUsd REAL`); } catch {}
+  try { db.exec(`ALTER TABLE messages ADD COLUMN turnDurationMs INTEGER`); } catch {}
+  // Display-only metadata blob: thinking text, tool steps, turn log.
+  // Stored as a JSON string so new fields don't need a schema migration.
+  try { db.exec(`ALTER TABLE messages ADD COLUMN metadata TEXT`); } catch {}
+  // Indexes for the common aggregate queries we'll want to run.
+  try { db.exec(`CREATE INDEX IF NOT EXISTS messages_model_idx ON messages(model)`); } catch {}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS messages_cost_idx ON messages(costUsd)`); } catch {}
 };

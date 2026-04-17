@@ -15,8 +15,9 @@ Chat with an AI that can execute code, edit files, and manage projects on your r
 - **Streaming chat** — Watch AI responses appear word-by-word in real-time
 - **Live tool tracking** — See every action the agent takes as it works (file edits, terminal commands, searches)
 - **Permission prompts** — Approve or deny dangerous operations inline before the agent proceeds
-- **Terminal drawer** — Pull-up bottom sheet with live terminal output and command input
-- **Model queue with fallback** — Configure multiple AI models (Claude, OpenRouter, local) that auto-fallback if one fails
+- **Turn telemetry** — Expandable "Worked for X" row after each turn showing cost, tokens, tool steps, and savings vs Anthropic pricing
+- **Image & file attachments** — Send images/files to multimodal models via the `+` button; vision-capability gated per model
+- **Model queue with fallback + retry** — Configure multiple AI models (Claude, OpenRouter, local) that retry transient errors with backoff before falling through to the next model
 - **Auto-compact** — Automatically summarizes conversation context when the window fills up
 - **Directory browser** — Browse your remote filesystem and pick a working directory per thread
 - **Dark & light mode** — Full native iOS theming with semantic colors
@@ -106,6 +107,40 @@ The terminal prints:
 > ⚠️ Use ngrok's **standalone v3 binary**, not `npx expo start --tunnel`. Expo bundles a legacy ngrok v2 client that no longer works against current ngrok servers.
 
 **`EXPO_TOKEN` (recommended for remote mode):** Without it, `dev:tunnel` falls back to `--offline` which skips EAS manifest signing and works fine for most cases. For the full experience (EAS Update metadata, etc.), generate a personal token at [expo.dev access tokens](https://expo.dev/accounts/[username]/settings/access-tokens) and put it in `.env` as `EXPO_TOKEN=...`. Each developer needs their own — **don't share**.
+
+### Install on iPhone (no App Store needed)
+
+The app is distributed via **ad-hoc builds** — you install directly from a link, no TestFlight or App Store review. Three steps:
+
+#### 1. Register your device (one-time, ~2 min)
+
+```bash
+eas device:create
+```
+
+This gives you a URL — **open it in Safari on your iPhone**. It installs a tiny configuration profile that registers your device's UDID. You'll need to approve it in Settings → General → VPN & Device Management.
+
+> **Find My iPhone caveat:** If Find My is enabled, Apple enforces a 1-hour security delay before the device can be added to a provisioning profile. Start this step first and grab coffee.
+
+#### 2. Build the app (~5 min)
+
+```bash
+eas build --profile development --platform ios
+```
+
+EAS compiles in the cloud and gives you a download link + QR code when done. No Xcode or Mac needed.
+
+#### 3. Install
+
+Open the build link on your iPhone (or scan the QR code). Tap **Install** when prompted. The app appears on your home screen.
+
+> **"Unable to Install" / "Integrity could not be verified"?** Your device UDID isn't in the provisioning profile. Go back to step 1, re-register, then rebuild. Each new device needs one rebuild.
+
+#### Adding more testers
+
+Each tester runs step 1 (register their device), then you rebuild once. The new build includes all registered devices. Share the build link — anyone registered can install it.
+
+---
 
 ### Gateway environment variables
 
@@ -234,13 +269,13 @@ All UI tokens live in `constants/theme.ts`:
 | `SHADOW` | `sm` · `md` · `lg` (iOS shadow props + elevation) |
 | `TYPOGRAPHY` | Font sizes 12–20, line heights 16–30 |
 
-Colors come from `@bacons/apple-colors` — semantic iOS colors that automatically adapt to dark/light mode.
+Colors come from `constants/palette.ts` — a custom theme system with lavender (default) and Claude accent palettes, full light/dark variants.
 
 ---
 
 ## Runtime Adapter
 
-The gateway ships with a stubbed `clawRuntime` that simulates AI deltas and terminal output. Swap it for a real Claw binary or RunPod-backed adapter while keeping the API surface unchanged.
+The gateway uses `clawRuntime.ts` to spawn the Claw Rust binary per turn. The runtime handles model queue fallback with retry, session snapshotting, proactive context compaction, auto-continue on truncated responses, and real-time streaming via stderr parsing. Model metadata (context windows, pricing) is fetched dynamically from OpenRouter and cached hourly.
 
 ---
 

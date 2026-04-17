@@ -1,5 +1,5 @@
-import { StyleProp, View, ViewStyle, useColorScheme } from "react-native";
-import * as AC from "@bacons/apple-colors";
+import { StyleProp, View, ViewStyle } from "react-native";
+import { usePalette } from "@/hooks/usePalette";
 
 export function ChatContainer({
   children,
@@ -8,8 +8,7 @@ export function ChatContainer({
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
 }) {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === "dark";
+  const palette = usePalette();
 
   return (
     <View
@@ -17,7 +16,7 @@ export function ChatContainer({
         {
           flex: 1,
           alignItems: "stretch",
-          backgroundColor: isDark ? "#000" : AC.systemGroupedBackground,
+          backgroundColor: palette.bg,
         },
         // @ts-expect-error
         process.env.EXPO_OS === "web" && { maxHeight: "100vh" },

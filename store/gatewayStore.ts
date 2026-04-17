@@ -301,6 +301,8 @@ export type ToolStep = {
   tool: string;
   /** Human-readable description, e.g. "Editing app/theme.ts" */
   label: string;
+  /** Raw tool input JSON, e.g. '{"path":"/root/project/README.md"}' */
+  detail?: string;
   status: ToolStepStatus;
   /** Timestamp when the step started */
   startedAt: number;
@@ -320,6 +322,29 @@ export type PermissionRequest = {
 
 export type MessageRole = "user" | "assistant" | "system";
 
+/**
+ * Metadata returned from `POST /threads/:id/upload`. `path` is the
+ * absolute on-disk path on the backend (used internally when claw
+ * spawns); `relativePath` is workdir-relative (used in auto-prepended
+ * prompt notes). `kind: "image"` means the backend will forward it to
+ * the model as a multimodal content block.
+ */
+export type Attachment = {
+  path: string;
+  relativePath: string;
+  fileName: string;
+  kind: "image" | "file";
+  mimeType?: string;
+  size?: number;
+  /**
+   * Client-only: the `file://…` URI the picker handed us for the
+   * original asset. Kept so the chat UI can show a real thumbnail
+   * after upload without needing to round-trip through the server.
+   * Not sent over the wire.
+   */
+  localUri?: string;
+};
+
 export type Message = {
   id: string;
   threadId: string;
@@ -330,6 +355,24 @@ export type Message = {
   error?: boolean;
   /** Chain-of-thought content parsed from <thinking>...</thinking> blocks */
   thinking?: string;
+  /** Wall-clock duration of the turn that produced this assistant message, in ms. */
+  turnDurationMs?: number;
+  /** Snapshot of claw stdout lines captured between run start and `done`. */
+  turnLog?: string[];
+  /** Model that produced this turn (persisted at finalize). */
+  model?: string;
+  /** Token usage reported by claw for the turn. */
+  tokensIn?: number;
+  tokensOut?: number;
+  /** Estimated cost in USD, parsed from claw's `estimated_cost` string. */
+  costUsd?: number;
+  /**
+   * Client-local attachments — populated when the user sends a
+   * message with images/files from the `+` picker. These are not
+   * round-tripped from the backend; they only live on the local
+   * user bubble so we can render inline thumbnails.
+   */
+  attachments?: Attachment[];
 };
 
 type ModelSettings = {
@@ -338,12 +381,24 @@ type ModelSettings = {
   apiKey: string;
 };
 
+export type OAuthTokenSet = {
+  accessToken: string;
+  refreshToken?: string;
+  expiresAt?: number;   // unix epoch ms
+  scopes?: string[];
+};
+
 export type ModelEntry = {
   id: string;
   provider: "claude" | "openrouter" | "local";
   name: string;
   apiKey: string;
   enabled: boolean;
+  /** How the user authenticates with this provider. "oauth" stores tokens in
+   *  `oauthToken` and sends them as ANTHROPIC_AUTH_TOKEN to the claw binary. */
+  authMethod?: "apiKey" | "oauth";
+  /** Populated when authMethod is "oauth". Contains the Anthropic OAuth tokens. */
+  oauthToken?: OAuthTokenSet;
 };
 
 type Settings = {
@@ -376,6 +431,8 @@ type Settings = {
    * of output tokens. Only runs once per user message.
    */
   autoContinueEnabled: boolean;
+  /** Last working directory selected — used as the initial path in DirectoryBrowser. */
+  lastWorkDir?: string;
 };
 
 type GatewayState = {
@@ -398,6 +455,12 @@ type GatewayState = {
    * that previous bubbles still need for their own badge displays.
    */
   runStartedAt: Record<string, number>;
+  /**
+   * Ephemeral per-turn buffer of claw stdout chunks. Reset when a run
+   * starts, snapshotted onto the trailing assistant message when the run
+   * ends. Separate from `terminal` (which is a rolling global log).
+   */
+  currentTurnLog: Record<string, string[]>;
   streams: Record<string, { abort: () => void } | undefined>;
   loadingThreads: boolean;
   activeThreadId?: string;
@@ -409,7 +472,15 @@ type GatewayState = {
     createThread: (workDir?: string) => Promise<Thread>;
     browseFsDirectory: (path?: string) => Promise<FsListing>;
     loadMessages: (threadId: string) => Promise<void>;
-    sendMessage: (threadId: string, content: string) => Promise<void>;
+    sendMessage: (
+      threadId: string,
+      content: string,
+      attachments?: Attachment[]
+    ) => Promise<void>;
+    uploadAttachment: (
+      threadId: string,
+      file: { uri: string; name: string; mimeType: string }
+    ) => Promise<Attachment>;
     stopRun: (threadId: string) => Promise<void>;
     openStream: (threadId: string) => void;
     closeStream: (threadId: string) => void;
@@ -421,6 +492,7 @@ type GatewayState = {
     refreshThread: (threadId: string) => Promise<void>;
     deleteThread: (threadId: string) => Promise<void>;
     duplicateThread: (threadId: string) => Promise<Thread>;
+    renameThread: (threadId: string, title: string) => Promise<void>;
     updateThreadWorkDir: (threadId: string, workDir: string) => Promise<void>;
   };
 };
@@ -439,6 +511,71 @@ const getClientConfig = (state: GatewayState) => {
       "Content-Type": "application/json",
     },
   };
+};
+
+/**
+ * Flatten server-side turn telemetry onto the client Message shape.
+ * The backend stores thinking/turnLog/toolSteps inside a nested
+ * `metadata` blob and the queryable fields (model, tokens, cost,
+ * duration) as top-level columns. The client stores them all top-level,
+ * so we do the flatten at the boundary.
+ */
+const hydrateServerMessage = (raw: any): Message => {
+  const meta = raw?.metadata ?? {};
+  const out: Message = {
+    id: raw.id,
+    threadId: raw.threadId,
+    role: raw.role,
+    content: raw.content,
+    createdAt: raw.createdAt,
+  };
+  if (raw.error) out.error = true;
+  if (typeof raw.model === "string") out.model = raw.model;
+  if (typeof raw.tokensIn === "number") out.tokensIn = raw.tokensIn;
+  if (typeof raw.tokensOut === "number") out.tokensOut = raw.tokensOut;
+  if (typeof raw.costUsd === "number") out.costUsd = raw.costUsd;
+  if (typeof raw.turnDurationMs === "number") out.turnDurationMs = raw.turnDurationMs;
+  if (typeof meta.thinking === "string" && meta.thinking.length > 0) {
+    out.thinking = meta.thinking;
+  }
+  if (Array.isArray(meta.turnLog) && meta.turnLog.length > 0) {
+    out.turnLog = meta.turnLog as string[];
+  }
+  return out;
+};
+
+/**
+ * Merge persisted tool steps from server-hydrated messages into the
+ * client's per-thread `toolSteps` map. Skips any step id that already
+ * exists (from a live run) so we don't clobber newer state.
+ */
+const rehydrateToolSteps = (
+  current: Record<string, ToolStep[]>,
+  threadId: string,
+  rawMessages: any[]
+): Record<string, ToolStep[]> => {
+  const existing = current[threadId] ?? [];
+  const seen = new Set(existing.map((s) => s.id));
+  const additions: ToolStep[] = [];
+  for (const m of rawMessages) {
+    const steps = m?.metadata?.toolSteps;
+    if (!Array.isArray(steps)) continue;
+    for (const s of steps) {
+      if (!s || typeof s.id !== "string" || seen.has(s.id)) continue;
+      seen.add(s.id);
+      additions.push({
+        id: s.id,
+        tool: s.tool,
+        label: s.label,
+        detail: s.detail,
+        status: s.status === "error" ? "error" : "done",
+        startedAt: 0,
+        messageId: m.id,
+      });
+    }
+  }
+  if (additions.length === 0) return current;
+  return { ...current, [threadId]: [...existing, ...additions] };
 };
 
 const upsertMessage = (
@@ -481,6 +618,7 @@ export const useGatewayStore = create<GatewayState>()(
       compacting: {},
       runPhase: {},
       runStartedAt: {},
+      currentTurnLog: {},
       streams: {},
       loadingThreads: false,
       activeThreadId: undefined,
@@ -565,15 +703,31 @@ export const useGatewayStore = create<GatewayState>()(
           });
           if (!res.ok) throw new Error("Failed to load messages");
           const data = await res.json();
-          set((current) => ({
-            messages: {
-              ...current.messages,
-              [threadId]: data.messages as Message[],
-            },
-          }));
+          const rawMessages = (data.messages as any[]) ?? [];
+          const hydrated = rawMessages.map(hydrateServerMessage);
+          set((current) => {
+            // Preserve client-only fields (local attachments) that the
+            // backend doesn't know about.
+            const prev = current.messages[threadId] ?? [];
+            const prevById = new Map(prev.map((m) => [m.id, m]));
+            const merged = hydrated.map((m) => {
+              const local = prevById.get(m.id);
+              return local?.attachments
+                ? { ...m, attachments: local.attachments }
+                : m;
+            });
+            return {
+              messages: { ...current.messages, [threadId]: merged },
+              toolSteps: rehydrateToolSteps(current.toolSteps, threadId, rawMessages),
+            };
+          });
         },
 
-        sendMessage: async (threadId: string, content: string) => {
+        sendMessage: async (
+          threadId: string,
+          content: string,
+          attachments: Attachment[] = []
+        ) => {
           const state = get();
           const { baseUrl, headers } = getClientConfig(state);
           const userMessage: Message = {
@@ -582,6 +736,7 @@ export const useGatewayStore = create<GatewayState>()(
             role: "user",
             content,
             createdAt: new Date().toISOString(),
+            attachments: attachments.length > 0 ? attachments : undefined,
           };
           set((current) => ({
             messages: upsertMessage(current.messages, userMessage),
@@ -590,19 +745,25 @@ export const useGatewayStore = create<GatewayState>()(
             ),
           }));
 
+          // Strip client-only fields before sending over the wire.
+          const wireAttachments = attachments.map(
+            ({ localUri: _localUri, ...rest }) => rest
+          );
+
           try {
             const res = await fetch(`${baseUrl}/threads/${threadId}/messages`, {
               method: "POST",
               headers,
               body: JSON.stringify({
                 content,
+                attachments: wireAttachments,
                 autoCompact: state.settings.autoCompact ?? true,
                 autoCompactThreshold: state.settings.autoCompactThreshold ?? 70,
                 autoContinueEnabled: state.settings.autoContinueEnabled ?? true,
                 streamingEnabled: state.settings.streamingEnabled ?? true,
                 modelQueue: (() => {
                   const q = (state.settings.modelQueue ?? []).filter((m) => m.enabled);
-                  if (q.length > 0) return q.map(({ provider, name, apiKey }) => ({ provider, name, apiKey }));
+                  if (q.length > 0) return q.map(({ provider, name, apiKey, authMethod, oauthToken }) => ({ provider, name, apiKey, authMethod, oauthToken }));
                   if (state.settings.model) {
                     const { provider, name, apiKey } = state.settings.model;
                     return [{ provider, name, apiKey }];
@@ -620,6 +781,43 @@ export const useGatewayStore = create<GatewayState>()(
             }));
             throw err;
           }
+        },
+
+        uploadAttachment: async (threadId, file) => {
+          const state = get();
+          const { baseUrl, headers } = getClientConfig(state);
+          // Read the file as base64 and POST as plain JSON. Yes, it's
+          // ~33% larger than raw bytes, but it sidesteps every
+          // RN-multipart quirk (empty FormData parts, missing boundary,
+          // stream piping races against Express 5's body parsers) and
+          // the json body limit on this router is raised to 40 MB.
+          const FileSystem = await import("expo-file-system/legacy");
+          const dataBase64 = await FileSystem.readAsStringAsync(file.uri, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+          const res = await fetch(`${baseUrl}/threads/${threadId}/upload`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              fileName: file.name,
+              mimeType: file.mimeType,
+              dataBase64,
+            }),
+          });
+          if (!res.ok) {
+            const text = await res.text().catch(() => "");
+            throw new Error(`upload failed: ${res.status} ${text}`);
+          }
+          const data = await res.json();
+          return {
+            path: data.path,
+            relativePath: data.relativePath,
+            fileName: data.fileName,
+            kind: data.kind,
+            mimeType: data.mimeType,
+            size: data.size,
+            localUri: file.uri,
+          } satisfies Attachment;
         },
 
         stopRun: async (threadId: string) => {
@@ -683,6 +881,7 @@ export const useGatewayStore = create<GatewayState>()(
                   // messageId inside MessageBubble.
                   ...(isRunning ? {
                     runStartedAt: { ...current.runStartedAt, [threadId]: Date.now() },
+                    currentTurnLog: { ...current.currentTurnLog, [threadId]: [] },
                   } : {}),
                 }));
                 break;
@@ -725,25 +924,60 @@ export const useGatewayStore = create<GatewayState>()(
                 });
                 break;
               case "done":
-                set((current) => ({
-                  threads: current.threads.map((t) =>
-                    t.id === threadId ? { ...t, status: "idle" } : t
-                  ),
-                  runPhase: { ...current.runPhase, [threadId]: "idle" },
-                  compacting: { ...current.compacting, [threadId]: false },
-                }));
+                set((current) => {
+                  // Snapshot the per-turn log + duration onto the most recent
+                  // assistant message so the bubble can render a collapsible
+                  // "Worked for X" row. We attach to the last assistant message
+                  // that doesn't already carry a snapshot — avoids clobbering
+                  // on reconnects/duplicate done events.
+                  const msgs = current.messages[threadId] ?? [];
+                  const turnLog = current.currentTurnLog[threadId] ?? [];
+                  const startedAt = current.runStartedAt[threadId];
+                  const durationMs =
+                    typeof startedAt === "number" ? Date.now() - startedAt : undefined;
+                  let nextMessages = current.messages;
+                  for (let i = msgs.length - 1; i >= 0; i--) {
+                    const m = msgs[i];
+                    if (m.role !== "assistant") continue;
+                    if (m.turnDurationMs != null) break;
+                    nextMessages = upsertMessage(current.messages, {
+                      ...m,
+                      turnLog: turnLog.length > 0 ? turnLog : undefined,
+                      turnDurationMs: durationMs,
+                    });
+                    break;
+                  }
+                  return {
+                    messages: nextMessages,
+                    threads: current.threads.map((t) =>
+                      t.id === threadId ? { ...t, status: "idle" } : t
+                    ),
+                    runPhase: { ...current.runPhase, [threadId]: "idle" },
+                    compacting: { ...current.compacting, [threadId]: false },
+                    currentTurnLog: { ...current.currentTurnLog, [threadId]: [] },
+                  };
+                });
                 return true; // signal openNativeSSE to stop reconnecting
-              case "terminal":
+              case "terminal": {
+                const line = payload.chunk.replace(/\n$/, "");
                 set((current) => ({
                   terminal: {
                     ...current.terminal,
                     [threadId]: [
                       ...(current.terminal[threadId] ?? []),
-                      payload.chunk.replace(/\n$/, ""),
+                      line,
                     ].slice(-400),
+                  },
+                  currentTurnLog: {
+                    ...current.currentTurnLog,
+                    [threadId]: [
+                      ...(current.currentTurnLog[threadId] ?? []),
+                      line,
+                    ].slice(-800),
                   },
                 }));
                 break;
+              }
               case "error":
                 set((current) => ({
                   threads: current.threads.map((t) =>
@@ -782,6 +1016,7 @@ export const useGatewayStore = create<GatewayState>()(
                     id: stepId,
                     tool: payload.tool ?? "unknown",
                     label: payload.label ?? payload.tool ?? "Working…",
+                    detail: payload.detail,
                     status: "running",
                     startedAt: Date.now(),
                     messageId: payload.messageId,
@@ -816,17 +1051,40 @@ export const useGatewayStore = create<GatewayState>()(
                 break;
               case "compact_end":
                 set((current) => {
+                  // The backend now persists the compact summary as a
+                  // proper `role: "system"` message in SQLite and echoes
+                  // the full record in `payload.systemMessage`. Using
+                  // the backend-provided id makes it idempotent across
+                  // refresh (SQLite has it, upsert is a no-op on reload)
+                  // and keeps the compact marker in its chronological
+                  // position in the chat history even after more turns
+                  // stream in. Fall back to a synthesized ephemeral
+                  // message if the backend payload is missing (older
+                  // clients / replays).
+                  const sm = payload.systemMessage;
                   const removed = payload.removedMessages ?? 0;
                   const kept = payload.keptMessages ?? 0;
-                  const systemMsg: Message = {
-                    id: `compact-${Date.now()}`,
-                    threadId,
-                    role: "system" as const,
-                    content: removed > 0
-                      ? `Compacted context — removed ${removed} messages, kept ${kept}`
-                      : "Compaction attempted — nothing to remove",
-                    createdAt: new Date().toISOString(),
-                  };
+                  const freed = payload.approxTokensFreed ?? 0;
+                  const fallbackContent =
+                    removed > 0
+                      ? `Compacted context — removed ${removed} messages, kept ${kept}` +
+                        (freed > 0 ? ` (~${freed.toLocaleString()} tokens freed)` : "")
+                      : "Compaction ran — nothing to remove";
+                  const systemMsg: Message = sm
+                    ? {
+                        id: sm.id,
+                        threadId: sm.threadId ?? threadId,
+                        role: "system" as const,
+                        content: sm.content,
+                        createdAt: sm.createdAt,
+                      }
+                    : {
+                        id: `compact-${Date.now()}`,
+                        threadId,
+                        role: "system" as const,
+                        content: fallbackContent,
+                        createdAt: new Date().toISOString(),
+                      };
                   return {
                     compacting: { ...current.compacting, [threadId]: false },
                     messages: upsertMessage(current.messages, systemMsg),
@@ -979,12 +1237,28 @@ export const useGatewayStore = create<GatewayState>()(
             }
             if (msgRes.ok) {
               const data = await msgRes.json();
-              set((current) => ({
-                messages: {
-                  ...current.messages,
-                  [threadId]: data.messages as Message[],
-                },
-              }));
+              const rawMessages = (data.messages as any[]) ?? [];
+              const hydrated = rawMessages.map(hydrateServerMessage);
+              set((current) => {
+                // Preserve local attachments (client-only, not on the
+                // backend) from the previous in-memory copy.
+                const prev = current.messages[threadId] ?? [];
+                const prevById = new Map(prev.map((m) => [m.id, m]));
+                const merged = hydrated.map((m) => {
+                  const local = prevById.get(m.id);
+                  return local?.attachments
+                    ? { ...m, attachments: local.attachments }
+                    : m;
+                });
+                return {
+                  messages: { ...current.messages, [threadId]: merged },
+                  toolSteps: rehydrateToolSteps(
+                    current.toolSteps,
+                    threadId,
+                    rawMessages
+                  ),
+                };
+              });
             }
           } catch {}
         },
@@ -1021,6 +1295,22 @@ export const useGatewayStore = create<GatewayState>()(
             threads: [copy, ...current.threads],
           }));
           return copy;
+        },
+
+        renameThread: async (threadId: string, title: string) => {
+          const state = get();
+          const { baseUrl, headers } = getClientConfig(state);
+          const res = await fetch(`${baseUrl}/threads/${threadId}`, {
+            method: "PATCH",
+            headers,
+            body: JSON.stringify({ title }),
+          });
+          if (!res.ok) throw new Error("Failed to rename thread");
+          const data = await res.json();
+          const updated = data.thread as Thread;
+          set((current) => ({
+            threads: current.threads.map((t) => (t.id === threadId ? updated : t)),
+          }));
         },
 
         updateThreadWorkDir: async (threadId: string, workDir: string) => {

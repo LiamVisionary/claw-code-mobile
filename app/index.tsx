@@ -3,13 +3,13 @@ import {
   ActivityIndicator,
   Alert,
   AppState,
-  FlatList,
   Platform,
   Pressable,
   Text,
   View,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { FlatList } from "react-native-gesture-handler";
+import { useRouter, Link } from "expo-router";
 import { useFocusEffect } from "expo-router";
 import ReanimatedSwipeable from "react-native-gesture-handler/ReanimatedSwipeable";
 import Reanimated, {
@@ -18,31 +18,34 @@ import Reanimated, {
   interpolate,
 } from "react-native-reanimated";
 import TouchableBounce from "@/components/ui/TouchableBounce";
+import { GlassButton } from "@/components/ui/GlassButton";
 import { useGatewayStore } from "@/store/gatewayStore";
 import type { Thread } from "@/store/gatewayStore";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { IconSymbol } from "@/components/ui/IconSymbol";
 import { Stack } from "expo-router";
+import { IconSymbol } from "@/components/ui/IconSymbol";
 import DirectoryBrowser from "@/components/DirectoryBrowser";
 import { usePalette } from "@/hooks/usePalette";
 import type { Palette } from "@/constants/palette";
 
-// ─── Right-side swipe actions (Delete + Duplicate) ───────────────────────────
+// ─── Right-side swipe actions (Rename + Duplicate + Delete) ─────────────────
 
 function RightActions({
   prog,
   drag,
   onDelete,
   onDuplicate,
+  onRename,
   palette,
 }: {
   prog: SharedValue<number>;
   drag: SharedValue<number>;
   onDelete: () => void;
   onDuplicate: () => void;
+  onRename: () => void;
   palette: Palette;
 }) {
-  const TOTAL_WIDTH = 152; // 76 per button
+  const TOTAL_WIDTH = 228; // 76 per button × 3
 
   const containerStyle = useAnimatedStyle(() => {
     const width = interpolate(prog.value, [0, 1], [0, TOTAL_WIDTH], "clamp");
@@ -51,6 +54,23 @@ function RightActions({
 
   return (
     <Reanimated.View style={[{ flexDirection: "row", alignItems: "stretch" }, containerStyle]}>
+      {/* Rename */}
+      <TouchableBounce sensory onPress={onRename}>
+        <View
+          style={{
+            width: 76,
+            flex: 1,
+            backgroundColor: palette.textSoft,
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 4,
+          }}
+        >
+          <IconSymbol name="pencil" color="#fff" size={20} />
+          <Text style={{ color: "#fff", fontSize: 12, fontWeight: "600" }}>Rename</Text>
+        </View>
+      </TouchableBounce>
+
       {/* Duplicate */}
       <TouchableBounce sensory onPress={onDuplicate}>
         <View
@@ -78,8 +98,6 @@ function RightActions({
             alignItems: "center",
             justifyContent: "center",
             gap: 4,
-            borderTopRightRadius: 16,
-            borderBottomRightRadius: 16,
           }}
         >
           <IconSymbol name="trash" color="#fff" size={20} />
@@ -99,7 +117,7 @@ export default function ChatListScreen() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showBrowser, setShowBrowser] = useState(false);
-  const { bottom } = useSafeAreaInsets();
+  const { top, bottom } = useSafeAreaInsets();
   const palette = usePalette();
 
   useEffect(() => {
@@ -135,6 +153,9 @@ export default function ChatListScreen() {
     setCreating(true);
     setError(null);
     try {
+      // Remember this directory for next time
+      const s = useGatewayStore.getState().settings;
+      actions.setSettings({ ...s, lastWorkDir: selectedPath });
       const thread = await actions.createThread(selectedPath);
       actions.setActiveThread(thread.id);
       router.push(`/thread/${thread.id}`);
@@ -170,55 +191,93 @@ export default function ChatListScreen() {
     }
   };
 
+  const handleRename = (thread: Thread) => {
+    Alert.prompt(
+      "Rename conversation",
+      undefined,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Save",
+          onPress: (newTitle?: string) => {
+            if (newTitle && newTitle.trim()) {
+              actions.renameThread(thread.id, newTitle.trim()).catch(() => {
+                setError("Failed to rename conversation.");
+              });
+            }
+          },
+        },
+      ],
+      "plain-text",
+      thread.title
+    );
+  };
+
   return (
     <>
       <Stack.Screen
         options={{
-          title: "Chats",
+          headerLeft: () => (
+            <Link href="/settings" asChild>
+              <TouchableBounce sensory>
+                <View style={{ width: 34, height: 34, alignItems: "center", justifyContent: "center" }}>
+                  <IconSymbol name="gear" color={palette.textMuted} size={20} />
+                </View>
+              </TouchableBounce>
+            </Link>
+          ),
           headerRight: () => (
             <TouchableBounce sensory onPress={handleNewChat} disabled={creating}>
-              <View
-                style={{
-                  padding: 8,
-                  backgroundColor: palette.text,
-                  borderRadius: 12,
-                  opacity: creating ? 0.5 : 1,
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 4,
-                }}
-              >
-                {creating
-                  ? <ActivityIndicator color={palette.bg} size="small" />
-                  : <IconSymbol name="plus" color={palette.bg} size={16} />}
+              <View style={{ width: 34, height: 34, alignItems: "center", justifyContent: "center", opacity: creating ? 0.5 : 1 }}>
+                {creating ? (
+                  <ActivityIndicator color={palette.textMuted} size="small" />
+                ) : (
+                  <IconSymbol name="plus" color={palette.text} size={20} />
+                )}
               </View>
             </TouchableBounce>
           ),
         }}
       />
-      <View
-        style={{
-          flex: 1,
-          backgroundColor: palette.bg,
-          paddingTop: 12,
-          paddingBottom: bottom + 16,
-        }}
-      >
+      <View style={{ flex: 1, backgroundColor: palette.bg }}>
         {error && (
-          <Text style={{ color: palette.danger, fontSize: 13, marginBottom: 12, paddingHorizontal: 16 }}>
+          <Text
+            style={{
+              color: palette.danger,
+              fontSize: 13,
+              marginTop: 12,
+              marginBottom: 4,
+              paddingHorizontal: 24,
+            }}
+          >
             {error}
           </Text>
         )}
 
         {!_hasHydrated || loadingThreads ? (
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-            <ActivityIndicator />
+            <ActivityIndicator color={palette.textSoft} />
           </View>
         ) : (
           <FlatList
             data={sortedThreads}
             keyExtractor={(item) => item.id}
-            contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
+            contentInsetAdjustmentBehavior="automatic"
+            automaticallyAdjustsScrollIndicatorInsets
+            contentContainerStyle={{
+              paddingTop: 8,
+              paddingBottom: bottom + 24,
+              flexGrow: 1,
+            }}
+            ItemSeparatorComponent={() => (
+              <View
+                style={{
+                  height: 1,
+                  marginHorizontal: 24,
+                  backgroundColor: palette.divider,
+                }}
+              />
+            )}
             renderItem={({ item }) => (
               <SwipeableChatRow
                 thread={item}
@@ -228,6 +287,7 @@ export default function ChatListScreen() {
                 }}
                 onDelete={() => handleDelete(item)}
                 onDuplicate={() => handleDuplicate(item)}
+                onRename={() => handleRename(item)}
                 palette={palette}
               />
             )}
@@ -235,30 +295,49 @@ export default function ChatListScreen() {
               <View
                 style={{
                   flex: 1,
-                  paddingTop: 80,
+                  paddingTop: 120,
+                  paddingHorizontal: 32,
                   alignItems: "center",
-                  gap: 12,
+                  gap: 10,
                 }}
               >
-                <IconSymbol name="bubble.left.and.bubble.right" color={palette.textSoft} size={40} />
-                <Text style={{ color: palette.textMuted, fontSize: 16, fontWeight: "600" }}>
-                  No chats yet
+                <Text
+                  style={{
+                    color: palette.text,
+                    fontSize: 22,
+                    fontWeight: "500",
+                    letterSpacing: -0.3,
+                  }}
+                >
+                  No conversations yet
                 </Text>
-                <TouchableBounce sensory onPress={handleNewChat} disabled={creating}>
-                  <View
+                <Text
+                  style={{
+                    color: palette.textMuted,
+                    fontSize: 15,
+                    textAlign: "center",
+                    lineHeight: 22,
+                    marginBottom: 20,
+                  }}
+                >
+                  Start a chat to begin working with Claw in a project directory.
+                </Text>
+                <GlassButton
+                  onPress={handleNewChat}
+                  disabled={creating}
+                  style={{ paddingHorizontal: 28, paddingVertical: 13, borderRadius: 14 }}
+                >
+                  <Text
                     style={{
-                      marginTop: 4,
-                      backgroundColor: palette.text,
-                      paddingHorizontal: 24,
-                      paddingVertical: 12,
-                      borderRadius: 14,
+                      color: palette.text,
+                      fontWeight: "600",
+                      fontSize: 15,
+                      letterSpacing: -0.1,
                     }}
                   >
-                    <Text style={{ color: palette.bg, fontWeight: "600" }}>
-                      Start a chat
-                    </Text>
-                  </View>
-                </TouchableBounce>
+                    New conversation
+                  </Text>
+                </GlassButton>
               </View>
             )}
           />
@@ -267,6 +346,7 @@ export default function ChatListScreen() {
 
       <DirectoryBrowser
         visible={showBrowser}
+        initialPath={useGatewayStore.getState().settings.lastWorkDir}
         onSelect={handleDirectorySelected}
         onCancel={() => setShowBrowser(false)}
       />
@@ -281,12 +361,14 @@ function SwipeableChatRow({
   onPress,
   onDelete,
   onDuplicate,
+  onRename,
   palette,
 }: {
   thread: Thread;
   onPress: () => void;
   onDelete: () => void;
   onDuplicate: () => void;
+  onRename: () => void;
   palette: Palette;
 }) {
   const swipeRef = useRef<any>(null);
@@ -305,6 +387,7 @@ function SwipeableChatRow({
           drag={drag}
           onDelete={() => { close(); onDelete(); }}
           onDuplicate={() => { close(); onDuplicate(); }}
+          onRename={() => { close(); onRename(); }}
           palette={palette}
         />
       )}
@@ -330,52 +413,76 @@ function ChatRow({ thread, onPress, palette }: { thread: Thread; onPress: () => 
   const isRunning = thread.status === "running";
   const dirName = thread.workDir ? thread.workDir.split("/").filter(Boolean).pop() : null;
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => ({ opacity: pressed ? 0.72 : 1 })}>
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({
+        backgroundColor: pressed ? palette.surfaceAlt : palette.bg,
+      })}
+    >
       <View
         style={{
-          backgroundColor: palette.surface,
-          borderRadius: 16,
-          padding: 16,
-          borderColor: palette.divider,
-          borderWidth: 1,
+          paddingHorizontal: 24,
+          paddingVertical: 18,
           gap: 6,
         }}
       >
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-          <Text style={{ color: palette.text, fontSize: 15, fontWeight: "600", flex: 1 }} numberOfLines={1}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+          <Text
+            style={{
+              color: palette.text,
+              fontSize: 16,
+              fontWeight: "500",
+              letterSpacing: -0.2,
+              flex: 1,
+            }}
+            numberOfLines={1}
+          >
             {thread.title}
           </Text>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-            {isRunning && (
-              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: palette.accent }} />
-            )}
-            <Text style={{ color: palette.textMuted, fontSize: 12 }}>
-              {timeAgo(thread.updatedAt)}
-            </Text>
-          </View>
-        </View>
-        {dirName && (
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-            <Text style={{ fontSize: 11 }}>📁</Text>
-            <Text
+          {isRunning && (
+            <View
               style={{
-                color: palette.textMuted,
-                fontSize: 12,
-                fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+                width: 7,
+                height: 7,
+                borderRadius: 3.5,
+                backgroundColor: palette.accent,
               }}
-              numberOfLines={1}
-            >
-              {dirName}
-            </Text>
-          </View>
-        )}
+            />
+          )}
+          <Text style={{ color: palette.textSoft, fontSize: 12 }}>
+            {timeAgo(thread.updatedAt)}
+          </Text>
+        </View>
+
         {thread.lastMessagePreview ? (
-          <Text style={{ color: palette.textMuted, fontSize: 14 }} numberOfLines={2}>
+          <Text
+            style={{
+              color: palette.textMuted,
+              fontSize: 14,
+              lineHeight: 20,
+            }}
+            numberOfLines={2}
+          >
             {thread.lastMessagePreview}
           </Text>
         ) : (
-          <Text style={{ color: palette.textSoft, fontSize: 14, fontStyle: "italic" }}>
+          <Text style={{ color: palette.textSoft, fontSize: 14 }}>
             No messages yet
+          </Text>
+        )}
+
+        {dirName && (
+          <Text
+            style={{
+              color: palette.textSoft,
+              fontSize: 11,
+              marginTop: 2,
+              fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+              letterSpacing: -0.1,
+            }}
+            numberOfLines={1}
+          >
+            {dirName}
           </Text>
         )}
       </View>

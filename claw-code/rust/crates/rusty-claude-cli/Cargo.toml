@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 api = { path = "../api" }
+base64 = "0.22"
 commands = { path = "../commands" }
 compat-harness = { path = "../compat-harness" }
 crossterm = "0.28"

@@ -14,6 +14,25 @@ export interface Thread {
 
 export type MessageRole = "user" | "assistant" | "system";
 
+export interface TurnToolStep {
+  id: string;
+  tool: string;
+  label: string;
+  detail?: string;
+  status: "done" | "error";
+}
+
+/**
+ * Display-only turn metadata stored as a JSON blob. Queryable fields
+ * (model, tokensIn, tokensOut, costUsd, turnDurationMs) live as real
+ * columns so aggregate reports don't have to parse the blob.
+ */
+export interface MessageMetadata {
+  thinking?: string;
+  turnLog?: string[];
+  toolSteps?: TurnToolStep[];
+}
+
 export interface Message {
   id: string;
   threadId: string;
@@ -21,6 +40,14 @@ export interface Message {
   content: string;
   createdAt: string;
   error?: boolean;
+  /** Queryable turn telemetry (real columns). */
+  model?: string;
+  tokensIn?: number;
+  tokensOut?: number;
+  costUsd?: number;
+  turnDurationMs?: number;
+  /** Display-only blob. */
+  metadata?: MessageMetadata;
 }
 
 export type RunStatus = "running" | "done" | "stopped" | "error";
@@ -44,11 +71,25 @@ export type StreamEvent =
   | { type: "terminal"; chunk: string }
   | { type: "done"; messageId: string }
   | { type: "error"; message: string }
-  | { type: "tool_start"; id: string; messageId: string; tool: string; label: string }
+  | { type: "tool_start"; id: string; messageId: string; tool: string; label: string; detail?: string }
   | { type: "tool_end"; id: string; messageId: string; error?: boolean }
   | { type: "message_error"; messageId: string; text: string }
   | { type: "run_phase"; phase: string }
   | { type: "compact_start" }
-  | { type: "compact_end"; removedMessages: number; keptMessages: number }
+  | {
+      type: "compact_end";
+      removedMessages: number;
+      keptMessages: number;
+      /** Rough bytes→tokens estimate of what the compact removed. */
+      approxTokensFreed?: number;
+      /** Persisted system message the backend wrote to SQLite so the
+       *  compact summary survives refresh. */
+      systemMessage?: {
+        id: string;
+        threadId: string;
+        content: string;
+        createdAt: string;
+      };
+    }
   | { type: "permission_request"; id: string; tool: string; description: string; message?: string }
   | { type: "thinking_content"; messageId: string; content: string };

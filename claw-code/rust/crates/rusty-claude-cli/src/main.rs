@@ -25,9 +25,9 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use api::{
     detect_provider_kind, resolve_startup_auth_source, AnthropicClient, AuthSource,
-    ContentBlockDelta, InputContentBlock, InputMessage, MessageRequest, MessageResponse,
-    OutputContentBlock, PromptCache, ProviderClient as ApiProviderClient, ProviderKind,
-    StreamEvent as ApiStreamEvent, ToolChoice, ToolDefinition, ToolResultContentBlock,
+    ContentBlockDelta, ImageSource, InputContentBlock, InputMessage, MessageRequest,
+    MessageResponse, OutputContentBlock, PromptCache, ProviderClient as ApiProviderClient,
+    ProviderKind, StreamEvent as ApiStreamEvent, ToolChoice, ToolDefinition, ToolResultContentBlock,
 };
 
 use commands::{
@@ -186,6 +186,42 @@ fn merge_prompt_with_stdin(prompt: &str, stdin_content: Option<&str>) -> String 
     format!("{prompt}\n\n{trimmed}")
 }
 
+/// Read each path, base64-encode the bytes, and pair with a media type
+/// sniffed from the file extension. Returns `(media_type, base64_data)`
+/// tuples ready to be attached as `InputContentBlock::Image` blocks.
+fn load_images_from_paths(paths: &[String]) -> Result<Vec<(String, String)>, String> {
+    use base64::Engine;
+    let mut out = Vec::with_capacity(paths.len());
+    for path in paths {
+        let bytes = std::fs::read(path).map_err(|e| format!("--image {path}: {e}"))?;
+        let media_type = guess_image_media_type(path);
+        let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        out.push((media_type, data));
+    }
+    Ok(out)
+}
+
+fn guess_image_media_type(path: &str) -> String {
+    let lower = path.to_ascii_lowercase();
+    if lower.ends_with(".png") {
+        "image/png"
+    } else if lower.ends_with(".gif") {
+        "image/gif"
+    } else if lower.ends_with(".webp") {
+        "image/webp"
+    } else if lower.ends_with(".heic") {
+        "image/heic"
+    } else if lower.ends_with(".heif") {
+        "image/heif"
+    } else {
+        // Default to JPEG for .jpg/.jpeg and unknown extensions —
+        // most providers accept this and it's the most common
+        // mobile-camera output.
+        "image/jpeg"
+    }
+    .to_string()
+}
+
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().skip(1).collect();
     match parse_args(&args)? {
@@ -238,6 +274,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             base_commit,
             reasoning_effort,
             allow_broad_cwd,
+            image_paths,
         } => {
             enforce_broad_cwd_policy(allow_broad_cwd, output_format)?;
             run_stale_base_preflight(base_commit.as_deref());
@@ -252,9 +289,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 None
             };
             let effective_prompt = merge_prompt_with_stdin(&prompt, stdin_context.as_deref());
+            let loaded_images = load_images_from_paths(&image_paths)
+                .map_err(|error| -> Box<dyn std::error::Error> { error.into() })?;
             let mut cli = LiveCli::new(model, true, allowed_tools, permission_mode)?;
             cli.set_reasoning_effort(reasoning_effort);
-            cli.run_turn_with_output(&effective_prompt, output_format, compact)?;
+            cli.run_turn_with_output(&effective_prompt, output_format, compact, loaded_images)?;
         }
         CliAction::Doctor { output_format } => run_doctor(output_format)?,
         CliAction::State { output_format } => run_worker_state(output_format)?,
@@ -342,6 +381,9 @@ enum CliAction {
         base_commit: Option<String>,
         reasoning_effort: Option<String>,
         allow_broad_cwd: bool,
+        /// Filesystem paths to image attachments. Resolved and base64
+        /// encoded just before the API request is built.
+        image_paths: Vec<String>,
     },
     Doctor {
         output_format: CliOutputFormat,
@@ -411,6 +453,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
     let mut base_commit: Option<String> = None;
     let mut reasoning_effort: Option<String> = None;
     let mut allow_broad_cwd = false;
+    let mut image_paths: Vec<String> = Vec::new();
     let mut rest: Vec<String> = Vec::new();
     let mut index = 0;
 
@@ -525,6 +568,17 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
                 allow_broad_cwd = true;
                 index += 1;
             }
+            "--image" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "missing value for --image".to_string())?;
+                image_paths.push(value.clone());
+                index += 2;
+            }
+            flag if flag.starts_with("--image=") => {
+                image_paths.push(flag[8..].to_string());
+                index += 1;
+            }
             "-p" => {
                 // Claw Code compat: -p "prompt" = one-shot prompt
                 let prompt = args[index + 1..].join(" ");
@@ -542,6 +596,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
                     base_commit: base_commit.clone(),
                     reasoning_effort: reasoning_effort.clone(),
                     allow_broad_cwd,
+                    image_paths: image_paths.clone(),
                 });
             }
             "--print" => {
@@ -614,6 +669,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
                     base_commit,
                     reasoning_effort,
                     allow_broad_cwd,
+                    image_paths,
                 });
             }
         }
@@ -664,6 +720,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
                     base_commit,
                     reasoning_effort: reasoning_effort.clone(),
                     allow_broad_cwd,
+                    image_paths: image_paths.clone(),
                 }),
                 SkillSlashDispatch::Local => Ok(CliAction::Skills {
                     args,
@@ -690,6 +747,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
                 base_commit: base_commit.clone(),
                 reasoning_effort: reasoning_effort.clone(),
                 allow_broad_cwd,
+                image_paths,
             })
         }
         other if other.starts_with('/') => parse_direct_slash_cli_action(
@@ -702,6 +760,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
             base_commit,
             reasoning_effort,
             allow_broad_cwd,
+            image_paths,
         ),
         _other => Ok(CliAction::Prompt {
             prompt: rest.join(" "),
@@ -713,6 +772,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
             base_commit,
             reasoning_effort: reasoning_effort.clone(),
             allow_broad_cwd,
+            image_paths,
         }),
     }
 }
@@ -829,6 +889,7 @@ fn parse_direct_slash_cli_action(
     base_commit: Option<String>,
     reasoning_effort: Option<String>,
     allow_broad_cwd: bool,
+    image_paths: Vec<String>,
 ) -> Result<CliAction, String> {
     let raw = rest.join(" ");
     match SlashCommand::parse(&raw) {
@@ -858,6 +919,7 @@ fn parse_direct_slash_cli_action(
                     base_commit,
                     reasoning_effort: reasoning_effort.clone(),
                     allow_broad_cwd,
+                    image_paths: image_paths.clone(),
                 }),
                 SkillSlashDispatch::Local => Ok(CliAction::Skills {
                     args,
@@ -3105,12 +3167,12 @@ fn run_repl(
                 if let Some(prompt) = try_resolve_bare_skill_prompt(&cwd, &trimmed) {
                     editor.push_history(input);
                     cli.record_prompt_history(&trimmed);
-                    cli.run_turn(&prompt)?;
+                    cli.run_turn(&prompt, Vec::new())?;
                     continue;
                 }
                 editor.push_history(input);
                 cli.record_prompt_history(&trimmed);
-                cli.run_turn(&trimmed)?;
+                cli.run_turn(&trimmed, Vec::new())?;
             }
             input::ReadOutcome::Cancel => {}
             input::ReadOutcome::Exit => {
@@ -3750,8 +3812,13 @@ impl LiveCli {
         Ok(())
     }
 
-    fn run_turn(&mut self, input: &str) -> Result<(), Box<dyn std::error::Error>> {
+    fn run_turn(
+        &mut self,
+        input: &str,
+        images: Vec<(String, String)>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let (mut runtime, hook_abort_monitor) = self.prepare_turn_runtime(true)?;
+        runtime.api_client_mut().set_pending_user_images(images);
         let mut spinner = Spinner::new();
         let mut stdout = io::stdout();
         spinner.tick(
@@ -3797,16 +3864,24 @@ impl LiveCli {
         input: &str,
         output_format: CliOutputFormat,
         compact: bool,
+        images: Vec<(String, String)>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         match output_format {
-            CliOutputFormat::Text if compact => self.run_prompt_compact(input),
-            CliOutputFormat::Text => self.run_turn(input),
-            CliOutputFormat::Json | CliOutputFormat::StreamJson => self.run_prompt_json(input),
+            CliOutputFormat::Text if compact => self.run_prompt_compact(input, images),
+            CliOutputFormat::Text => self.run_turn(input, images),
+            CliOutputFormat::Json | CliOutputFormat::StreamJson => {
+                self.run_prompt_json(input, images)
+            }
         }
     }
 
-    fn run_prompt_compact(&mut self, input: &str) -> Result<(), Box<dyn std::error::Error>> {
+    fn run_prompt_compact(
+        &mut self,
+        input: &str,
+        images: Vec<(String, String)>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let (mut runtime, hook_abort_monitor) = self.prepare_turn_runtime(false)?;
+        runtime.api_client_mut().set_pending_user_images(images);
         let mut permission_prompter = CliPermissionPrompter::new(self.permission_mode);
         let result = runtime.run_turn(input, Some(&mut permission_prompter));
         hook_abort_monitor.stop();
@@ -3818,8 +3893,13 @@ impl LiveCli {
         Ok(())
     }
 
-    fn run_prompt_json(&mut self, input: &str) -> Result<(), Box<dyn std::error::Error>> {
+    fn run_prompt_json(
+        &mut self,
+        input: &str,
+        images: Vec<(String, String)>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let (mut runtime, hook_abort_monitor) = self.prepare_turn_runtime(false)?;
+        runtime.api_client_mut().set_pending_user_images(images);
         let mut permission_prompter = CliPermissionPrompter::new(self.permission_mode);
         let result = runtime.run_turn(input, Some(&mut permission_prompter));
         hook_abort_monitor.stop();
@@ -3960,7 +4040,7 @@ impl LiveCli {
             }
             SlashCommand::Skills { args } => {
                 match classify_skills_slash_command(args.as_deref()) {
-                    SkillSlashDispatch::Invoke(prompt) => self.run_turn(&prompt)?,
+                    SkillSlashDispatch::Invoke(prompt) => self.run_turn(&prompt, Vec::new())?,
                     SkillSlashDispatch::Local => {
                         Self::print_skills(args.as_deref(), CliOutputFormat::Text)?;
                     }
@@ -6768,6 +6848,10 @@ struct AnthropicRuntimeClient {
     tool_registry: GlobalToolRegistry,
     progress_reporter: Option<InternalPromptProgressReporter>,
     reasoning_effort: Option<String>,
+    /// One-shot user images attached to the current turn's first
+    /// request. Drained after the first `stream()` call so subsequent
+    /// tool-result iterations don't re-attach them.
+    pending_user_images: Vec<(String, String)>,
 }
 
 impl AnthropicRuntimeClient {
@@ -6800,7 +6884,21 @@ impl AnthropicRuntimeClient {
         // prompt cache is Anthropic-only so non-Anthropic variants
         // skip it.
         let resolved_model = api::resolve_model_alias(&model);
-        let client = match detect_provider_kind(&resolved_model) {
+        // If the caller explicitly configured an OpenAI-compat proxy
+        // via OPENAI_BASE_URL + OPENAI_API_KEY, route every model
+        // through it — including `claude-*` and `anthropic/*` slugs.
+        // OpenRouter and other aggregators expose Anthropic models via
+        // this path, and hardcoding the Anthropic branch would skip
+        // the proxy entirely. Matches the guard in
+        // `ProviderClient::from_model_with_anthropic_auth`.
+        let force_openai_compat = std::env::var_os("OPENAI_BASE_URL").is_some()
+            && std::env::var_os("OPENAI_API_KEY").is_some();
+        let effective_kind = if force_openai_compat {
+            ProviderKind::OpenAi
+        } else {
+            detect_provider_kind(&resolved_model)
+        };
+        let client = match effective_kind {
             ProviderKind::Anthropic => {
                 let auth = resolve_cli_auth_source()?;
                 let inner = AnthropicClient::from_auth(auth)
@@ -6833,11 +6931,16 @@ impl AnthropicRuntimeClient {
             tool_registry,
             progress_reporter,
             reasoning_effort: None,
+            pending_user_images: Vec::new(),
         })
     }
 
     fn set_reasoning_effort(&mut self, effort: Option<String>) {
         self.reasoning_effort = effort;
+    }
+
+    fn set_pending_user_images(&mut self, images: Vec<(String, String)>) {
+        self.pending_user_images = images;
     }
 }
 
@@ -6856,10 +6959,30 @@ impl ApiClient for AnthropicRuntimeClient {
             progress_reporter.mark_model_phase();
         }
         let is_post_tool = request_ends_with_tool_result(&request);
+        let mut messages = convert_messages(&request.messages);
+        // Attach any pending user images to the most recent user
+        // message (the one we're about to send). Drained so subsequent
+        // tool-result iterations within this turn don't re-attach.
+        if !self.pending_user_images.is_empty() {
+            if let Some(last_user) = messages.iter_mut().rev().find(|m| m.role == "user") {
+                let drained: Vec<(String, String)> =
+                    self.pending_user_images.drain(..).collect();
+                let mut prefix: Vec<InputContentBlock> = drained
+                    .into_iter()
+                    .map(|(media_type, data)| InputContentBlock::Image {
+                        source: ImageSource::Base64 { media_type, data },
+                    })
+                    .collect();
+                prefix.append(&mut last_user.content);
+                last_user.content = prefix;
+            } else {
+                self.pending_user_images.clear();
+            }
+        }
         let message_request = MessageRequest {
             model: self.model.clone(),
             max_tokens: max_tokens_for_model(&self.model),
-            messages: convert_messages(&request.messages),
+            messages,
             system: (!request.system_prompt.is_empty()).then(|| request.system_prompt.join("\n\n")),
             tools: self
                 .enable_tools
@@ -8703,6 +8826,7 @@ mod tests {
                 base_commit: None,
                 reasoning_effort: None,
                 allow_broad_cwd: false,
+                image_paths: Vec::new(),
             }
         );
     }
@@ -8837,6 +8961,7 @@ mod tests {
                 base_commit: None,
                 reasoning_effort: None,
                 allow_broad_cwd: false,
+                image_paths: Vec::new(),
             }
         );
     }
@@ -8928,6 +9053,7 @@ mod tests {
                 base_commit: None,
                 reasoning_effort: None,
                 allow_broad_cwd: false,
+                image_paths: Vec::new(),
             }
         );
     }
@@ -8959,6 +9085,7 @@ mod tests {
                 base_commit: None,
                 reasoning_effort: None,
                 allow_broad_cwd: false,
+                image_paths: Vec::new(),
             }
         );
     }
@@ -9002,6 +9129,7 @@ mod tests {
                 base_commit: None,
                 reasoning_effort: None,
                 allow_broad_cwd: false,
+                image_paths: Vec::new(),
             }
         );
     }
@@ -9081,6 +9209,7 @@ mod tests {
                 base_commit: None,
                 reasoning_effort: None,
                 allow_broad_cwd: false,
+                image_paths: Vec::new(),
             }
         );
     }
@@ -9102,6 +9231,7 @@ mod tests {
                 base_commit: None,
                 reasoning_effort: None,
                 allow_broad_cwd: false,
+                image_paths: Vec::new(),
             }
         );
     }
@@ -9132,6 +9262,7 @@ mod tests {
                 base_commit: None,
                 reasoning_effort: None,
                 allow_broad_cwd: false,
+                image_paths: Vec::new(),
             }
         );
     }
@@ -9159,6 +9290,7 @@ mod tests {
                 base_commit: None,
                 reasoning_effort: None,
                 allow_broad_cwd: false,
+                image_paths: Vec::new(),
             }
         );
     }
@@ -9674,6 +9806,7 @@ mod tests {
                 base_commit: None,
                 reasoning_effort: None,
                 allow_broad_cwd: false,
+                image_paths: Vec::new(),
             }
         );
     }

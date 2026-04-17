@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Animated,
+  ActivityIndicator,
   ScrollView,
   Switch,
   Text,
@@ -8,56 +8,17 @@ import {
   View,
   useColorScheme,
 } from "react-native";
-import { Stack } from "expo-router";
 import TouchableBounce from "@/components/ui/TouchableBounce";
-import { type ModelEntry, useGatewayStore } from "@/store/gatewayStore";
-
-// ─── Design tokens ───────────────────────────────────────────────────────────
-// Warm, low-contrast palette from DESIGN_GUIDELINES.md.
-
-const LIGHT = {
-  bg: "#F6F2EA",
-  surface: "#FBF8F1",
-  surfaceAlt: "#F0EADE",
-  text: "#2B2823",
-  textMuted: "#78736A",
-  textSoft: "#A9A397",
-  divider: "#E6DFD1",
-  accent: "#B85742",
-  danger: "#A6463A",
-  success: "#6B8F5E",
-};
-
-const DARK = {
-  bg: "#1B1917",
-  surface: "#242120",
-  surfaceAlt: "#2E2A27",
-  text: "#EDE7DA",
-  textMuted: "#9E978A",
-  textSoft: "#6E685E",
-  divider: "#332F2B",
-  accent: "#D97A63",
-  danger: "#D97A63",
-  success: "#9EBB90",
-};
-
-type Palette = typeof LIGHT;
-
-// ─── Accent themes ───────────────────────────────────────────────────────────
-// The original warm terracotta ("claude") is preserved as one option; lavender
-// is the default so the app doesn't read as Claude-branded at a glance.
-
-const ACCENTS = {
-  claude:   { light: "#B85742", dark: "#D97A63" },
-  lavender: { light: "#7B6CA8", dark: "#B9A6DB" },
-} as const;
-
-type AccentTheme = keyof typeof ACCENTS;
-
-const ACCENT_OPTIONS: { key: AccentTheme; label: string }[] = [
-  { key: "lavender", label: "Lavender" },
-  { key: "claude", label: "Terracotta" },
-];
+import { IconSymbol } from "@/components/ui/IconSymbol";
+import { GlassButton } from "@/components/ui/GlassButton";
+import SegmentedControl from "@react-native-segmented-control/segmented-control";
+import { type ModelEntry, type OAuthTokenSet, useGatewayStore } from "@/store/gatewayStore";
+import {
+  buildPalette,
+  ACCENT_OPTIONS,
+  type AccentTheme,
+  type Palette,
+} from "@/constants/palette";
 
 // ─── Providers ───────────────────────────────────────────────────────────────
 
@@ -171,57 +132,28 @@ function Caption({
   );
 }
 
-// ─── Segmented control ──────────────────────────────────────────────────────
+// ─── Segmented control (native iOS) ─────────────────────────────────────────
 
 function Segmented<T extends string>({
   options,
   value,
   onChange,
-  palette,
 }: {
   options: { key: T; label: string }[];
   value: T;
   onChange: (v: T) => void;
-  palette: Palette;
+  palette?: Palette;
 }) {
+  const selectedIndex = options.findIndex((o) => o.key === value);
   return (
-    <View
-      style={{
-        flexDirection: "row",
-        backgroundColor: palette.surfaceAlt,
-        borderRadius: 12,
-        padding: 3,
+    <SegmentedControl
+      values={options.map((o) => o.label)}
+      selectedIndex={selectedIndex >= 0 ? selectedIndex : 0}
+      onChange={(e) => {
+        const idx = e.nativeEvent.selectedSegmentIndex;
+        if (options[idx]) onChange(options[idx].key);
       }}
-    >
-      {options.map((opt) => {
-        const selected = value === opt.key;
-        return (
-          <View key={opt.key} style={{ flex: 1 }}>
-            <TouchableBounce sensory onPress={() => onChange(opt.key)}>
-              <View
-                style={{
-                  paddingVertical: 10,
-                  borderRadius: 9,
-                  alignItems: "center",
-                  backgroundColor: selected ? palette.surface : "transparent",
-                }}
-              >
-                <Text
-                  style={{
-                    fontSize: 13,
-                    fontWeight: selected ? "600" : "500",
-                    color: selected ? palette.text : palette.textMuted,
-                    letterSpacing: 0.1,
-                  }}
-                >
-                  {opt.label}
-                </Text>
-              </View>
-            </TouchableBounce>
-          </View>
-        );
-      })}
-    </View>
+    />
   );
 }
 
@@ -235,6 +167,9 @@ function Field({
   secureTextEntry,
   keyboardType,
   autoCapitalize = "none",
+  onSubmitEditing,
+  onEndEditing,
+  returnKeyType,
 }: {
   placeholder: string;
   value: string;
@@ -243,6 +178,9 @@ function Field({
   secureTextEntry?: boolean;
   keyboardType?: "default" | "url";
   autoCapitalize?: "none" | "sentences";
+  onSubmitEditing?: () => void;
+  onEndEditing?: () => void;
+  returnKeyType?: "done" | "go" | "next" | "search" | "send";
 }) {
   return (
     <TextInput
@@ -253,6 +191,10 @@ function Field({
       autoCapitalize={autoCapitalize}
       keyboardType={keyboardType}
       secureTextEntry={secureTextEntry}
+      onSubmitEditing={onSubmitEditing}
+      onEndEditing={onEndEditing}
+      returnKeyType={returnKeyType}
+      blurOnSubmit
       style={{
         backgroundColor: palette.surfaceAlt,
         borderRadius: 12,
@@ -298,32 +240,32 @@ function QueueRow({
         alignItems: "center",
         paddingVertical: 14,
         paddingHorizontal: 18,
-        gap: 14,
+        gap: 12,
         opacity: entry.enabled ? 1 : 0.5,
       }}
     >
-      <View style={{ gap: 4 }}>
-        <TouchableBounce onPress={onMoveUp} disabled={isFirst}>
-          <Text
-            style={{
-              fontSize: 11,
-              color: isFirst ? palette.textSoft : palette.textMuted,
-            }}
-          >
-            ▲
-          </Text>
-        </TouchableBounce>
-        <TouchableBounce onPress={onMoveDown} disabled={isLast}>
-          <Text
-            style={{
-              fontSize: 11,
-              color: isLast ? palette.textSoft : palette.textMuted,
-            }}
-          >
-            ▼
-          </Text>
-        </TouchableBounce>
-      </View>
+      {total > 1 && (
+        <View style={{ gap: 2 }}>
+          <TouchableBounce onPress={onMoveUp} disabled={isFirst} sensory>
+            <View style={{ paddingHorizontal: 6, paddingVertical: 4 }}>
+              <IconSymbol
+                name="chevron.up"
+                color={isFirst ? palette.divider : palette.textMuted}
+                size={12}
+              />
+            </View>
+          </TouchableBounce>
+          <TouchableBounce onPress={onMoveDown} disabled={isLast} sensory>
+            <View style={{ paddingHorizontal: 6, paddingVertical: 4 }}>
+              <IconSymbol
+                name="chevron.down"
+                color={isLast ? palette.divider : palette.textMuted}
+                size={12}
+              />
+            </View>
+          </TouchableBounce>
+        </View>
+      )}
 
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text
@@ -347,7 +289,9 @@ function QueueRow({
           numberOfLines={1}
         >
           {providerLabel}
-          {entry.apiKey
+          {entry.authMethod === "oauth" && entry.oauthToken
+            ? "  ·  OAuth"
+            : entry.apiKey
             ? `  ·  ···${entry.apiKey.slice(-4)}`
             : entry.provider !== "local"
             ? "  ·  no key"
@@ -382,6 +326,57 @@ function QueueRow({
 
 // ─── Add model form ─────────────────────────────────────────────────────────
 
+const AUTH_METHODS = [
+  { key: "apiKey" as const, label: "API Key" },
+  { key: "oauth" as const, label: "OAuth" },
+];
+
+type ClaudeModel = { id: string; label: string };
+
+const CLAUDE_FALLBACK: ClaudeModel[] = [
+  { id: "claude-opus-4-7", label: "Claude Opus 4.7" },
+  { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
+  { id: "claude-opus-4-6", label: "Claude Opus 4.6" },
+  { id: "claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5" },
+  { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
+];
+
+let claudeModelsCache: { models: ClaudeModel[]; fetchedAt: number } | null =
+  null;
+const CLAUDE_CACHE_TTL_MS = 1000 * 60 * 60;
+
+async function fetchClaudeModels(apiKey: string): Promise<ClaudeModel[]> {
+  if (
+    claudeModelsCache &&
+    Date.now() - claudeModelsCache.fetchedAt < CLAUDE_CACHE_TTL_MS
+  ) {
+    return claudeModelsCache.models;
+  }
+  const res = await fetch("https://api.anthropic.com/v1/models?limit=100", {
+    headers: {
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+  });
+  if (!res.ok) throw new Error(`Anthropic ${res.status}`);
+  const json = (await res.json()) as {
+    data?: { id?: string; display_name?: string }[];
+  };
+  const raw = json.data ?? [];
+  const models: ClaudeModel[] = raw
+    .filter(
+      (m): m is { id: string; display_name?: string } =>
+        typeof m.id === "string" && m.id.length > 0
+    )
+    .map((m) => ({
+      id: m.id,
+      label: m.display_name || m.id,
+    }));
+  if (models.length === 0) throw new Error("Anthropic returned empty list");
+  claudeModelsCache = { models, fetchedAt: Date.now() };
+  return models;
+}
+
 function AddModelForm({
   existingEntries,
   onAdd,
@@ -392,10 +387,74 @@ function AddModelForm({
   palette: Palette;
 }) {
   const [provider, setProvider] = useState<ModelEntry["provider"]>("claude");
-  const [name, setName] = useState("");
+  const [authMethod, setAuthMethod] = useState<"apiKey" | "oauth">(
+    () => existingEntries.some((e) => e.provider === "claude" && e.authMethod === "oauth") ? "oauth" : "apiKey"
+  );
+  const [name, setName] = useState(CLAUDE_FALLBACK[0]?.id ?? "");
+  const [useCustomModel, setUseCustomModel] = useState(false);
+  /** Flipped to true when the user blurs or submits the API key field */
+  const [apiKeyBlurred, setApiKeyBlurred] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [expanded, setExpanded] = useState(false);
-  const height = useRef(new Animated.Value(0)).current;
+  const [oauthLoading, setOauthLoading] = useState(false);
+  // Reuse OAuth token from any existing Claude OAuth entry in the queue
+  const [oauthToken, setOauthToken] = useState<OAuthTokenSet | null>(
+    () => existingEntries.find((e) => e.provider === "claude" && e.authMethod === "oauth" && e.oauthToken)?.oauthToken ?? null
+  );
+  const [oauthError, setOauthError] = useState<string | null>(null);
+  /** After opening the browser, holds the state param so we can exchange the code */
+  const [oauthPendingState, setOauthPendingState] = useState<string | null>(null);
+  const [oauthCode, setOauthCode] = useState("");
+  // height animation removed — was causing scroll jumps
+
+  const [claudeModels, setClaudeModels] = useState<ClaudeModel[] | null>(
+    claudeModelsCache?.models ?? null
+  );
+  const [claudeModelsLoading, setClaudeModelsLoading] = useState(false);
+  const [claudeModelsError, setClaudeModelsError] = useState<string | null>(null);
+
+  // Fetch Claude models when provider is "claude" and we have a key to auth with.
+  // Re-trigger when the API key changes (debounced by checking length threshold).
+  const claudeKey =
+    provider === "claude"
+      ? apiKey.trim() ||
+        existingEntries.find((e) => e.provider === "claude" && e.apiKey)?.apiKey ||
+        ""
+      : "";
+  const hasClaudeKey = claudeKey.length > 10; // rough sanity check
+
+  useEffect(() => {
+    if (provider !== "claude") return;
+    if (!hasClaudeKey) {
+      setClaudeModels(CLAUDE_FALLBACK);
+      setClaudeModelsError(null);
+      return;
+    }
+    if (claudeModelsCache && claudeModelsCache.models.length > 0) {
+      setClaudeModels(claudeModelsCache.models);
+      return;
+    }
+    let cancelled = false;
+    setClaudeModelsLoading(true);
+    setClaudeModelsError(null);
+    fetchClaudeModels(claudeKey)
+      .then((models) => {
+        if (!cancelled) setClaudeModels(models);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setClaudeModelsError(err?.message ?? "Failed to load");
+          setClaudeModels(CLAUDE_FALLBACK);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setClaudeModelsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [provider, hasClaudeKey]);
 
   const [openRouterTop, setOpenRouterTop] = useState<OpenRouterModel[] | null>(
     openRouterTopCache?.models ?? null
@@ -431,68 +490,170 @@ function AddModelForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provider]);
 
-  useEffect(() => {
-    Animated.spring(height, {
-      toValue: expanded ? 1 : 0,
-      useNativeDriver: false,
-      tension: 70,
-      friction: 12,
-    }).start();
-  }, [expanded]);
 
   const onProviderChange = (p: ModelEntry["provider"]) => {
     setProvider(p);
+    setUseCustomModel(false);
+    setApiKeyBlurred(false);
+    setAuthMethod("apiKey");
+    setOauthToken(null);
+    setOauthError(null);
+    setOauthPendingState(null);
+    setOauthCode("");
+    // Set a sensible default model name per provider
+    if (p === "claude") {
+      setName(CLAUDE_FALLBACK[0]?.id ?? "");
+    } else {
+      setName("");
+    }
+    // Only carry over the API key if switching to a provider that has
+    // one saved — and clear it when switching away so Claude keys
+    // don't bleed into OpenRouter and vice-versa.
     const existing = existingEntries.find((e) => e.provider === p && e.apiKey);
-    if (existing) setApiKey(existing.apiKey);
+    setApiKey(existing?.apiKey ?? "");
+  };
+
+  const startOAuthFlow = async () => {
+    const settings = useGatewayStore.getState().settings;
+    const baseUrl = settings.serverUrl?.replace(/\/+$/, "");
+    const token = settings.bearerToken;
+    if (!baseUrl || !token) {
+      setOauthError("Configure server connection first");
+      return;
+    }
+
+    setOauthLoading(true);
+    setOauthError(null);
+    setOauthCode("");
+    try {
+      const authRes = await fetch(`${baseUrl}/oauth/authorize`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
+      if (!authRes.ok) throw new Error(`Server returned ${authRes.status}`);
+      const { url, state } = (await authRes.json()) as {
+        url: string;
+        state: string;
+      };
+
+      // Open the browser — the callback page will show the auth code
+      const { Linking: RNLinking } = require("react-native");
+      RNLinking.openURL(url);
+
+      // Show the code input field
+      setOauthPendingState(state);
+      setOauthLoading(false);
+    } catch (err: any) {
+      setOauthLoading(false);
+      setOauthError(err.message ?? "Failed to start OAuth flow");
+    }
+  };
+
+  const submitOAuthCode = async () => {
+    if (!oauthCode.trim() || !oauthPendingState) return;
+    const settings = useGatewayStore.getState().settings;
+    const baseUrl = settings.serverUrl?.replace(/\/+$/, "");
+    const token = settings.bearerToken;
+    if (!baseUrl || !token) return;
+
+    setOauthLoading(true);
+    setOauthError(null);
+    try {
+      const tokenRes = await fetch(`${baseUrl}/oauth/token`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          code: oauthCode.trim(),
+          state: oauthPendingState,
+        }),
+      });
+      if (!tokenRes.ok) {
+        const err = await tokenRes.json().catch(() => ({}));
+        throw new Error(
+          (err as any).error ?? `Token exchange failed (${tokenRes.status})`
+        );
+      }
+      const tokens = (await tokenRes.json()) as OAuthTokenSet;
+      setOauthToken(tokens);
+      setOauthPendingState(null);
+      setOauthCode("");
+      setOauthError(null);
+    } catch (err: any) {
+      setOauthError(err.message ?? "OAuth failed");
+    } finally {
+      setOauthLoading(false);
+    }
   };
 
   const handleAdd = () => {
     if (!name.trim()) return;
+    if (provider === "claude" && authMethod === "oauth" && !oauthToken) return;
     onAdd({
       id: makeId(),
       provider,
       name: name.trim(),
       apiKey: apiKey.trim(),
       enabled: true,
+      // For OAuth, store both the API key and the OAuth token so the
+      // backend can pass both to the claw binary (ApiKeyAndBearer auth).
+      authMethod: provider === "claude" && authMethod === "oauth" ? "oauth" : undefined,
+      oauthToken: provider === "claude" && authMethod === "oauth" ? oauthToken ?? undefined : undefined,
     });
-    setName("");
+    setName(CLAUDE_FALLBACK[0]?.id ?? "");
     setApiKey("");
+    setApiKeyBlurred(false);
+    setOauthToken(null);
+    setOauthError(null);
+    setAuthMethod("apiKey");
+    setUseCustomModel(false);
     setExpanded(false);
   };
 
+  const isDuplicate = !!(
+    name.trim() &&
+    existingEntries.some((e) => e.provider === provider && e.name === name.trim())
+  );
+
+  const canAdd = !isDuplicate && !!(
+    name.trim() &&
+    (provider === "local" ||
+      (provider === "claude" && authMethod === "apiKey" && apiKeyBlurred && hasClaudeKey) ||
+      (provider === "claude" && authMethod === "oauth" && oauthToken) ||
+      (provider === "openrouter" && apiKeyBlurred && apiKey.trim().length > 10))
+  );
+
   return (
     <View>
-      <TouchableBounce sensory onPress={() => setExpanded((e) => !e)}>
-        <View
-          style={{
-            paddingVertical: 16,
-            paddingHorizontal: 18,
-            alignItems: "center",
-          }}
-        >
-          <Text
+      {!expanded && (
+        <TouchableBounce sensory onPress={() => setExpanded(true)}>
+          <View
             style={{
-              color: palette.accent,
-              fontSize: 14,
-              fontWeight: "600",
-              letterSpacing: 0.2,
+              paddingVertical: 16,
+              paddingHorizontal: 18,
+              alignItems: "center",
             }}
           >
-            {expanded ? "Cancel" : "Add a model"}
-          </Text>
-        </View>
-      </TouchableBounce>
+            <Text
+              style={{
+                color: palette.accent,
+                fontSize: 14,
+                fontWeight: "600",
+                letterSpacing: 0.2,
+              }}
+            >
+              Add a model
+            </Text>
+          </View>
+        </TouchableBounce>
+      )}
 
-      <Animated.View
-        style={{
-          overflow: "hidden",
-          maxHeight: height.interpolate({
-            inputRange: [0, 1],
-            outputRange: [0, 560],
-          }),
-          opacity: height,
-        }}
-      >
+      {expanded && (
         <View style={{ padding: 18, paddingTop: 4, gap: 14 }}>
           <Segmented
             options={PROVIDERS}
@@ -501,52 +662,265 @@ function AddModelForm({
             palette={palette}
           />
 
-          {provider === "openrouter" && (
-            <View style={{ gap: 10 }}>
-              <View
-                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
-              >
+          {/* ── Claude auth + model selection ─────────────────── */}
+          {provider === "claude" && (
+            <>
+              <Segmented
+                options={AUTH_METHODS}
+                value={authMethod}
+                onChange={(m) => {
+                  setAuthMethod(m);
+                  setOauthToken(null);
+                  setOauthError(null);
+                  setOauthPendingState(null);
+                  setOauthCode("");
+                }}
+                palette={palette}
+              />
+
+              {/* API Key mode */}
+              {authMethod === "apiKey" && (
+                <View style={{ gap: 6 }}>
+                  <Field
+                    placeholder="Anthropic API key"
+                    value={apiKey}
+                    onChangeText={(v) => { setApiKey(v); setApiKeyBlurred(false); }}
+                    palette={palette}
+                    secureTextEntry
+                    returnKeyType="done"
+                    onSubmitEditing={() => setApiKeyBlurred(true)}
+                    onEndEditing={() => setApiKeyBlurred(true)}
+                  />
+                  {apiKeyBlurred && apiKey.trim().length > 0 && !hasClaudeKey && (
+                    <Text style={{ color: palette.danger, fontSize: 12, marginLeft: 4 }}>
+                      Invalid API key
+                    </Text>
+                  )}
+                </View>
+              )}
+
+              {/* OAuth note */}
+              {authMethod === "oauth" && (
                 <Text
                   style={{
-                    fontSize: 11,
-                    fontWeight: "600",
-                    color: palette.textMuted,
-                    textTransform: "uppercase",
-                    letterSpacing: 1.2,
+                    color: palette.textSoft,
+                    fontSize: 12,
+                    lineHeight: 17,
+                    marginHorizontal: 2,
                   }}
                 >
-                  Top coding models this week
+                  Due to an Anthropic policy update, OAuth models run through
+                  the official Claude Code CLI. Your Claw instructions,
+                  CLAUDE.md files, and project context are still used.
                 </Text>
-                {openRouterLoading && (
-                  <Text style={{ fontSize: 11, color: palette.textSoft }}>
-                    loading
-                  </Text>
-                )}
-                {openRouterError && (
-                  <Text style={{ fontSize: 11, color: palette.textSoft }}>
-                    offline
-                  </Text>
-                )}
-              </View>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ gap: 8, paddingRight: 8 }}
-              >
-                {(openRouterTop ?? []).map((m) => {
-                  const selected = name === m.id;
-                  return (
+              )}
+
+              {/* OAuth mode */}
+              {authMethod === "oauth" && (
+                <View style={{ gap: 10 }}>
+                  {oauthToken ? (
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        backgroundColor: palette.surfaceAlt,
+                        borderRadius: 12,
+                        paddingHorizontal: 16,
+                        paddingVertical: 12,
+                      }}
+                    >
+                      <View
+                        style={{
+                          width: 7,
+                          height: 7,
+                          borderRadius: 3.5,
+                          backgroundColor: palette.success,
+                          marginRight: 8,
+                        }}
+                      />
+                      <Text
+                        style={{ color: palette.textMuted, fontSize: 14, flex: 1 }}
+                      >
+                        Signed in
+                      </Text>
+                      <TouchableBounce
+                        sensory
+                        onPress={() => {
+                          setOauthToken(null);
+                          setOauthError(null);
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: palette.danger,
+                            fontSize: 13,
+                            fontWeight: "500",
+                            paddingLeft: 12,
+                          }}
+                        >
+                          Sign out
+                        </Text>
+                      </TouchableBounce>
+                    </View>
+                  ) : oauthPendingState ? (
+                    <View style={{ gap: 10 }}>
+                      <Text
+                        style={{
+                          color: palette.textMuted,
+                          fontSize: 13,
+                          lineHeight: 18,
+                        }}
+                      >
+                        Paste the authorization code shown after you approve
+                        access.
+                      </Text>
+                      <Field
+                        placeholder="Authorization code"
+                        value={oauthCode}
+                        onChangeText={setOauthCode}
+                        palette={palette}
+                      />
+                      <GlassButton
+                        onPress={submitOAuthCode}
+                        disabled={!oauthCode.trim() || oauthLoading}
+                        style={{
+                          borderRadius: 12,
+                          paddingVertical: 14,
+                          width: "100%",
+                          opacity:
+                            oauthCode.trim() && !oauthLoading ? 1 : 0.4,
+                        }}
+                      >
+                        {oauthLoading ? (
+                          <ActivityIndicator
+                            color={palette.text}
+                            size="small"
+                          />
+                        ) : (
+                          <Text
+                            style={{
+                              color: palette.text,
+                              fontWeight: "600",
+                              fontSize: 14,
+                            }}
+                          >
+                            Submit code
+                          </Text>
+                        )}
+                      </GlassButton>
+                      <TouchableBounce
+                        sensory
+                        onPress={() => {
+                          setOauthPendingState(null);
+                          setOauthCode("");
+                          setOauthError(null);
+                        }}
+                      >
+                        <View
+                          style={{ paddingVertical: 6, alignItems: "center" }}
+                        >
+                          <Text
+                            style={{
+                              color: palette.textMuted,
+                              fontSize: 13,
+                              fontWeight: "500",
+                            }}
+                          >
+                            Cancel
+                          </Text>
+                        </View>
+                      </TouchableBounce>
+                    </View>
+                  ) : (
+                    <GlassButton
+                      onPress={startOAuthFlow}
+                      disabled={oauthLoading}
+                      style={{
+                        borderRadius: 12,
+                        paddingVertical: 14,
+                        width: "100%",
+                        opacity: oauthLoading ? 0.6 : 1,
+                      }}
+                    >
+                      {oauthLoading ? (
+                        <ActivityIndicator
+                          color={palette.text}
+                          size="small"
+                        />
+                      ) : (
+                        <Text
+                          style={{
+                            color: palette.text,
+                            fontWeight: "600",
+                            fontSize: 14,
+                            letterSpacing: 0.2,
+                          }}
+                        >
+                          Sign in with Anthropic
+                        </Text>
+                      )}
+                    </GlassButton>
+                  )}
+                  {oauthError && (
+                    <Text
+                      style={{
+                        color: palette.danger,
+                        fontSize: 13,
+                        marginLeft: 4,
+                      }}
+                    >
+                      {oauthError}
+                    </Text>
+                  )}
+                </View>
+              )}
+
+              {/* Model chips — only shown once key submitted and valid, or OAuth */}
+              {((apiKeyBlurred && hasClaudeKey) || oauthToken) && (
+                <View style={{ gap: 10 }}>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 11,
+                        fontWeight: "600",
+                        color: palette.textMuted,
+                        textTransform: "uppercase",
+                        letterSpacing: 1.2,
+                      }}
+                    >
+                      Model
+                    </Text>
+                    {claudeModelsLoading && (
+                      <Text style={{ fontSize: 11, color: palette.textSoft }}>
+                        loading
+                      </Text>
+                    )}
+                  </View>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={{ gap: 8, paddingRight: 8 }}
+                  >
+                    {/* Custom pill */}
                     <TouchableBounce
-                      key={m.id}
                       sensory
-                      onPress={() => setName(m.id)}
+                      onPress={() => {
+                        setUseCustomModel(true);
+                        setName("");
+                      }}
                     >
                       <View
                         style={{
                           paddingVertical: 9,
                           paddingHorizontal: 14,
                           borderRadius: 999,
-                          backgroundColor: selected
+                          backgroundColor: useCustomModel
                             ? palette.text
                             : palette.surfaceAlt,
                         }}
@@ -555,70 +929,251 @@ function AddModelForm({
                           style={{
                             fontSize: 13,
                             fontWeight: "600",
-                            color: selected ? palette.surface : palette.text,
+                            color: useCustomModel
+                              ? palette.surface
+                              : palette.textMuted,
                           }}
                         >
-                          {m.label}
+                          Custom
                         </Text>
                       </View>
                     </TouchableBounce>
-                  );
-                })}
-              </ScrollView>
-            </View>
+                    {(claudeModels ?? []).map((m) => {
+                      const selected = !useCustomModel && name === m.id;
+                      return (
+                        <TouchableBounce
+                          key={m.id}
+                          sensory
+                          onPress={() => {
+                            setUseCustomModel(false);
+                            setName(m.id);
+                          }}
+                        >
+                          <View
+                            style={{
+                              paddingVertical: 9,
+                              paddingHorizontal: 14,
+                              borderRadius: 999,
+                              backgroundColor: selected
+                                ? palette.text
+                                : palette.surfaceAlt,
+                            }}
+                          >
+                            <Text
+                              style={{
+                                fontSize: 13,
+                                fontWeight: "600",
+                                color: selected
+                                  ? palette.surface
+                                  : palette.text,
+                              }}
+                            >
+                              {m.label}
+                            </Text>
+                          </View>
+                        </TouchableBounce>
+                      );
+                    })}
+                  </ScrollView>
+                  {useCustomModel && (
+                    <Field
+                      placeholder="Model ID, e.g. claude-sonnet-4"
+                      value={name}
+                      onChangeText={setName}
+                      palette={palette}
+                    />
+                  )}
+                </View>
+              )}
+            </>
           )}
 
-          <Field
-            placeholder={
-              provider === "claude"
-                ? "Model name, e.g. claude-opus-4-5"
-                : provider === "openrouter"
-                ? "Model name, e.g. anthropic/claude-3.5-sonnet"
-                : "Model name or path"
-            }
-            value={name}
-            onChangeText={setName}
-            palette={palette}
-          />
+          {/* ── OpenRouter model selection ─────────────────────── */}
+          {provider === "openrouter" && (
+            <>
+              <Field
+                placeholder="OpenRouter API key"
+                value={apiKey}
+                onChangeText={(v) => { setApiKey(v); setApiKeyBlurred(false); }}
+                palette={palette}
+                secureTextEntry
+                returnKeyType="done"
+                onSubmitEditing={() => setApiKeyBlurred(true)}
+                onEndEditing={() => setApiKeyBlurred(true)}
+              />
+              {apiKeyBlurred && apiKey.trim().length > 0 && apiKey.trim().length <= 10 && (
+                <Text style={{ color: palette.danger, fontSize: 12, marginLeft: 4 }}>
+                  Invalid API key
+                </Text>
+              )}
+              {apiKeyBlurred && apiKey.trim().length > 10 && (
+                <View style={{ gap: 10 }}>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 11,
+                        fontWeight: "600",
+                        color: palette.textMuted,
+                        textTransform: "uppercase",
+                        letterSpacing: 1.2,
+                      }}
+                    >
+                      Top coding models this week
+                    </Text>
+                    {openRouterLoading && (
+                      <Text style={{ fontSize: 11, color: palette.textSoft }}>
+                        loading
+                      </Text>
+                    )}
+                    {openRouterError && (
+                      <Text style={{ fontSize: 11, color: palette.textSoft }}>
+                        offline
+                      </Text>
+                    )}
+                  </View>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={{ gap: 8, paddingRight: 8 }}
+                  >
+                    <TouchableBounce
+                      sensory
+                      onPress={() => {
+                        setUseCustomModel(true);
+                        setName("");
+                      }}
+                    >
+                      <View
+                        style={{
+                          paddingVertical: 9,
+                          paddingHorizontal: 14,
+                          borderRadius: 999,
+                          backgroundColor: useCustomModel
+                            ? palette.text
+                            : palette.surfaceAlt,
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontSize: 13,
+                            fontWeight: "600",
+                            color: useCustomModel
+                              ? palette.surface
+                              : palette.textMuted,
+                          }}
+                        >
+                          Custom
+                        </Text>
+                      </View>
+                    </TouchableBounce>
+                    {(openRouterTop ?? []).map((m) => {
+                      const selected = !useCustomModel && name === m.id;
+                      return (
+                        <TouchableBounce
+                          key={m.id}
+                          sensory
+                          onPress={() => {
+                            setUseCustomModel(false);
+                            setName(m.id);
+                          }}
+                        >
+                          <View
+                            style={{
+                              paddingVertical: 9,
+                              paddingHorizontal: 14,
+                              borderRadius: 999,
+                              backgroundColor: selected
+                                ? palette.text
+                                : palette.surfaceAlt,
+                            }}
+                          >
+                            <Text
+                              style={{
+                                fontSize: 13,
+                                fontWeight: "600",
+                                color: selected
+                                  ? palette.surface
+                                  : palette.text,
+                              }}
+                            >
+                              {m.label}
+                            </Text>
+                          </View>
+                        </TouchableBounce>
+                      );
+                    })}
+                  </ScrollView>
+                  {useCustomModel && (
+                    <Field
+                      placeholder="Model ID, e.g. anthropic/claude-sonnet-4"
+                      value={name}
+                      onChangeText={setName}
+                      palette={palette}
+                    />
+                  )}
+                </View>
+              )}
+            </>
+          )}
 
-          {provider !== "local" && (
+          {/* Model name — only for local provider */}
+          {provider === "local" && (
             <Field
-              placeholder={
-                provider === "claude"
-                  ? "Anthropic API key"
-                  : "OpenRouter API key"
-              }
-              value={apiKey}
-              onChangeText={setApiKey}
+              placeholder="Model name or path"
+              value={name}
+              onChangeText={setName}
               palette={palette}
-              secureTextEntry
             />
           )}
 
-          <TouchableBounce sensory onPress={handleAdd}>
-            <View
-              style={{
-                borderRadius: 12,
-                paddingVertical: 14,
-                alignItems: "center",
-                backgroundColor: name.trim() ? palette.text : palette.surfaceAlt,
-                marginTop: 4,
-              }}
-            >
-              <Text
+          {/* Add to queue — visible once auth is done and model is selectable */}
+          {(canAdd || isDuplicate) && (
+            <>
+              {isDuplicate && (
+                <Text style={{ color: palette.textSoft, fontSize: 12, marginLeft: 4 }}>
+                  Already in queue
+                </Text>
+              )}
+              <GlassButton
+                onPress={handleAdd}
+                disabled={!canAdd}
                 style={{
-                  color: name.trim() ? palette.surface : palette.textSoft,
-                  fontWeight: "600",
-                  fontSize: 15,
-                  letterSpacing: 0.2,
+                  borderRadius: 12,
+                  paddingVertical: 14,
+                  marginTop: 4,
+                  width: "100%",
+                  opacity: canAdd ? 1 : 0.4,
                 }}
               >
-                Add to queue
+                <Text
+                  style={{
+                    color: palette.text,
+                    fontWeight: "600",
+                    fontSize: 15,
+                    letterSpacing: 0.2,
+                  }}
+                >
+                  Add to queue
+                </Text>
+              </GlassButton>
+            </>
+          )}
+
+          <TouchableBounce sensory onPress={() => { setExpanded(false); setName(CLAUDE_FALLBACK[0]?.id ?? ""); setApiKey(""); setApiKeyBlurred(false); setOauthToken(null); setOauthError(null); setOauthPendingState(null); setOauthCode(""); setAuthMethod("apiKey"); setUseCustomModel(false); }}>
+            <View style={{ paddingVertical: 12, alignItems: "center" }}>
+              <Text style={{ color: palette.textMuted, fontSize: 14, fontWeight: "500" }}>
+                Cancel
               </Text>
             </View>
           </TouchableBounce>
         </View>
-      </Animated.View>
+      )}
     </View>
   );
 }
@@ -706,7 +1261,8 @@ function ToggleRow({
 
 export default function SettingsScreen() {
   const scheme = useColorScheme();
-  const { settings, _hasHydrated } = useGatewayStore();
+  const settings = useGatewayStore((s) => s.settings);
+  const _hasHydrated = useGatewayStore((s) => s._hasHydrated);
   const actions = useGatewayStore((s) => s.actions);
 
   const [serverUrl, setServerUrl] = useState(settings.serverUrl);
@@ -732,16 +1288,12 @@ export default function SettingsScreen() {
   const [autoContinueEnabled, setAutoContinueEnabled] = useState(
     settings.autoContinueEnabled ?? true
   );
-  const [saved, setSaved] = useState(false);
-
   const effectiveScheme =
     darkMode === "system" ? scheme ?? "light" : darkMode;
-  const palette = useMemo<Palette>(() => {
-    const base = effectiveScheme === "dark" ? DARK : LIGHT;
-    const accent =
-      ACCENTS[accentTheme][effectiveScheme === "dark" ? "dark" : "light"];
-    return { ...base, accent };
-  }, [effectiveScheme, accentTheme]);
+  const palette = useMemo<Palette>(
+    () => buildPalette(effectiveScheme === "dark", accentTheme),
+    [effectiveScheme, accentTheme]
+  );
 
   const buildQueue = (s: typeof settings): ModelEntry[] => {
     if (s.modelQueue && s.modelQueue.length > 0) return s.modelQueue;
@@ -776,21 +1328,79 @@ export default function SettingsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [_hasHydrated]);
 
-  const save = () => {
-    actions.setSettings({
-      serverUrl,
-      bearerToken,
-      modelQueue: queue,
-      autoCompact,
-      streamingEnabled,
-      darkMode,
-      accentTheme,
-      autoCompactThreshold,
-      telemetryEnabled,
-      autoContinueEnabled,
-    });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+  // Persist all local state to the store on every change via a ref
+  // so the save never causes a re-render cycle. The ref is flushed
+  // on unmount (modal close) and also kept in sync so "revert" works.
+  const pendingRef = useRef({
+    serverUrl, bearerToken, queue, autoCompact, streamingEnabled,
+    darkMode, accentTheme, autoCompactThreshold, telemetryEnabled,
+    autoContinueEnabled,
+  });
+  // Keep the ref current without triggering effects
+  pendingRef.current = {
+    serverUrl, bearerToken, queue, autoCompact, streamingEnabled,
+    darkMode, accentTheme, autoCompactThreshold, telemetryEnabled,
+    autoContinueEnabled,
+  };
+  // Flush to store on unmount (modal close)
+  useEffect(() => {
+    return () => {
+      const s = pendingRef.current;
+      actions.setSettings({
+        serverUrl: s.serverUrl,
+        bearerToken: s.bearerToken,
+        modelQueue: s.queue,
+        autoCompact: s.autoCompact,
+        streamingEnabled: s.streamingEnabled,
+        darkMode: s.darkMode,
+        accentTheme: s.accentTheme,
+        autoCompactThreshold: s.autoCompactThreshold,
+        telemetryEnabled: s.telemetryEnabled,
+        autoContinueEnabled: s.autoContinueEnabled,
+      });
+    };
+  }, [actions]);
+
+
+  // Snapshot the initial values so "Revert" can restore them.
+  const initialRef = useRef({
+    serverUrl: settings.serverUrl,
+    bearerToken: settings.bearerToken,
+    queue: buildQueue(settings),
+    autoCompact: settings.autoCompact ?? true,
+    streamingEnabled: settings.streamingEnabled ?? true,
+    darkMode: (settings.darkMode ?? "system") as "system" | "light" | "dark",
+    accentTheme: (settings.accentTheme ?? "lavender") as "claude" | "lavender",
+    autoCompactThreshold: settings.autoCompactThreshold ?? 70,
+    telemetryEnabled: settings.telemetryEnabled ?? true,
+    autoContinueEnabled: settings.autoContinueEnabled ?? true,
+  });
+
+  const hasChanges =
+    serverUrl !== initialRef.current.serverUrl ||
+    bearerToken !== initialRef.current.bearerToken ||
+    autoCompact !== initialRef.current.autoCompact ||
+    streamingEnabled !== initialRef.current.streamingEnabled ||
+    darkMode !== initialRef.current.darkMode ||
+    accentTheme !== initialRef.current.accentTheme ||
+    autoCompactThreshold !== initialRef.current.autoCompactThreshold ||
+    telemetryEnabled !== initialRef.current.telemetryEnabled ||
+    autoContinueEnabled !== initialRef.current.autoContinueEnabled ||
+    JSON.stringify(queue.map((q) => q.id)) !==
+      JSON.stringify(initialRef.current.queue.map((q) => q.id));
+
+  const revert = () => {
+    const s = initialRef.current;
+    setServerUrl(s.serverUrl);
+    setBearerToken(s.bearerToken);
+    setQueue(s.queue);
+    setAutoCompact(s.autoCompact);
+    setStreamingEnabled(s.streamingEnabled);
+    setDarkMode(s.darkMode);
+    setAccentTheme(s.accentTheme);
+    setAutoCompactThreshold(s.autoCompactThreshold);
+    setTelemetryEnabled(s.telemetryEnabled);
+    setAutoContinueEnabled(s.autoContinueEnabled);
   };
 
   const testConnection = async () => {
@@ -843,30 +1453,20 @@ export default function SettingsScreen() {
 
   const enabledCount = queue.filter((e) => e.enabled).length;
 
+
   return (
-    <>
-      <Stack.Screen
-        options={{
-          title: "Settings",
-          headerTransparent: false,
-          headerLargeTitle: false,
-          headerShadowVisible: false,
-          headerStyle: { backgroundColor: palette.bg },
-          headerTitleStyle: { color: palette.text, fontWeight: "600" },
-          headerTintColor: palette.accent,
-          contentStyle: { backgroundColor: palette.bg },
-        }}
-      />
-      <ScrollView
-        style={{ backgroundColor: palette.bg }}
-        contentContainerStyle={{
-          paddingHorizontal: 22,
-          paddingTop: 20,
-          paddingBottom: 60,
-        }}
-        keyboardShouldPersistTaps="handled"
-        contentInsetAdjustmentBehavior="automatic"
-      >
+    <ScrollView
+      style={{ backgroundColor: palette.bg }}
+      contentContainerStyle={{
+        paddingHorizontal: 22,
+        paddingTop: 20,
+        paddingBottom: 60,
+      }}
+      contentInsetAdjustmentBehavior="automatic"
+      automaticallyAdjustsScrollIndicatorInsets
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="on-drag"
+    >
         <Text
           style={{
             color: palette.textMuted,
@@ -899,27 +1499,11 @@ export default function SettingsScreen() {
               palette={palette}
               secureTextEntry
             />
-            <TouchableBounce sensory onPress={testConnection}>
-              <View
-                style={{
-                  borderRadius: 12,
-                  paddingVertical: 13,
-                  alignItems: "center",
-                  backgroundColor: palette.surfaceAlt,
-                }}
-              >
-                <Text
-                  style={{
-                    color: palette.text,
-                    fontWeight: "600",
-                    fontSize: 14,
-                    letterSpacing: 0.2,
-                  }}
-                >
-                  Test connection
-                </Text>
-              </View>
-            </TouchableBounce>
+            <GlassButton onPress={testConnection} style={{ borderRadius: 12, paddingVertical: 13, width: "100%" }}>
+              <Text style={{ color: palette.text, fontWeight: "600", fontSize: 14, letterSpacing: 0.2 }}>
+                Test connection
+              </Text>
+            </GlassButton>
             {connMessage && (
               <Text
                 style={{
@@ -1150,29 +1734,14 @@ export default function SettingsScreen() {
 
         <View style={{ height: 40 }} />
 
-        {/* ── Save ─────────────────────────────────────────────── */}
-        <TouchableBounce sensory onPress={save}>
-          <View
-            style={{
-              borderRadius: 14,
-              paddingVertical: 16,
-              alignItems: "center",
-              backgroundColor: palette.text,
-            }}
-          >
-            <Text
-              style={{
-                color: palette.bg,
-                fontWeight: "600",
-                fontSize: 15,
-                letterSpacing: 0.3,
-              }}
-            >
-              {saved ? "Saved" : "Save settings"}
+        {/* ── Revert (only shown when settings differ from initial) ── */}
+        {hasChanges && (
+          <GlassButton onPress={revert} style={{ borderRadius: 14, paddingVertical: 16, width: "100%" }}>
+            <Text style={{ color: palette.danger, fontWeight: "600", fontSize: 15, letterSpacing: 0.3 }}>
+              Revert changes
             </Text>
-          </View>
-        </TouchableBounce>
-      </ScrollView>
-    </>
+          </GlassButton>
+        )}
+    </ScrollView>
   );
 }

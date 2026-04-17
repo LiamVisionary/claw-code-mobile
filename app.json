@@ -4,13 +4,13 @@
     "slug": "claw-code-mobile",
     "version": "1.0.1",
     "orientation": "portrait",
-    "icon": "./assets/icons/bouquet.png",
+    "icon": "./assets/icons/claude-sprite-icon.png",
     "scheme": "clawcodemobile",
     "userInterfaceStyle": "automatic",
     "backgroundColor": "#000",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/icons/bouquet.png",
+      "image": "./assets/icons/claude-sprite-icon.png",
       "resizeMode": "cover",
       "backgroundColor": "#000"
     },
@@ -18,8 +18,8 @@
       "appleTeamId": "L7XLLTV3X7",
       "bundleIdentifier": "com.liamvisionary.clawcodemobile",
       "icon": {
-        "light": "./assets/icons/bouquet.png",
-        "dark": "./assets/icons/floral.png"
+        "light": "./assets/icons/claude-sprite-icon.png",
+        "dark": "./assets/icons/claude-sprite-icon.png"
       },
       "supportsTablet": false,
       "infoPlist": {
@@ -57,7 +57,7 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/icons/bouquet.png",
+          "image": "./assets/icons/claude-sprite-icon.png",
           "resizeMode": "cover",
           "backgroundColor": "#000"
         }

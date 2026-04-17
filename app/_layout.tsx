@@ -3,12 +3,8 @@ import Stack from "@/components/ui/Stack";
 import ThemeProvider from "@/components/ui/ThemeProvider";
 import "@/global.css";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
-import * as AC from "@bacons/apple-colors";
-import { Link } from "expo-router";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import TouchableBounce from "@/components/ui/TouchableBounce";
-import { Appearance, View } from "react-native";
-import { IconSymbol } from "@/components/ui/IconSymbol";
+import { Appearance } from "react-native";
 import { useEffect } from "react";
 import { useGatewayStore } from "@/store/gatewayStore";
 
@@ -43,44 +39,23 @@ export default function Layout() {
             <Stack.Screen
               name="index"
               options={{
-                headerLargeStyle: {
-                  backgroundColor: AC.systemGroupedBackground,
-                },
-                headerTransparent: false,
-                headerLeft: () => (
-                  <Link href="/settings" asChild>
-                    <TouchableBounce sensory>
-                      <View
-                        style={[
-                          {
-                            flex: 1,
-                            paddingHorizontal: 16,
-                            paddingVertical: 8,
-                            alignItems: "center",
-                            display: "flex",
-                            marginLeft: process.env.EXPO_OS !== "web" ? -16 : 0,
-                          },
-                        ]}
-                      >
-                        <IconSymbol name="gear" color={AC.label} />
-                      </View>
-                    </TouchableBounce>
-                  </Link>
-                ),
+                title: "Chats",
               }}
             />
             <Stack.Screen
               name="thread/[id]"
               options={{
-                title: "Thread",
-                headerTransparent: false,
+                title: "",
               }}
             />
             <Stack.Screen
               name="settings"
               options={{
                 title: "Settings",
-                presentation: "formSheet",
+                presentation: "modal",
+                headerBlurEffect: undefined,
+                headerShadowVisible: false,
+                headerStyle: { backgroundColor: "transparent" },
               }}
             />
           </Stack>

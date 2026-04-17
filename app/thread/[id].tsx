@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFocusEffect } from "expo-router";
+import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import {
+  ActivityIndicator,
+  Alert,
   Animated,
   AppState,
   FlatList,
-  KeyboardAvoidingView,
+  Image,
+  Keyboard,
+
   Modal,
   Platform,
   Pressable,
@@ -14,19 +19,27 @@ import {
   View,
   useColorScheme,
 } from "react-native";
+import { BlurView } from "expo-blur";
+import { GlassView } from "expo-glass-effect";
+import { GlassButton } from "@/components/ui/GlassButton";
+import { LinearGradient } from "expo-linear-gradient";
+import MaskedView from "@react-native-masked-view/masked-view";
 import Markdown from "react-native-markdown-display";
 import * as Clipboard from "expo-clipboard";
-import { Stack, useLocalSearchParams, useNavigation } from "expo-router";
-import { BottomSheetModal } from "@gorhom/bottom-sheet";
+import { Stack, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import TouchableBounce from "@/components/ui/TouchableBounce";
 import { IconSymbol } from "@/components/ui/IconSymbol";
 import { ThinkingSprite } from "@/components/ui/ThinkingSprite";
 import { usePalette } from "@/hooks/usePalette";
+import { useModelCapabilities } from "@/hooks/useModelCapabilities";
 import type { Palette } from "@/constants/palette";
+import { cleanModelMarkdown } from "@/utils/markdownCleanup";
+import * as ImagePicker from "expo-image-picker";
+import * as DocumentPicker from "expo-document-picker";
 import SlashCommandPicker from "@/components/SlashCommandPicker";
 import DirectoryBrowser from "@/components/DirectoryBrowser";
 import { useGatewayStore } from "@/store/gatewayStore";
-import type { Message, ToolStep, PermissionRequest, ThreadStatus, ModelEntry } from "@/store/gatewayStore";
+import type { Attachment, Message, ToolStep, PermissionRequest, ThreadStatus, ModelEntry } from "@/store/gatewayStore";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BORDER_RADIUS, SPACING, SHADOW, TYPOGRAPHY } from "@/constants/theme";
 
@@ -35,17 +48,20 @@ import { BORDER_RADIUS, SPACING, SHADOW, TYPOGRAPHY } from "@/constants/theme";
 const EMPTY_STEPS: ToolStep[] = [];
 const EMPTY_REQS: PermissionRequest[] = [];
 const EMPTY_MESSAGES: Message[] = [];
-const EMPTY_TERMINAL: string[] = [];
+
+const TOP_BAR_HEIGHT = 52;
+
+// Module-level bridge so HeaderTitle (inside native header) can open
+// ModelPickerBar without any React state flowing through Stack.Screen.
+let _openModelPicker: (() => void) | null = null;
 
 export default function ThreadScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const navigation = useNavigation();
   const actions = useGatewayStore((s) => s.actions);
   const thread = useGatewayStore((s) =>
     s.threads.find((t) => t.id === id)
   );
   const messageMap = useGatewayStore((s) => s.messages);
-  const terminalMap = useGatewayStore((s) => s.terminal);
   const toolSteps = useGatewayStore((s) => s.toolSteps[id ?? ""] ?? EMPTY_STEPS);
   const rawPermReqs = useGatewayStore((s) => s.permissionRequests[id ?? ""] ?? EMPTY_REQS);
   const isCompacting = useGatewayStore((s) => s.compacting[id ?? ""] ?? false);
@@ -55,36 +71,69 @@ export default function ThreadScreen() {
     [rawPermReqs]
   );
   const messages = messageMap[id ?? ""] ?? EMPTY_MESSAGES;
-  const terminalLines = terminalMap[id ?? ""] ?? EMPTY_TERMINAL;
   const listRef = useRef<FlatList<Message>>(null);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [slashPickerVisible, setSlashPickerVisible] = useState(false);
-  const [command, setCommand] = useState("");
   const [copiedConvo, setCopiedConvo] = useState(false);
-  const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [showDirBrowser, setShowDirBrowser] = useState(false);
   const [queuedMessage, setQueuedMessage] = useState<string | null>(null);
+  const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
+  const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
+  /**
+   * In-flight uploads keyed by a client id. We track these separately
+   * from `pendingAttachments` so the chat can show an instant thumbnail
+   * + spinner while the file is being posted to the backend.
+   */
+  const [uploadingPreviews, setUploadingPreviews] = useState<
+    { id: string; localUri: string; name: string; kind: "image" | "file" }[]
+  >([]);
+  /** URI of the attachment currently being shown in a full-screen overlay. */
+  const [previewUri, setPreviewUri] = useState<string | null>(null);
   const settings = useGatewayStore((s) => s.settings);
+
+  // Vision capability check for the currently-active model. Drives the
+  // disabled state of the Photo library / Camera menu items so users
+  // can't send images to a model that would reject them with a 404.
+  const activeModel = useMemo(() => {
+    const q = (settings.modelQueue ?? []).filter((m) => m.enabled);
+    return q[0] ?? null;
+  }, [settings.modelQueue]);
+  const { supportsImage } = useModelCapabilities(activeModel);
   // Tracks the previous thread status so we can detect idle transitions
   const prevStatusRef = useRef<ThreadStatus>("idle");
-  const terminalRef = useRef<BottomSheetModal>(null);
-  const { bottom } = useSafeAreaInsets();
+  const { top, bottom } = useSafeAreaInsets();
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const keyboardUp = keyboardHeight > 0;
+  useEffect(() => {
+    const show = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
+      (e) => {
+        setKeyboardHeight(e.endCoordinates.height);
+        // Keep the chat pinned to bottom when keyboard opens
+        if (isAtBottomRef.current) {
+          setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
+        }
+      }
+    );
+    const hide = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
+      () => setKeyboardHeight(0)
+    );
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+  const router = useRouter();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
   const palette = usePalette();
 
-  // Track whether messages were successfully loaded so we never accidentally
-  // delete a thread whose messages just failed to fetch.
-  const messagesLoaded = useRef(false);
-
   useEffect(() => {
     if (!id) return;
     actions.setActiveThread(id);
-    actions.loadMessages(id)
-      .then(() => { messagesLoaded.current = true; })
-      .catch(() => {});
-    actions.loadTerminal(id).catch(() => {});
+    actions.loadMessages(id).catch(() => {});
     actions.openStream(id);
     return () => actions.closeStream(id);
   }, [id, actions]);
@@ -97,7 +146,7 @@ export default function ThreadScreen() {
         actions.refreshThread(id).catch(() => {});
       }
       return () => {
-        if (!id || !messagesLoaded.current) return;
+        if (!id) return;
         const currentMessages = useGatewayStore.getState().messages[id] ?? [];
         if (currentMessages.length === 0) {
           actions.deleteThread(id).catch(() => {});
@@ -122,10 +171,76 @@ export default function ThreadScreen() {
     }
   }, [id, thread, actions]);
 
+  // ── Auto-scroll + "scroll to bottom" FAB ─────────────────────────
+  //
+  // Design: follow iMessage/WhatsApp conventions.
+  //  - By default, pinned to bottom. New content auto-scrolls.
+  //  - When the user drags up, we un-pin and show a simple "↓" FAB.
+  //  - When the user scrolls back to the bottom (or taps the FAB), re-pin.
+  //  - No "+N unread" counter — it's confusing for streaming AI where
+  //    content grows continuously in a single message.
+
+  const isAtBottomRef = useRef(true);
+  const userDraggingRef = useRef(false);
+  const [showGoToLatest, setShowGoToLatest] = useState(false);
+  // Suppress FAB after programmatic scroll-to-end, cleared on next drag.
+  const suppressFabRef = useRef(false);
+  const lastScrollYRef = useRef(0);
+  const [headerVisible, setHeaderVisible] = useState(true);
+
+  const handleScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
+      const distanceFromBottom =
+        contentSize.height - (contentOffset.y + layoutMeasurement.height);
+      const atBottom = distanceFromBottom < 80;
+
+      if (suppressFabRef.current) {
+        if (showGoToLatest) setShowGoToLatest(false);
+        lastScrollYRef.current = contentOffset.y;
+        return;
+      }
+
+      // Non-dragging scroll events come from programmatic scrollToEnd or
+      // content growth. Only allow re-pinning, never un-pinning — prevents
+      // the content-grows-faster-than-scroll race from showing the FAB.
+      if (!userDraggingRef.current) {
+        if (atBottom) {
+          isAtBottomRef.current = true;
+          if (showGoToLatest) setShowGoToLatest(false);
+        }
+        lastScrollYRef.current = contentOffset.y;
+        return;
+      }
+
+      // User is actively dragging — allow both pin and un-pin.
+      isAtBottomRef.current = atBottom;
+      if (atBottom) {
+        if (showGoToLatest) setShowGoToLatest(false);
+      } else {
+        if (!showGoToLatest) setShowGoToLatest(true);
+      }
+      lastScrollYRef.current = contentOffset.y;
+    },
+    [showGoToLatest]
+  );
+
+  // Auto-scroll when new messages arrive (new message count changes).
   useEffect(() => {
-    // Scroll when a new message arrives or claw starts running (ThinkingIndicator appears)
-    listRef.current?.scrollToEnd({ animated: true });
+    if (isAtBottomRef.current) {
+      requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+    }
   }, [messages.length]);
+
+  const jumpToLatest = useCallback(() => {
+    suppressFabRef.current = true;
+    setShowGoToLatest(false);
+    isAtBottomRef.current = true;
+    listRef.current?.scrollToEnd({ animated: true });
+    setTimeout(() => {
+      listRef.current?.scrollToEnd({ animated: false });
+    }, 400);
+  }, []);
 
   const handleInputChange = (text: string) => {
     setInput(text);
@@ -134,29 +249,41 @@ export default function ThreadScreen() {
 
   const threadStatus = thread?.status ?? "idle";
 
-  const sendNow = useCallback(async (msg: string) => {
-    if (!id || !msg.trim()) return;
-    setSending(true);
-    try {
-      await actions.sendMessage(id, msg.trim());
-    } catch {
-      // errors handled in store
-    } finally {
-      setSending(false);
-    }
-  }, [id, actions]);
+  const sendNow = useCallback(
+    async (msg: string, attachments: Attachment[] = []) => {
+      if (!id) return;
+      if (!msg.trim() && attachments.length === 0) return;
+      setSending(true);
+      try {
+        await actions.sendMessage(id, msg.trim(), attachments);
+      } catch {
+        // errors handled in store
+      } finally {
+        setSending(false);
+      }
+    },
+    [id, actions]
+  );
 
   const send = async () => {
-    if (!id || !input.trim()) return;
+    if (!id) return;
     const msg = input.trim();
+    if (!msg && pendingAttachments.length === 0) return;
+    const attachmentsSnapshot = pendingAttachments;
     setInput("");
     setSlashPickerVisible(false);
-    // If AI is busy, park the message in the queue instead of sending
+    setPendingAttachments([]);
+    // If AI is busy, park the message in the queue instead of sending.
+    // (Attachments fire immediately even when queued — they're already
+    // uploaded and referenced by path, so sendNow can batch them with
+    // the text once the AI is idle.)
     if (threadStatus === "running" || threadStatus === "waiting") {
       setQueuedMessage(msg);
+      // NOTE: queued-message auto-send currently doesn't carry
+      // attachments — those land in this run. Good enough for now.
       return;
     }
-    await sendNow(msg);
+    await sendNow(msg, attachmentsSnapshot);
   };
 
   // Auto-send queued message when the AI becomes idle
@@ -192,128 +319,143 @@ export default function ThreadScreen() {
     setTimeout(() => setCopiedConvo(false), 2000);
   }, [messages]);
 
-  const headerRight = useMemo(
-    () => (
-      <View style={{ flexDirection: "row", gap: 8 }}>
-        {threadStatus === "running" && (
-          <TouchableBounce sensory onPress={onStop}>
-            <View
-              style={{
-                width: 32,
-                height: 32,
-                justifyContent: "center",
-                alignItems: "center",
-                backgroundColor: palette.danger,
-                borderRadius: BORDER_RADIUS.full,
-              }}
-            >
-              <IconSymbol name="stop.fill" color="#fff" size={12} />
-            </View>
-          </TouchableBounce>
-        )}
-        <TouchableBounce
-          sensory
-          onPress={() => {
-            actions.loadTerminal(id!).catch(() => {});
-            terminalRef.current?.present();
-          }}
-        >
-          <View
-            style={{
-              width: 32,
-              height: 32,
-              justifyContent: "center",
-              alignItems: "center",
-              backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.05)",
-              borderRadius: BORDER_RADIUS.full,
-            }}
-          >
-            <IconSymbol name="terminal" color={palette.text} size={14} />
-          </View>
-        </TouchableBounce>
-        <TouchableBounce
-          sensory
-          disabled={!messages.length}
-          onPress={copyConversation}
-          style={{ opacity: messages.length ? 1 : 0.3 }}
-        >
-          <View
-            style={{
-              width: 32,
-              height: 32,
-              justifyContent: "center",
-              alignItems: "center",
-              backgroundColor: copiedConvo
-                ? palette.success
-                : isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.05)",
-              borderRadius: BORDER_RADIUS.full,
-            }}
-          >
-            <IconSymbol
-              name={copiedConvo ? "checkmark" : "doc.on.doc"}
-              color={copiedConvo ? "#fff" : palette.text}
-              size={14}
-            />
-          </View>
-        </TouchableBounce>
-      </View>
-    ),
-    [threadStatus, id, actions, onStop, messages.length, copiedConvo, isDark]
+  // ── Attachment pickers ────────────────────────────────────────
+  // All three paths funnel through the gateway store's
+  // `uploadAttachment` action so the backend saves the file into
+  // `<workDir>/.uploads/`, classifies it, and returns the metadata
+  // we stash in `pendingAttachments` until the user taps Send.
+
+  const uploadPicked = useCallback(
+    async (file: {
+      uri: string;
+      name: string;
+      mimeType: string;
+      kind: "image" | "file";
+    }) => {
+      if (!id) return;
+      const previewId = `up-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      // Push an instant preview so the user sees the image land in
+      // the composer immediately. Removed once the upload resolves
+      // (success → replaced by real attachment; failure → just gone).
+      setUploadingPreviews((prev) => [
+        ...prev,
+        { id: previewId, localUri: file.uri, name: file.name, kind: file.kind },
+      ]);
+      try {
+        const attachment = await actions.uploadAttachment(id, file);
+        setPendingAttachments((prev) => [...prev, attachment]);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        Alert.alert("Upload failed", message);
+      } finally {
+        setUploadingPreviews((prev) => prev.filter((p) => p.id !== previewId));
+      }
+    },
+    [id, actions]
   );
 
-  // Imperatively update the navigator header so it reacts to settings changes
-  // (zustand store updates don't always trigger a Stack.Screen options re-read).
-  useEffect(() => {
-    const queue = (settings.modelQueue ?? []).filter((m) => m.enabled);
-    const active = queue[0] ?? null;
+  const pickFromLibrary = useCallback(async () => {
+    setAttachmentMenuOpen(false);
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert("Permission required", "Enable photo library access in Settings.");
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        quality: 0.85,
+        allowsMultipleSelection: false,
+      });
+      if (result.canceled || !result.assets?.length) return;
+      const asset = result.assets[0];
+      const ext = (asset.uri.split(".").pop() ?? "jpg").toLowerCase();
+      const name = asset.fileName ?? `photo-${Date.now()}.${ext}`;
+      const mimeType = asset.mimeType ?? "image/jpeg";
+      await uploadPicked({ uri: asset.uri, name, mimeType, kind: "image" });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      Alert.alert("Photo picker failed", message);
+    }
+  }, [uploadPicked]);
 
-    navigation.setOptions({
-      headerTitle: () => {
-        if (!active) {
-          return (
-            <Text style={{ color: palette.text, fontSize: 16, fontWeight: "600" }} numberOfLines={1}>
-              {thread?.title ?? "Chat"}
-            </Text>
-          );
-        }
-        const dotColor = PROVIDER_COLOR[active.provider] ?? "#6B7280";
-        const shortName = active.name.includes("/")
-          ? active.name.split("/").pop()!
-          : active.name;
-        return (
-          <TouchableBounce sensory onPress={() => setModelPickerOpen((v) => !v)}>
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 6,
-                paddingHorizontal: 10,
-                paddingVertical: 5,
-                backgroundColor: isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.05)",
-                borderRadius: BORDER_RADIUS.full,
-                borderWidth: 1,
-                borderColor: isDark ? "rgba(255,255,255,0.10)" : "rgba(0,0,0,0.08)",
-              }}
-            >
-              <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: dotColor }} />
-              <Text
-                style={{ color: palette.text, fontSize: 13, fontWeight: "600", maxWidth: 180 }}
-                numberOfLines={1}
-              >
-                {shortName}
-              </Text>
-              <IconSymbol
-                name={modelPickerOpen ? "chevron.up" : "chevron.down"}
-                size={9}
-                color={isDark ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.35)"}
-              />
-            </View>
-          </TouchableBounce>
-        );
-      },
-      headerRight: () => headerRight,
-    });
-  }, [settings.modelQueue, thread?.title, modelPickerOpen, isDark, headerRight]);
+  const pickFromCamera = useCallback(async () => {
+    setAttachmentMenuOpen(false);
+    try {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert("Permission required", "Enable camera access in Settings.");
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ["images"],
+        quality: 0.85,
+      });
+      if (result.canceled || !result.assets?.length) return;
+      const asset = result.assets[0];
+      const name = asset.fileName ?? `camera-${Date.now()}.jpg`;
+      const mimeType = asset.mimeType ?? "image/jpeg";
+      await uploadPicked({ uri: asset.uri, name, mimeType, kind: "image" });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      Alert.alert("Camera failed", message);
+    }
+  }, [uploadPicked]);
+
+  const pickDocument = useCallback(async () => {
+    setAttachmentMenuOpen(false);
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        multiple: false,
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled || !result.assets?.length) return;
+      const asset = result.assets[0];
+      const name = asset.name ?? `file-${Date.now()}`;
+      const mimeType = asset.mimeType ?? "application/octet-stream";
+      const isImage = (mimeType ?? "").startsWith("image/");
+      await uploadPicked({
+        uri: asset.uri,
+        name,
+        mimeType,
+        kind: isImage ? "image" : "file",
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      Alert.alert("File picker failed", message);
+    }
+  }, [uploadPicked]);
+
+  const removeAttachment = useCallback((index: number) => {
+    setPendingAttachments((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  // Animate the custom top bar visibility via a translateY transform
+  // (native driver) AND the content wrapper's paddingTop in parallel
+  // (JS driver — layout props can't use the native driver). Running
+  // them together means the list reclaims the vacated space instead
+  // of leaving a gap where the bar used to be.
+  const headerAnim = useRef(new Animated.Value(0)).current;
+  const padAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(headerAnim, {
+        toValue: headerVisible ? 0 : 1,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+      Animated.timing(padAnim, {
+        toValue: headerVisible ? 0 : 1,
+        duration: 200,
+        useNativeDriver: false,
+      }),
+    ]).start();
+  }, [headerVisible, headerAnim, padAnim]);
+
+  const contentPaddingTop = padAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [top + TOP_BAR_HEIGHT, top],
+  });
 
   const liveThinking = useMemo(() => {
     const lastMsg = messages[messages.length - 1];
@@ -349,10 +491,16 @@ export default function ThreadScreen() {
       phaseActive ||
       threadStatus === "waiting" ||
       (threadStatus === "running" && (!lastMsg || lastMsg.role === "user"));
+    // Hide tool badges while the model is actively streaming response
+    // text — no tool is currently running, and the badges for the tools
+    // that produced this response are already attached to their own
+    // bubble above. Showing them next to "responding…" is visually stale.
+    const badgesForIndicator =
+      runPhase === "responding" ? EMPTY_STEPS : liveCycleSteps;
     return needsIndicator ? (
       <ThinkingIndicator
         status={threadStatus}
-        toolSteps={liveCycleSteps}
+        toolSteps={badgesForIndicator}
         permissionRequests={permissionReqs}
         onApprove={(permId) => actions.respondToPermission(id ?? "", permId, true)}
         onDeny={(permId) => actions.respondToPermission(id ?? "", permId, false)}
@@ -366,7 +514,42 @@ export default function ThreadScreen() {
 
   const listFooterComponent = useCallback(() => listFooterElem, [listFooterElem]);
 
+  // While the thread is loading (e.g. after app resumes from background
+  // and the Zustand store is briefly empty), show a loading screen with
+  // the Claude sprite. Once refreshThread / loadThreads resolves, if the
+  // thread truly doesn't exist, navigate to the chat list.
+  const [threadCheckDone, setThreadCheckDone] = useState(false);
+  useEffect(() => {
+    if (thread) {
+      setThreadCheckDone(false);
+      return;
+    }
+    if (!id) return;
+    let cancelled = false;
+    actions
+      .loadThreads()
+      .then(() => {
+        if (cancelled) return;
+        const found = useGatewayStore
+          .getState()
+          .threads.some((t) => t.id === id);
+        if (!found) {
+          setThreadCheckDone(true);
+          if (router.canGoBack()) router.back();
+          else router.replace("/");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setThreadCheckDone(true);
+          router.replace("/");
+        }
+      });
+    return () => { cancelled = true; };
+  }, [thread, id, actions, router]);
+
   if (!thread) {
+    if (threadCheckDone) return null;
     return (
       <View
         style={{
@@ -374,48 +557,172 @@ export default function ThreadScreen() {
           alignItems: "center",
           justifyContent: "center",
           backgroundColor: palette.bg,
+          gap: 16,
         }}
       >
-        <Text style={{ color: palette.text, fontSize: 16 }}>Thread not found</Text>
+        <ThinkingSprite size={48} intervalMs={200} />
+        <Text style={{ color: palette.textMuted, fontSize: 13 }}>
+          Loading...
+        </Text>
       </View>
     );
   }
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: palette.bg }}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={80}
-    >
-      <Stack.Screen />
-      <View
-        style={{
-          flex: 1,
-          paddingBottom: bottom,
+    <View style={{ flex: 1 }}>
+      <Stack.Screen
+        options={{
+          headerTitle: () => (
+            <HeaderTitle
+              modelQueue={settings.modelQueue ?? []}
+              onToggleModelPicker={() => _openModelPicker?.()}
+              workDir={thread.workDir}
+              threadTitle={thread.title ?? "Chat"}
+              palette={palette}
+            />
+          ),
+          headerRight: () => (
+            <TouchableBounce sensory onPress={copyConversation} disabled={messages.length === 0}>
+              <View style={{ width: 34, height: 34, alignItems: "center", justifyContent: "center", opacity: messages.length > 0 ? 1 : 0.3 }}>
+                <IconSymbol
+                  name={copiedConvo ? "checkmark" : "doc.on.doc"}
+                  color={copiedConvo ? palette.success : palette.textMuted}
+                  size={16}
+                />
+              </View>
+            </TouchableBounce>
+          ),
+          headerBackVisible: true,
+          headerTransparent: true,
+          headerBlurEffect: undefined,
+          headerShadowVisible: false,
+          headerLargeTitleShadowVisible: false,
+          headerStyle: { backgroundColor: "transparent" },
         }}
-      >
-        {/* Model picker */}
-        <ModelPickerBar
-          open={modelPickerOpen}
-          onToggle={() => setModelPickerOpen((v) => !v)}
-          isDark={isDark}
-        />
+      />
+      {/* Model picker — must be outside MaskedView so its Modal renders correctly */}
+      <ModelPickerBar
+        onChooseDirectory={() => {
+          setShowDirBrowser(true);
+        }}
+        canChangeDirectory={messages.length === 0}
+        currentWorkDir={thread.workDir}
+        isDark={isDark}
+      />
 
+      <MaskedView
+        style={{ flex: 1, backgroundColor: palette.bg }}
+        maskElement={
+          <LinearGradient
+            colors={["#000", "#000", "rgba(0,0,0,0.25)"]}
+            locations={[0, 0.85, 1]}
+            style={{ flex: 1 }}
+          />
+        }
+      >
         {/* Messages */}
         <FlatList
           ref={listRef}
           data={messages}
           keyExtractor={(item) => item.id}
+          contentInsetAdjustmentBehavior="never"
+          automaticallyAdjustsScrollIndicatorInsets={false}
+          scrollIndicatorInsets={{ top: top + 44 }}
+          keyboardDismissMode="interactive"
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={{
-            padding: SPACING.lg,
-            gap: SPACING.sm,
-            flexGrow: 1,
+            paddingHorizontal: 20,
+            // Manual top padding for the transparent header (safe area + nav bar).
+            paddingTop: top + 52,
+            // Extra bottom space for the floating input pill + safe area.
+            // When the keyboard is open, add its height so content isn't
+            // hidden behind it.
+            paddingBottom: keyboardUp
+              ? keyboardHeight + 80
+              : 100 + bottom,
+            gap: 18,
           }}
-          onScrollBeginDrag={() => setModelPickerOpen(false)}
-          renderItem={({ item }) => item.role === "system"
+          onScroll={handleScroll}
+          scrollEventThrottle={32}
+          onContentSizeChange={() => {
+            // Stay pinned to bottom as content grows (streaming).
+            if (isAtBottomRef.current && !userDraggingRef.current) {
+              listRef.current?.scrollToEnd({ animated: false });
+            }
+          }}
+          onScrollBeginDrag={() => {
+            suppressFabRef.current = false;
+            userDraggingRef.current = true;
+          }}
+          onScrollEndDrag={(e) => {
+            userDraggingRef.current = false;
+            const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
+            const dist = contentSize.height - (contentOffset.y + layoutMeasurement.height);
+            const atBottom = dist < 80;
+            isAtBottomRef.current = atBottom;
+            if (atBottom) {
+              if (showGoToLatest) setShowGoToLatest(false);
+            } else {
+              if (!showGoToLatest) setShowGoToLatest(true);
+            }
+          }}
+          onMomentumScrollEnd={(e) => {
+            userDraggingRef.current = false;
+            const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
+            const dist = contentSize.height - (contentOffset.y + layoutMeasurement.height);
+            const atBottom = dist < 80;
+            isAtBottomRef.current = atBottom;
+            if (atBottom) {
+              if (showGoToLatest) setShowGoToLatest(false);
+            } else {
+              if (!showGoToLatest) setShowGoToLatest(true);
+            }
+          }}
+          renderItem={({ item, index }) => item.role === "system"
             ? <SystemLine message={item} isDark={isDark} />
-            : <MessageBubble message={item} threadId={id ?? ""} />
+            : <MessageBubble
+                message={item}
+                threadId={id ?? ""}
+                onOpenPreview={(uri) => setPreviewUri(uri)}
+                onTurnConclusionExpand={() => {
+                  // Suppress the FAB while the layout shift settles —
+                  // the expand grows content which fires scroll events
+                  // that would otherwise show "Go to latest".
+                  suppressFabRef.current = true;
+                  setShowGoToLatest(false);
+                  requestAnimationFrame(() => {
+                    try {
+                      listRef.current?.scrollToIndex({
+                        index,
+                        animated: true,
+                        viewPosition: 1,
+                      });
+                    } catch {
+                      listRef.current?.scrollToEnd({ animated: true });
+                    }
+                    // Release suppression after the scroll animation
+                    setTimeout(() => { suppressFabRef.current = false; }, 500);
+                  });
+                }}
+              />
           }
+          onScrollToIndexFailed={({ index: i }) => {
+            // scrollToIndex can fail when the target row isn't in the
+            // rendered window yet. Fall back to scrolling toward the
+            // end which at least gets the user moving in the right
+            // direction; FlatList will then resolve the target.
+            setTimeout(() => {
+              try {
+                listRef.current?.scrollToIndex({
+                  index: i,
+                  animated: true,
+                  viewPosition: 1,
+                });
+              } catch {
+                listRef.current?.scrollToEnd({ animated: true });
+              }
+            }, 120);
+          }}
           ListFooterComponent={listFooterComponent}
           ListEmptyComponent={() => (
             <View
@@ -476,79 +783,155 @@ export default function ThreadScreen() {
           />
         )}
 
-        {/* Input bar - clean, minimal */}
-        <View
-          style={{
-            paddingHorizontal: SPACING.lg,
-            paddingTop: SPACING.sm,
-            paddingBottom: SPACING.sm,
-            gap: SPACING.sm,
-          }}
-        >
-          {/* Directory badge — tappable on turn 0, read-only otherwise */}
-          {thread.workDir ? (
-            <TouchableBounce
-              sensory
-              disabled={messages.length > 0}
-              onPress={() => setShowDirBrowser(true)}
-            >
-              <View
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  alignSelf: "flex-start",
-                  gap: 5,
-                  paddingHorizontal: 10,
-                  paddingVertical: 5,
-                  backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
-                  borderRadius: BORDER_RADIUS.full,
-                  borderWidth: 1,
-                  borderColor: isDark ? "rgba(255,255,255,0.09)" : "rgba(0,0,0,0.07)",
-                }}
-              >
-                <Text style={{ fontSize: 11 }}>📁</Text>
-                <Text
-                  style={{
-                    color: palette.textMuted,
-                    fontSize: 12,
-                    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
-                    maxWidth: 220,
-                  }}
-                  numberOfLines={1}
-                >
-                  {thread.workDir.split("/").filter(Boolean).pop() ?? thread.workDir}
-                </Text>
-                {messages.length === 0 && (
-                  <IconSymbol
-                    name="chevron.down"
-                    size={10}
-                    color={palette.textMuted as any}
-                  />
-                )}
-              </View>
-            </TouchableBounce>
-          ) : null}
+      </MaskedView>
 
+      {/* ── Input — absolutely positioned, keyboard-aware ─── */}
+      <View
+        pointerEvents="box-none"
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: keyboardUp ? keyboardHeight + SPACING.sm : SPACING.sm + bottom,
+          paddingHorizontal: SPACING.lg,
+          gap: SPACING.sm,
+          zIndex: 30,
+        }}
+      >
+        {/* Pending-attachment row */}
+        {(pendingAttachments.length > 0 || uploadingPreviews.length > 0) && (
           <View
             style={{
               flexDirection: "row",
-              alignItems: "flex-end",
-              gap: SPACING.sm,
-              backgroundColor: isDark ? "#1c1c1e" : "#fff",
-              borderRadius: 22,
-              borderWidth: 1,
-              borderColor: isDark ? "rgba(255,255,255,0.08)" : palette.divider,
-              paddingHorizontal: SPACING.md,
-              paddingVertical: SPACING.xs,
-              ...SHADOW.sm,
+              flexWrap: "wrap",
+              gap: 10,
+              paddingHorizontal: 4,
+              paddingBottom: 4,
             }}
           >
+            {uploadingPreviews.map((p) => (
+              <AttachmentThumb
+                key={p.id}
+                kind={p.kind}
+                localUri={p.kind === "image" ? p.localUri : undefined}
+                name={p.name}
+                palette={palette}
+                loading
+              />
+            ))}
+            {pendingAttachments.map((att, i) => (
+              <AttachmentThumb
+                key={`${att.path}-${i}`}
+                kind={att.kind}
+                localUri={att.localUri}
+                name={att.fileName}
+                palette={palette}
+                onPress={
+                  att.kind === "image" && att.localUri
+                    ? () => setPreviewUri(att.localUri!)
+                    : undefined
+                }
+                onRemove={() => removeAttachment(i)}
+              />
+            ))}
+          </View>
+        )}
+
+        {/* Liquid glass pill — true iOS 26 glass with specular highlights */}
+        <GlassView
+          glassEffectStyle="regular"
+          isInteractive
+          style={{
+            flexDirection: "row",
+            alignItems: "flex-end",
+            gap: SPACING.sm,
+            borderRadius: 22,
+            overflow: "hidden",
+            paddingHorizontal: SPACING.md,
+            paddingVertical: SPACING.xs,
+          }}
+        >
+          {/* Attachment + button */}
+          <View style={{ position: "relative" }}>
+            <TouchableBounce
+              sensory
+              onPress={() => setAttachmentMenuOpen((v) => !v)}
+              style={{ marginBottom: SPACING.xs }}
+            >
+              <View
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 16,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <IconSymbol
+                  name={attachmentMenuOpen ? "xmark" : "plus"}
+                  size={20}
+                  color={palette.textMuted}
+                />
+              </View>
+            </TouchableBounce>
+              {attachmentMenuOpen && (
+                <View
+                  style={{
+                    position: "absolute",
+                    bottom: 44,
+                    left: 0,
+                    backgroundColor: palette.surface,
+                    borderRadius: 14,
+                    borderWidth: 1,
+                    borderColor: palette.divider,
+                    paddingVertical: 6,
+                    minWidth: 180,
+                    zIndex: 40,
+                  }}
+                >
+                  <AttachmentMenuItem
+                    icon="photo"
+                    label="Photo library"
+                    onPress={pickFromLibrary}
+                    palette={palette}
+                    disabled={!supportsImage}
+                    hint={
+                      !supportsImage && activeModel
+                        ? `${activeModel.name} has no vision`
+                        : undefined
+                    }
+                  />
+                  <View style={{ height: 1, backgroundColor: palette.divider, marginLeft: 44 }} />
+                  <AttachmentMenuItem
+                    icon="camera"
+                    label="Camera"
+                    onPress={pickFromCamera}
+                    palette={palette}
+                    disabled={!supportsImage}
+                    hint={
+                      !supportsImage && activeModel
+                        ? `${activeModel.name} has no vision`
+                        : undefined
+                    }
+                  />
+                  <View style={{ height: 1, backgroundColor: palette.divider, marginLeft: 44 }} />
+                  <AttachmentMenuItem
+                    icon="doc"
+                    label="File"
+                    onPress={pickDocument}
+                    palette={palette}
+                  />
+                </View>
+              )}
+            </View>
+
             <TextInput
               placeholder="Message…"
               placeholderTextColor={palette.textSoft}
               value={input}
               onChangeText={handleInputChange}
               multiline
+              keyboardAppearance={isDark ? "dark" : "light"}
               style={{
                 minHeight: 40,
                 maxHeight: 120,
@@ -561,10 +944,11 @@ export default function ThreadScreen() {
             />
             <TouchableBounce
               sensory
-              disabled={!input.trim()}
+              disabled={!input.trim() && pendingAttachments.length === 0}
               onPress={send}
               style={{
-                opacity: !input.trim() ? 0.3 : 1,
+                opacity:
+                  input.trim() || pendingAttachments.length > 0 ? 1 : 0.3,
                 marginBottom: SPACING.xs,
               }}
             >
@@ -573,7 +957,12 @@ export default function ThreadScreen() {
                   width: 32,
                   height: 32,
                   borderRadius: 16,
-                  backgroundColor: input.trim() ? palette.text : (isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.08)"),
+                  backgroundColor:
+                    input.trim() || pendingAttachments.length > 0
+                      ? palette.text
+                      : isDark
+                      ? "rgba(255,255,255,0.12)"
+                      : "rgba(0,0,0,0.06)",
                   justifyContent: "center",
                   alignItems: "center",
                 }}
@@ -581,17 +970,21 @@ export default function ThreadScreen() {
                 <IconSymbol
                   name="arrow.up"
                   size={14}
-                  color={input.trim() ? (isDark ? "#000" : "#fff") : palette.textSoft}
+                  color={
+                    input.trim() || pendingAttachments.length > 0
+                      ? palette.bg
+                      : palette.textSoft
+                  }
                 />
               </View>
             </TouchableBounce>
-          </View>
-        </View>
+          </GlassView>
       </View>
 
       {/* Directory browser — only available on turn 0 */}
       <DirectoryBrowser
         visible={showDirBrowser}
+        initialPath={thread?.workDir || settings.lastWorkDir}
         onSelect={(path) => {
           setShowDirBrowser(false);
           if (id) actions.updateThreadWorkDir(id, path).catch(() => {});
@@ -599,186 +992,327 @@ export default function ThreadScreen() {
         onCancel={() => setShowDirBrowser(false)}
       />
 
-      <BottomSheetModal
-        ref={terminalRef}
-        snapPoints={["40%", "70%"]}
-        backgroundStyle={{
-          backgroundColor: palette.surface,
-        }}
-        handleIndicatorStyle={{ backgroundColor: palette.textSoft }}
-      >
-        <View style={{ flex: 1, padding: SPACING.md, gap: SPACING.md }}>
-          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-            <Text style={{ color: palette.text, fontWeight: "600", fontSize: 15 }}>
-              Terminal
-            </Text>
-            <TouchableBounce
-              sensory
-              onPress={() => terminalRef.current?.dismiss()}
-            >
-              <View style={{
-                width: 28,
-                height: 28,
-                borderRadius: 14,
-                backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.05)",
-                justifyContent: "center",
-                alignItems: "center",
-              }}>
-                <IconSymbol name="xmark" color={palette.textMuted} size={12} />
-              </View>
-            </TouchableBounce>
-          </View>
-          <View
+      {/* Scroll-to-bottom FAB — simple down arrow like iMessage. */}
+      {showGoToLatest && (
+        <View
+          pointerEvents="box-none"
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            bottom: keyboardUp ? keyboardHeight + 64 : 64 + bottom,
+            alignItems: "center",
+            zIndex: 40,
+          }}
+        >
+          <GlassButton
+            onPress={jumpToLatest}
             style={{
-              flex: 1,
-              backgroundColor: "#0a0a0a",
-              borderRadius: BORDER_RADIUS.lg,
-              padding: SPACING.md,
-              gap: SPACING.xs,
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              alignItems: "center",
+              justifyContent: "center",
             }}
           >
-            <FlatList
-              data={terminalLines}
-              keyExtractor={(_, index) => `${index}`}
-              renderItem={({ item }) => (
-                <Text
-                  style={{
-                    color: "#a8e6a8",
-                    fontFamily: Platform.select({
-                      ios: "Menlo",
-                      android: "monospace",
-                      default: "monospace",
-                    }),
-                    fontSize: 12,
-                    lineHeight: 18,
-                  }}
-                >
-                  {item}
-                </Text>
-              )}
-            />
-          </View>
-          <View style={{ flexDirection: "row", gap: SPACING.sm, alignItems: "center" }}>
-            <TextInput
-              value={command}
-              onChangeText={setCommand}
-              placeholder="Run a command"
-              placeholderTextColor={palette.textSoft}
-              style={{
-                flex: 1,
-                backgroundColor: isDark ? "#1c1c1e" : palette.surface,
-                borderRadius: BORDER_RADIUS.md,
-                paddingHorizontal: SPACING.md,
-                paddingVertical: SPACING.sm,
-                borderWidth: 1,
-                borderColor: isDark ? "rgba(255,255,255,0.06)" : palette.divider,
-                color: palette.text,
-                fontSize: 14,
-              }}
-            />
-            <TouchableBounce
-              sensory
-              disabled={!command.trim()}
-              onPress={() => {
-                if (!id || !command.trim()) return;
-                actions.sendTerminalCommand(id, command.trim());
-                setCommand("");
-              }}
-            >
-              <View
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: 18,
-                  backgroundColor: command.trim() ? palette.text : (isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.05)"),
-                  justifyContent: "center",
-                  alignItems: "center",
-                  opacity: command.trim() ? 1 : 0.5,
-                }}
-              >
-                <IconSymbol name="arrow.up" color={command.trim() ? (isDark ? "#000" : "#fff") : palette.textSoft} size={14} />
-              </View>
-            </TouchableBounce>
-          </View>
+            <IconSymbol name="chevron.down" color={palette.text} size={14} />
+          </GlassButton>
         </View>
-      </BottomSheetModal>
-    </KeyboardAvoidingView>
+      )}
+
+      {/* Full-screen image preview — opens when the user taps a
+          pending-attachment thumbnail or an inline bubble image. */}
+      <Modal
+        visible={previewUri !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPreviewUri(null)}
+      >
+        <Pressable
+          onPress={() => setPreviewUri(null)}
+          style={{
+            flex: 1,
+            backgroundColor: "rgba(0,0,0,0.9)",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+          }}
+        >
+          {previewUri && (
+            <Image
+              source={{ uri: previewUri }}
+              style={{ width: "100%", height: "85%" }}
+              resizeMode="contain"
+            />
+          )}
+          <View
+            style={{
+              position: "absolute",
+              top: top + 12,
+              right: 20,
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              backgroundColor: "rgba(255,255,255,0.15)",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <IconSymbol name="xmark" size={16} color="#fff" />
+          </View>
+        </Pressable>
+      </Modal>
+
+    </View>
   );
 }
 
 const EMPTY_BUBBLE_STEPS: ToolStep[] = [];
+const EMPTY_TURN_LOG: string[] = [];
+
+function formatTurnDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "0s";
+  const totalSec = Math.round(ms / 1000);
+  if (totalSec < 60) return `${totalSec}s`;
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  if (m < 60) return s === 0 ? `${m}m` : `${m}m ${s}s`;
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return rm === 0 ? `${h}h` : `${h}h ${rm}m`;
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+  const h = hex.replace("#", "");
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function isErrorLine(line: string): boolean {
+  return (
+    /\berror\b/i.test(line) ||
+    /\bfailed\b/i.test(line) ||
+    /\b50[0-9]\b/.test(line)
+  );
+}
+
+function formatLogLine(line: string): string {
+  if (!line.startsWith("{")) return line;
+  try {
+    const obj = JSON.parse(line);
+    // API error payloads — extract the human message
+    if (obj.error && typeof obj.error === "string") {
+      // e.g. {"error":"api returned 502 ...","type":"error"}
+      const inner = obj.error;
+      // Try to pull the nested message out of the stringified JSON
+      const msgMatch = inner.match(/"message"\s*:\s*"([^"]+)"/);
+      if (msgMatch) return `Error: ${msgMatch[1]}`;
+      return `Error: ${inner.slice(0, 300)}`;
+    }
+    return line;
+  } catch {
+    return line;
+  }
+}
+
+function TurnConclusion({
+  durationMs,
+  log,
+  palette,
+  isDark,
+  onExpand,
+}: {
+  durationMs: number;
+  log: string[];
+  palette: Palette;
+  isDark: boolean;
+  onExpand?: (expanded: boolean) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const logScrollRef = useRef<ScrollView>(null);
+  const hasLog = log.length > 0;
+  const label = `Worked for ${formatTurnDuration(durationMs)}`;
+  const lineColor = isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.10)";
+  const textColor = isDark ? "rgba(255,255,255,0.45)" : "rgba(0,0,0,0.42)";
+
+  return (
+    <View style={{ width: "100%", gap: 4, marginTop: 2 }}>
+      <TouchableBounce
+        sensory
+        onPress={
+          hasLog
+            ? () => {
+                setExpanded((v) => {
+                  const next = !v;
+                  onExpand?.(next);
+                  return next;
+                });
+              }
+            : undefined
+        }
+      >
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 8,
+            paddingHorizontal: SPACING.sm,
+          }}
+        >
+          <View style={{ flex: 1, height: 1, backgroundColor: lineColor }} />
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 4,
+            }}
+          >
+            <Text
+              style={{
+                color: textColor,
+                fontSize: 11,
+                fontWeight: "500",
+                letterSpacing: 0.2,
+              }}
+            >
+              {label}
+            </Text>
+            {hasLog && (
+              <IconSymbol
+                name={expanded ? "chevron.up" : "chevron.down"}
+                size={9}
+                color={textColor}
+              />
+            )}
+          </View>
+          <View style={{ flex: 1, height: 1, backgroundColor: lineColor }} />
+        </View>
+      </TouchableBounce>
+      {expanded && hasLog && (
+        <View
+          style={{
+            marginHorizontal: SPACING.sm,
+            backgroundColor: palette.surfaceAlt,
+            borderRadius: BORDER_RADIUS.md,
+            borderWidth: 1,
+            borderColor: palette.divider,
+            paddingHorizontal: 12,
+            paddingVertical: 10,
+            maxHeight: 260,
+          }}
+        >
+          <ScrollView
+            ref={logScrollRef}
+            onContentSizeChange={() => {
+              logScrollRef.current?.scrollToEnd({ animated: false });
+            }}
+          >
+            {log.map((line, i) => (
+              <Text
+                key={i}
+                selectable
+                style={{
+                  color: isErrorLine(line)
+                    ? palette.danger
+                    : palette.text,
+                  fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+                  fontSize: 11,
+                  lineHeight: 16,
+                }}
+              >
+                {formatLogLine(line)}
+              </Text>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+    </View>
+  );
+}
 
 /** Theme-aware styles for react-native-markdown-display inside assistant bubbles */
-function useMarkdownStyles(isDark: boolean) {
+function useMarkdownStyles(palette: Palette) {
   return useMemo(() => {
-    const fg       = isDark ? "#ECEDEE" : "#1C1C1E";
-    const muted    = isDark ? "rgba(255,255,255,0.45)" : "rgba(0,0,0,0.4)";
-    const codeBg   = isDark ? "rgba(255,255,255,0.09)" : "rgba(0,0,0,0.055)";
-    const codeBorder = isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.1)";
-    const mono     = Platform.OS === "ios" ? "Menlo" : "monospace";
-    const base     = 15;
-    const lh       = 22;
+    const mono = Platform.OS === "ios" ? "Menlo" : "monospace";
+    const base = 15;
+    const lh   = 24;
     return {
-      body:      { color: fg, fontSize: base, lineHeight: lh },
-      paragraph: { color: fg, fontSize: base, lineHeight: lh, marginTop: 0, marginBottom: 5 },
-      heading1:  { color: fg, fontSize: 20, fontWeight: "700" as const, marginTop: 12, marginBottom: 6 },
-      heading2:  { color: fg, fontSize: 17, fontWeight: "700" as const, marginTop: 10, marginBottom: 4 },
-      heading3:  { color: fg, fontSize: 15, fontWeight: "600" as const, marginTop: 8, marginBottom: 2 },
-      strong:    { fontWeight: "700" as const },
+      body:      { color: palette.text, fontSize: base, lineHeight: lh },
+      paragraph: {
+        color: palette.text,
+        fontSize: base,
+        lineHeight: lh,
+        marginTop: 0,
+        // Comfortable paragraph rhythm per DESIGN_GUIDELINES.md ("let
+        // text breathe; don't pack rows tightly to save pixels").
+        marginBottom: 12,
+      },
+      heading1:  { color: palette.text, fontSize: 20, fontWeight: "700" as const, marginTop: 18, marginBottom: 8 },
+      heading2:  { color: palette.text, fontSize: 17, fontWeight: "700" as const, marginTop: 16, marginBottom: 6 },
+      heading3:  { color: palette.text, fontSize: 15, fontWeight: "600" as const, marginTop: 12, marginBottom: 4 },
+      strong:    { fontWeight: "700" as const, color: palette.text },
       em:        { fontStyle: "italic" as const },
       s:         { textDecorationLine: "line-through" as const },
-      link:      { color: "#0A84FF", textDecorationLine: "none" as const },
+      link:      { color: palette.accent, textDecorationLine: "underline" as const },
       blockquote: {
-        backgroundColor: codeBg,
-        borderLeftWidth: 3,
-        borderLeftColor: muted,
-        paddingLeft: 10,
-        paddingVertical: 4,
-        marginVertical: 6,
-        borderRadius: 4,
+        backgroundColor: palette.surfaceAlt,
+        borderLeftWidth: 2,
+        borderLeftColor: palette.textSoft,
+        paddingLeft: 12,
+        paddingVertical: 8,
+        marginVertical: 10,
+        borderRadius: 6,
       },
       code_inline: {
-        backgroundColor: codeBg,
+        backgroundColor: palette.surfaceAlt,
         fontFamily: mono,
         fontSize: 13,
         borderRadius: 4,
-        paddingHorizontal: 4,
+        paddingHorizontal: 5,
         paddingVertical: 1,
-        color: isDark ? "#E879F9" : "#7C3AED",
+        // Stay in the warm palette — no saturated purple. The surface-
+        // vs-bg tonal shift is enough to distinguish inline code.
+        color: palette.text,
       },
       fence: {
-        backgroundColor: codeBg,
+        backgroundColor: palette.surfaceAlt,
         fontFamily: mono,
         fontSize: 12.5,
         lineHeight: 19,
-        borderRadius: 8,
-        padding: 12,
-        marginVertical: 6,
+        borderRadius: 10,
+        padding: 14,
+        marginVertical: 10,
         borderWidth: 1,
-        borderColor: codeBorder,
-        color: fg,
+        borderColor: palette.divider,
+        color: palette.text,
       },
       code_block: {
-        backgroundColor: codeBg,
+        backgroundColor: palette.surfaceAlt,
         fontFamily: mono,
         fontSize: 12.5,
         lineHeight: 19,
-        borderRadius: 8,
-        padding: 12,
-        marginVertical: 6,
+        borderRadius: 10,
+        padding: 14,
+        marginVertical: 10,
         borderWidth: 1,
-        borderColor: codeBorder,
-        color: fg,
+        borderColor: palette.divider,
+        color: palette.text,
       },
-      hr:           { backgroundColor: codeBorder, height: 1, marginVertical: 12 },
-      bullet_list:  { marginVertical: 3 },
-      ordered_list: { marginVertical: 3 },
-      list_item:    { marginBottom: 3 },
-      bullet_list_icon: { color: muted, fontSize: 14, marginRight: 6, marginTop: 2 },
-      ordered_list_icon:{ color: muted, fontSize: 14, marginRight: 6, marginTop: 2 },
+      hr:           { backgroundColor: palette.divider, height: 1, marginVertical: 16 },
+      bullet_list:  { marginVertical: 6 },
+      ordered_list: { marginVertical: 6 },
+      list_item:    { marginBottom: 6 },
+      bullet_list_icon: { color: palette.textMuted, fontSize: 14, marginRight: 8, marginTop: 2 },
+      ordered_list_icon:{ color: palette.textMuted, fontSize: 14, marginRight: 8, marginTop: 2 },
     };
-  }, [isDark]);
+  }, [palette]);
 }
+
+// Markdown cleanup helpers live in a pure module so they can be
+// unit-tested with `node --test` (no React Native deps).
+// See utils/markdownCleanup.ts.
 
 function SystemLine({ message, isDark }: { message: Message; isDark: boolean }) {
   return (
@@ -819,7 +1353,17 @@ function SystemLine({ message, isDark }: { message: Message; isDark: boolean }) 
   );
 }
 
-function MessageBubble({ message, threadId }: { message: Message; threadId: string }) {
+function MessageBubble({
+  message,
+  threadId,
+  onOpenPreview,
+  onTurnConclusionExpand,
+}: {
+  message: Message;
+  threadId: string;
+  onOpenPreview?: (uri: string) => void;
+  onTurnConclusionExpand?: (messageId: string) => void;
+}) {
   const isUser = message.role === "user";
   const [copied, setCopied] = useState(false);
   const [stepsExpanded, setStepsExpanded] = useState(false);
@@ -827,8 +1371,8 @@ function MessageBubble({ message, threadId }: { message: Message; threadId: stri
   const [tappedBadgeId, setTappedBadgeId] = useState<string | null>(null);
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
-  const mdStyles = useMarkdownStyles(isDark);
   const palette = usePalette();
+  const mdStyles = useMarkdownStyles(palette);
 
   // Tool steps for THIS message — only populated for assistant messages after a run.
   // Separate selector + useMemo avoids creating new arrays on every store update.
@@ -1045,31 +1589,46 @@ function MessageBubble({ message, threadId }: { message: Message; threadId: stri
                 const meta = TOOL_META[step.tool] ?? TOOL_META.unknown;
                 const isErr = step.status === "error";
                 return (
-                  <View key={step.id} style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
-                    {isErr
-                      ? <IconSymbol name="xmark.circle.fill" size={12} color="#EF4444" />
-                      : <IconSymbol name="checkmark.circle.fill" size={12} color="#22C55E" />
-                    }
-                    <View
-                      style={{
-                        width: 18, height: 18, borderRadius: 4,
-                        backgroundColor: `${meta.color}20`,
-                        justifyContent: "center", alignItems: "center",
-                      }}
-                    >
-                      <IconSymbol name={meta.icon as any} size={10} color={meta.color} />
+                  <View key={step.id} style={{ gap: 2 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
+                      {isErr
+                        ? <IconSymbol name="xmark.circle.fill" size={12} color="#EF4444" />
+                        : <IconSymbol name="checkmark.circle.fill" size={12} color="#22C55E" />
+                      }
+                      <View
+                        style={{
+                          width: 18, height: 18, borderRadius: 4,
+                          backgroundColor: `${meta.color}20`,
+                          justifyContent: "center", alignItems: "center",
+                        }}
+                      >
+                        <IconSymbol name={meta.icon as any} size={10} color={meta.color} />
+                      </View>
+                      <Text
+                        style={{
+                          color: isDark ? "rgba(255,255,255,0.55)" : "rgba(0,0,0,0.5)",
+                          fontSize: 11.5,
+                          fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+                          flexShrink: 1,
+                        }}
+                        numberOfLines={1}
+                      >
+                        {step.label}
+                      </Text>
                     </View>
-                    <Text
-                      style={{
-                        color: isDark ? "rgba(255,255,255,0.55)" : "rgba(0,0,0,0.5)",
-                        fontSize: 11.5,
-                        fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
-                        flexShrink: 1,
-                      }}
-                      numberOfLines={1}
-                    >
-                      {step.label}
-                    </Text>
+                    {step.detail != null && (
+                      <Text
+                        style={{
+                          color: isDark ? "rgba(255,255,255,0.30)" : "rgba(0,0,0,0.28)",
+                          fontSize: 10,
+                          fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+                          marginLeft: 37,
+                        }}
+                        numberOfLines={2}
+                      >
+                        {step.detail}
+                      </Text>
+                    )}
                   </View>
                 );
               })}
@@ -1081,68 +1640,148 @@ function MessageBubble({ message, threadId }: { message: Message; threadId: stri
       {/* ── Message bubble ─────────────────────────────────────── */}
       <TouchableBounce sensory onPress={onCopy}>
         {message.error ? (
-          /* ── Error bubble ── */
+          /* ── Error bubble — muted, low-contrast, no shadow ── */
           <View
             style={{
-              width: "92%",
-              backgroundColor: isDark ? "rgba(239,68,68,0.10)" : "rgba(239,68,68,0.07)",
-              borderRadius: BORDER_RADIUS.lg,
-              borderWidth: 1,
-              borderColor: isDark ? "rgba(239,68,68,0.25)" : "rgba(239,68,68,0.20)",
-              paddingHorizontal: SPACING.md,
-              paddingVertical: SPACING.sm + 2,
-              ...SHADOW.sm,
+              width: "100%",
+              backgroundColor: palette.surfaceAlt,
+              borderRadius: 14,
+              borderLeftWidth: 2,
+              borderLeftColor: palette.danger,
+              paddingHorizontal: 16,
+              paddingVertical: 12,
             }}
           >
             <Text
               selectable
               style={{
-                color: isDark ? "#FCA5A5" : "#B91C1C",
+                color: palette.danger,
                 fontSize: TYPOGRAPHY.fontSizes.sm,
                 lineHeight: TYPOGRAPHY.lineHeights.md,
               }}
             >
-              {"⚠ "}{(message.content || "An error occurred — please try again.").slice(0, 500)}
+              {(message.content || "An error occurred — please try again.").slice(0, 500)}
             </Text>
           </View>
         ) : (
-          /* ── Normal bubble ── */
+          /* ── Normal bubble ──
+             Per DESIGN_GUIDELINES.md: the assistant response reads as
+             clean text on the background — no fill, no border, no
+             shadow. The user message is subtle and unobtrusive: a soft
+             surface-alt pill with palette.text, never painted in the
+             accent colour. */
           <View
             style={{
-              maxWidth: isUser ? "80%" : "92%",
-              backgroundColor: isUser
-                ? palette.accent
-                : isDark
-                  ? "#1c1c1e"
-                  : "#fff",
-              borderRadius: BORDER_RADIUS.xl,
-              borderBottomRightRadius: isUser ? SPACING.xs : BORDER_RADIUS.xl,
-              borderBottomLeftRadius: isUser ? BORDER_RADIUS.xl : SPACING.xs,
-              paddingHorizontal: SPACING.md,
-              paddingVertical: SPACING.sm + 2,
-              borderWidth: isUser ? 0 : 1,
-              borderColor: isDark ? "rgba(255,255,255,0.06)" : palette.divider,
-              ...(isUser ? SHADOW.md : SHADOW.sm),
+              maxWidth: isUser ? "82%" : "100%",
+              alignSelf: isUser ? "flex-end" : "flex-start",
+              gap: 6,
             }}
           >
-            {isUser ? (
-              <Text
+            {/* Inline attachment thumbnails for user messages. Images
+                use the stashed local URI we tucked onto the client
+                message at send time. */}
+            {isUser && message.attachments && message.attachments.length > 0 && (
+              <View
                 style={{
-                  color: "#fff",
-                  fontSize: TYPOGRAPHY.fontSizes.md,
-                  lineHeight: TYPOGRAPHY.lineHeights.md,
+                  flexDirection: "row",
+                  flexWrap: "wrap",
+                  gap: 6,
+                  alignSelf: "flex-end",
+                  justifyContent: "flex-end",
                 }}
               >
-                {message.content}
-              </Text>
-            ) : (
-              <Markdown style={mdStyles}>
-                {message.content}
-              </Markdown>
+                {message.attachments.map((att, i) =>
+                  att.kind === "image" && att.localUri ? (
+                    <Pressable
+                      key={`${att.path}-${i}`}
+                      onPress={() => onOpenPreview?.(att.localUri!)}
+                    >
+                      <Image
+                        source={{ uri: att.localUri }}
+                        style={{
+                          width: 72,
+                          height: 72,
+                          borderRadius: 10,
+                          backgroundColor: palette.surfaceAlt,
+                        }}
+                        resizeMode="cover"
+                      />
+                    </Pressable>
+                  ) : (
+                    <View
+                      key={`${att.path}-${i}`}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 8,
+                        paddingHorizontal: 12,
+                        paddingVertical: 10,
+                        backgroundColor: palette.surfaceAlt,
+                        borderRadius: 12,
+                        borderWidth: 1,
+                        borderColor: palette.divider,
+                        maxWidth: 240,
+                      }}
+                    >
+                      <IconSymbol name="doc" size={16} color={palette.textMuted} />
+                      <Text
+                        style={{ color: palette.text, fontSize: 13 }}
+                        numberOfLines={1}
+                      >
+                        {att.fileName}
+                      </Text>
+                    </View>
+                  )
+                )}
+              </View>
+            )}
+
+            {/* Text body. Hidden for attachment-only messages so the
+                bubble doesn't render an empty pill under the image. */}
+            {message.content.trim().length > 0 && (
+              <View
+                style={{
+                  backgroundColor: isUser ? palette.surfaceAlt : "transparent",
+                  borderRadius: isUser ? 14 : 0,
+                  paddingHorizontal: isUser ? 16 : 0,
+                  paddingVertical: isUser ? 10 : 0,
+                  alignSelf: isUser ? "flex-end" : "stretch",
+                }}
+              >
+                {isUser ? (
+                  <Text
+                    selectable
+                    style={{
+                      color: palette.text,
+                      fontSize: TYPOGRAPHY.fontSizes.md,
+                      lineHeight: TYPOGRAPHY.lineHeights.md,
+                    }}
+                  >
+                    {message.content}
+                  </Text>
+                ) : (
+                  <Markdown style={mdStyles}>
+                    {cleanModelMarkdown(message.content)}
+                  </Markdown>
+                )}
+              </View>
             )}
           </View>
         )}
       </TouchableBounce>
+
+      {/* ── Turn conclusion: "Worked for X" (assistant only) ─────── */}
+      {!isUser && message.turnDurationMs != null && (
+        <TurnConclusion
+          durationMs={message.turnDurationMs}
+          log={message.turnLog ?? EMPTY_TURN_LOG}
+          palette={palette}
+          isDark={isDark}
+          onExpand={(next) => {
+            if (next) onTurnConclusionExpand?.(message.id);
+          }}
+        />
+      )}
 
       {/* Timestamp */}
       <Text
@@ -1318,26 +1957,494 @@ function QueuedMessagePanel({
 
 // ─── Model picker ─────────────────────────────────────────────────────────────
 
+function HeaderTitle({
+  modelQueue,
+  onToggleModelPicker,
+  workDir,
+  threadTitle,
+  palette,
+}: {
+  modelQueue: ModelEntry[];
+  onToggleModelPicker: () => void;
+  workDir?: string | null;
+  threadTitle: string;
+  palette: Palette;
+}) {
+  const active = modelQueue.filter((m) => m.enabled)[0] ?? null;
+  const dotColor = active ? PROVIDER_COLOR[active.provider] ?? "#6B7280" : null;
+  const shortName = active
+    ? active.name.includes("/")
+      ? active.name.split("/").pop()!
+      : active.name
+    : null;
+  const cwdName = workDir
+    ? workDir.split("/").filter(Boolean).pop() ?? workDir
+    : "";
+
+  if (!active) {
+    return (
+      <Text style={{ color: palette.text, fontSize: 16, fontWeight: "600" }} numberOfLines={1}>
+        {threadTitle}
+      </Text>
+    );
+  }
+
+  return (
+    <TouchableBounce sensory onPress={onToggleModelPicker}>
+      <View style={{ alignItems: "center", gap: 1 }}>
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 6,
+          }}
+        >
+          <View
+            style={{
+              width: 7,
+              height: 7,
+              borderRadius: 3.5,
+              backgroundColor: dotColor ?? "#6B7280",
+            }}
+          />
+          <Text
+            style={{
+              color: palette.text,
+              fontSize: 15,
+              fontWeight: "600",
+              maxWidth: 180,
+            }}
+            numberOfLines={1}
+          >
+            {shortName}
+          </Text>
+          <IconSymbol
+            name="chevron.down"
+            size={10}
+            color={palette.textMuted as any}
+          />
+        </View>
+        {cwdName ? (
+          <Text
+            style={{
+              color: palette.textMuted,
+              fontSize: 10,
+              maxWidth: 200,
+              fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+            }}
+            numberOfLines={1}
+          >
+            {cwdName}
+          </Text>
+        ) : null}
+      </View>
+    </TouchableBounce>
+  );
+}
+
 const PROVIDER_COLOR: Record<string, string> = {
   claude:      "#0066FF",
   openrouter:  "#7B3FE4",
   local:       "#16A34A",
 };
 
+// ─── Attachment thumbnail ────────────────────────────────────────
+
+function AttachmentThumb({
+  kind,
+  localUri,
+  name,
+  palette,
+  loading,
+  onPress,
+  onRemove,
+}: {
+  kind: "image" | "file";
+  localUri?: string;
+  name: string;
+  palette: Palette;
+  loading?: boolean;
+  onPress?: () => void;
+  onRemove?: () => void;
+}) {
+  const SIZE = 56;
+  const content = (
+    <View
+      style={{
+        width: SIZE,
+        height: SIZE,
+        borderRadius: 10,
+        backgroundColor: palette.surfaceAlt,
+        borderWidth: 1,
+        borderColor: palette.divider,
+        overflow: "hidden",
+        position: "relative",
+      }}
+    >
+      {kind === "image" && localUri ? (
+        <Image
+          source={{ uri: localUri }}
+          style={{ width: "100%", height: "100%" }}
+          resizeMode="cover"
+        />
+      ) : (
+        <View
+          style={{
+            flex: 1,
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 2,
+            padding: 4,
+          }}
+        >
+          <IconSymbol name="doc" size={18} color={palette.textMuted} />
+        </View>
+      )}
+      {loading && (
+        <View
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: "rgba(0,0,0,0.45)",
+          }}
+        >
+          <ActivityIndicator size="small" color="#fff" />
+        </View>
+      )}
+    </View>
+  );
+
+  return (
+    // Extra top/right padding leaves room for the remove-x to sit
+    // outside the thumbnail without being clipped by sibling layout.
+    <View style={{ position: "relative", paddingTop: 6, paddingRight: 6 }}>
+      {onPress ? (
+        <Pressable onPress={onPress} accessibilityLabel={`Preview ${name}`}>
+          {content}
+        </Pressable>
+      ) : (
+        content
+      )}
+      {!loading && onRemove && (
+        <Pressable
+          onPress={onRemove}
+          hitSlop={8}
+          style={{
+            position: "absolute",
+            top: 0,
+            right: 0,
+            width: 20,
+            height: 20,
+            borderRadius: 10,
+            backgroundColor: palette.text,
+            borderWidth: 2,
+            borderColor: palette.surface,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <IconSymbol name="xmark" size={10} color={palette.bg} />
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
+// ─── Attachment menu item ────────────────────────────────────────
+
+function AttachmentMenuItem({
+  icon,
+  label,
+  onPress,
+  palette,
+  disabled,
+  hint,
+}: {
+  icon: string;
+  label: string;
+  onPress: () => void;
+  palette: Palette;
+  disabled?: boolean;
+  hint?: string;
+}) {
+  return (
+    <Pressable
+      onPress={disabled ? undefined : onPress}
+      disabled={disabled}
+      style={({ pressed }) => ({
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        backgroundColor: !disabled && pressed ? palette.surfaceAlt : "transparent",
+        opacity: disabled ? 0.4 : 1,
+      })}
+    >
+      <IconSymbol name={icon as any} size={16} color={palette.textMuted} />
+      <View style={{ flex: 1 }}>
+        <Text style={{ color: palette.text, fontSize: 14 }}>{label}</Text>
+        {hint && (
+          <Text style={{ color: palette.textSoft, fontSize: 11, marginTop: 2 }}>
+            {hint}
+          </Text>
+        )}
+      </View>
+    </Pressable>
+  );
+}
+
+// ─── Custom animated top bar ────────────────────────────────────────────────
+
+function ThreadTopBar({
+  animValue,
+  topInset,
+  palette,
+  isDark,
+  threadTitle,
+  workDir,
+  modelQueue,
+  modelPickerOpen,
+  onToggleModelPicker,
+  onBack,
+  threadStatus,
+  onStop,
+  onCopyConversation,
+  copiedConvo,
+  canCopy,
+}: {
+  animValue: Animated.Value;
+  topInset: number;
+  palette: Palette;
+  isDark: boolean;
+  threadTitle: string;
+  workDir?: string | null;
+  modelQueue: ModelEntry[];
+  modelPickerOpen: boolean;
+  onToggleModelPicker: () => void;
+  onBack: () => void;
+  threadStatus: ThreadStatus;
+  onStop: () => void;
+  onCopyConversation: () => void;
+  copiedConvo: boolean;
+  canCopy: boolean;
+}) {
+  const active = modelQueue.filter((m) => m.enabled)[0] ?? null;
+  const dotColor = active ? PROVIDER_COLOR[active.provider] ?? "#6B7280" : null;
+  const shortName = active
+    ? active.name.includes("/")
+      ? active.name.split("/").pop()!
+      : active.name
+    : null;
+  const cwdName = workDir
+    ? workDir.split("/").filter(Boolean).pop() ?? workDir
+    : "";
+
+  const translateY = animValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, -(topInset + TOP_BAR_HEIGHT)],
+  });
+  const opacity = animValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 0],
+  });
+
+  const blurTint = isDark ? "systemChromeMaterialDark" : "systemChromeMaterial";
+
+  return (
+    <Animated.View
+      pointerEvents="box-none"
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        right: 0,
+        paddingTop: topInset,
+        zIndex: 30,
+        transform: [{ translateY }],
+        opacity,
+      }}
+    >
+      <View
+        style={{
+          height: TOP_BAR_HEIGHT,
+          flexDirection: "row",
+          alignItems: "center",
+          paddingHorizontal: 8,
+        }}
+      >
+        {/* Back — blur pill */}
+        <TouchableBounce sensory onPress={onBack}>
+          <BlurView
+            tint={blurTint}
+            intensity={80}
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              overflow: "hidden",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <IconSymbol name="chevron.left" color={palette.text} size={18} />
+          </BlurView>
+        </TouchableBounce>
+
+        {/* Title area (centered) */}
+        <View style={{ flex: 1, alignItems: "center" }}>
+          {active ? (
+            <TouchableBounce sensory onPress={onToggleModelPicker}>
+              <View style={{ alignItems: "center", gap: 1 }}>
+                <BlurView
+                  tint={blurTint}
+                  intensity={80}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 6,
+                    paddingHorizontal: 12,
+                    paddingVertical: 5,
+                    borderRadius: 999,
+                    overflow: "hidden",
+                  }}
+                >
+                  <View
+                    style={{
+                      width: 7,
+                      height: 7,
+                      borderRadius: 3.5,
+                      backgroundColor: dotColor ?? "#6B7280",
+                    }}
+                  />
+                  <Text
+                    style={{
+                      color: palette.text,
+                      fontSize: 13,
+                      fontWeight: "600",
+                      maxWidth: 160,
+                    }}
+                    numberOfLines={1}
+                  >
+                    {shortName}
+                  </Text>
+                  <IconSymbol
+                    name={modelPickerOpen ? "chevron.up" : "chevron.down"}
+                    size={9}
+                    color={palette.textMuted as any}
+                  />
+                </BlurView>
+                {cwdName ? (
+                  <Text
+                    style={{
+                      color: palette.textMuted,
+                      fontSize: 10,
+                      marginTop: 1,
+                      maxWidth: 200,
+                      fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+                    }}
+                    numberOfLines={1}
+                  >
+                    {cwdName}
+                  </Text>
+                ) : null}
+              </View>
+            </TouchableBounce>
+          ) : (
+            <Text
+              style={{ color: palette.text, fontSize: 16, fontWeight: "600" }}
+              numberOfLines={1}
+            >
+              {threadTitle}
+            </Text>
+          )}
+        </View>
+
+        {/* Right action cluster — blur pills */}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          {threadStatus === "running" && (
+            <TouchableBounce sensory onPress={onStop}>
+              <BlurView
+                tint={blurTint}
+                intensity={80}
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 18,
+                  overflow: "hidden",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <IconSymbol name="stop.fill" color={palette.danger} size={16} />
+              </BlurView>
+            </TouchableBounce>
+          )}
+          <TouchableBounce
+            sensory
+            disabled={!canCopy}
+            onPress={onCopyConversation}
+          >
+            <BlurView
+              tint={blurTint}
+              intensity={80}
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 18,
+                overflow: "hidden",
+                alignItems: "center",
+                justifyContent: "center",
+                opacity: canCopy ? 1 : 0.3,
+              }}
+            >
+              <IconSymbol
+                name={copiedConvo ? "checkmark" : "doc.on.doc"}
+                color={copiedConvo ? palette.success : palette.textMuted}
+                size={16}
+              />
+            </BlurView>
+          </TouchableBounce>
+        </View>
+      </View>
+    </Animated.View>
+  );
+}
+
 function ModelPickerBar({
-  open,
-  onToggle,
+  onChooseDirectory,
+  canChangeDirectory,
+  currentWorkDir,
   isDark,
 }: {
-  open: boolean;
-  onToggle: () => void;
+  onChooseDirectory?: () => void;
+  canChangeDirectory?: boolean;
+  currentWorkDir?: string;
   isDark: boolean;
 }) {
+  const [open, setOpen] = useState(false);
   const settings = useGatewayStore((s) => s.settings);
   const actions  = useGatewayStore((s) => s.actions);
   const queue    = (settings.modelQueue ?? []).filter((m) => m.enabled);
 
-  if (queue.length === 0) return null;
+  // Register the module-level opener so HeaderTitle (inside the native
+  // header, outside this component tree) can trigger it without any
+  // React state flowing through Stack.Screen options.
+  useEffect(() => {
+    _openModelPicker = () => setOpen(true);
+    return () => { _openModelPicker = null; };
+  }, []);
+
+  const close = () => setOpen(false);
+
+  // Allow opening even with zero models so users can still reach
+  // "Change working directory" via this picker on a fresh thread.
+  if (queue.length === 0 && !onChooseDirectory) return null;
 
   const selectModel = (entry: ModelEntry) => {
     const newQueue = [entry, ...settings.modelQueue.filter((m) => m.id !== entry.id)];
@@ -1349,7 +2456,7 @@ function ModelPickerBar({
       autoCompact:     settings.autoCompact,
       streamingEnabled: settings.streamingEnabled,
     });
-    onToggle();
+    close();
   };
 
   const dropBg     = isDark ? "#1c1c1e" : "#fff";
@@ -1362,11 +2469,11 @@ function ModelPickerBar({
         transparent
         visible={open}
         animationType="none"
-        onRequestClose={onToggle}
+        onRequestClose={close}
       >
         <Pressable
           style={{ flex: 1 }}
-          onPress={onToggle}
+          onPress={close}
         >
           {/* Position the card near the top-center of the screen */}
           <View
@@ -1400,7 +2507,7 @@ function ModelPickerBar({
                           gap: 9,
                           paddingHorizontal: 14,
                           paddingVertical: 11,
-                          borderBottomWidth: i < queue.length - 1 ? 1 : 0,
+                          borderBottomWidth: 1,
                           borderBottomColor: dropBorder,
                           backgroundColor: isActive
                             ? isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.03)"
@@ -1428,6 +2535,63 @@ function ModelPickerBar({
                     </TouchableBounce>
                   );
                 })}
+                {/* Change working directory row. Disabled once the thread
+                    has messages (claw sessions are pinned to the cwd
+                    they started with). */}
+                {onChooseDirectory && (
+                  <TouchableBounce
+                    sensory
+                    disabled={!canChangeDirectory}
+                    onPress={() => { close(); onChooseDirectory(); }}
+                  >
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 9,
+                        paddingHorizontal: 14,
+                        paddingVertical: 11,
+                        opacity: canChangeDirectory ? 1 : 0.4,
+                      }}
+                    >
+                      <IconSymbol
+                        name="folder"
+                        size={13}
+                        color={isDark ? "rgba(255,255,255,0.55)" : "rgba(0,0,0,0.5)"}
+                      />
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text
+                          style={{
+                            color: isDark ? "#fff" : "#000",
+                            fontSize: 13.5,
+                            fontWeight: "500",
+                          }}
+                          numberOfLines={1}
+                        >
+                          Working directory
+                        </Text>
+                        {currentWorkDir ? (
+                          <Text
+                            style={{
+                              color: isDark ? "rgba(255,255,255,0.45)" : "rgba(0,0,0,0.45)",
+                              fontSize: 11,
+                              fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+                              marginTop: 2,
+                            }}
+                            numberOfLines={1}
+                          >
+                            {currentWorkDir}
+                          </Text>
+                        ) : null}
+                      </View>
+                      <IconSymbol
+                        name="chevron.right"
+                        size={11}
+                        color={isDark ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.3)"}
+                      />
+                    </View>
+                  </TouchableBounce>
+                )}
               </View>
             </Pressable>
           </View>

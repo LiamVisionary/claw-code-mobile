@@ -2,6 +2,7 @@ import { spawn } from "child_process";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { createLineBuffer } from "../utils/lineBuffer";
 import { logger } from "../utils/logger";
 import { eventsService } from "../services/eventsService";
 import { messageService } from "../services/messageService";
@@ -23,6 +24,17 @@ const CLAW_BINARY =
     "debug/claw"
   );
 
+// Official Claude CLI binary — used for OAuth-authenticated models because
+// Anthropic's API validates the system prompt and rejects non-official clients
+// for Opus/Sonnet on Max subscriptions. The official binary passes this check.
+const CLAUDE_CLI =
+  process.env.CLAUDE_CLI || "/root/.local/bin/claude";
+
+// Map thread ID → Claude CLI session ID for conversation continuity.
+// The Claude CLI returns a session_id in its JSON output; we pass it
+// back via --resume on subsequent turns so the model sees history.
+const claudeCliSessions = new Map<string, string>();
+
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const WORKSPACES_DIR = path.resolve(__dirname, "../../data/workspaces");
 
@@ -32,6 +44,29 @@ export type ModelConfig = {
   provider: "claude" | "openrouter" | "local";
   name?: string;
   apiKey?: string;
+  /** When "oauth", the apiKey is treated as an ANTHROPIC_AUTH_TOKEN (bearer)
+   *  instead of an x-api-key header. */
+  authMethod?: "apiKey" | "oauth";
+  /** OAuth token set – used when authMethod is "oauth". */
+  oauthToken?: {
+    accessToken: string;
+    refreshToken?: string;
+    expiresAt?: number;
+    scopes?: string[];
+  };
+};
+
+export type Attachment = {
+  /** Absolute path on disk (already saved by the uploads router). */
+  path: string;
+  /** Original filename — shown in the chat bubble and in the agent prompt. */
+  fileName: string;
+  /** Path relative to the thread's cwd, for the agent's filesystem tools. */
+  relativePath: string;
+  /** Categorization picked by the uploads router. */
+  kind: "image" | "file";
+  mimeType?: string;
+  size?: number;
 };
 
 type ActiveRun = {
@@ -58,6 +93,19 @@ type ActiveRun = {
   hadToolSinceLastText: boolean;
   /** All message IDs created during this run (initial + any new bubbles), for finalization. */
   allMessageIds: string[];
+  /** Per-turn metadata collected during the run and persisted on finalize. */
+  startedAt: number;
+  turnLog: string[];
+  turnToolSteps: {
+    id: string;
+    tool: string;
+    label: string;
+    status: "done" | "error";
+  }[];
+  turnTokensIn?: number;
+  turnTokensOut?: number;
+  turnCostUsd?: number;
+  turnModel?: string;
 };
 
 type SpawnResult = {
@@ -74,6 +122,8 @@ export type RunPhase = "idle" | "thinking" | "compacting" | "responding";
 const runPhases = new Map<string, RunPhase>();
 
 function setRunPhase(threadId: string, phase: RunPhase) {
+  const prev = runPhases.get(threadId) ?? "idle";
+  if (prev === phase) return; // no-op — skip redundant publishes
   if (phase === "idle") {
     runPhases.delete(threadId);
   } else {
@@ -92,20 +142,53 @@ function workspaceDir(threadId: string): string {
   return dir;
 }
 
+/**
+ * Resolve the working directory for a thread — its configured `workDir`
+ * if it exists on disk, otherwise the per-thread workspace fallback
+ * under `data/workspaces/<id>`. Used by the uploads router so saved
+ * attachments land in the same directory the agent will execute in.
+ */
+export function resolveThreadCwd(threadId: string): string {
+  const thread = threadService.get(threadId);
+  if (thread?.workDir && fs.existsSync(thread.workDir)) {
+    return thread.workDir;
+  }
+  return workspaceDir(threadId);
+}
+
 function buildEnv(
   model?: ModelConfig,
   sessionDir?: string
 ): Record<string, string> {
   const env: Record<string, string> = { ...process.env } as Record<string, string>;
 
-  if (model?.apiKey) {
+  // Claw embeds the full `git diff` (staged + unstaged) into its system
+  // prompt — on a repo with large uncommitted changes this easily adds
+  // 50-60K tokens to EVERY API call. Without Anthropic prompt caching
+  // (not available through OpenRouter), this is paid at full price on
+  // each spawn. Setting GIT_DIFF_LIMIT to "0" tells git to skip the
+  // binary diff stat, but claw calls `git diff` directly. Instead, we
+  // point GIT_EXTERNAL_DIFF at /bin/true so `git diff` always returns
+  // empty, and GIT_DIFF_OPTS to limit context. These are respected by
+  // the git CLI that claw shells out to.
+  env["GIT_EXTERNAL_DIFF"] = "/bin/true";
+
+  if (model?.apiKey || model?.oauthToken) {
     if (model.provider === "openrouter") {
-      env["OPENAI_API_KEY"] = model.apiKey;
+      env["OPENAI_API_KEY"] = model.apiKey ?? "";
       env["OPENAI_BASE_URL"] = "https://openrouter.ai/api/v1";
       delete env["ANTHROPIC_API_KEY"];
       delete env["ANTHROPIC_AUTH_TOKEN"];
+    } else if (model.authMethod === "oauth") {
+      // OAuth-authenticated Claude model: the official Claude CLI
+      // handles auth internally (reads ~/.claude/.credentials.json).
+      // No env vars needed — just clear any conflicting ones.
+      delete env["ANTHROPIC_API_KEY"];
+      delete env["ANTHROPIC_AUTH_TOKEN"];
+      delete env["OPENAI_API_KEY"];
+      delete env["OPENAI_BASE_URL"];
     } else {
-      env["ANTHROPIC_API_KEY"] = model.apiKey;
+      env["ANTHROPIC_API_KEY"] = model.apiKey ?? "";
       delete env["OPENAI_API_KEY"];
       delete env["OPENAI_BASE_URL"];
     }
@@ -115,7 +198,7 @@ function buildEnv(
     env["CLAW_MODEL"] = model.name;
   }
 
-  if (sessionDir) {
+  if (sessionDir && !(model?.authMethod === "oauth")) {
     env["CLAW_SESSION_DIR"] = sessionDir;
     fs.mkdirSync(sessionDir, { recursive: true });
   }
@@ -123,12 +206,85 @@ function buildEnv(
   return env;
 }
 
-function buildArgs(prompt: string, model?: ModelConfig): string[] {
+function isOAuthModel(model?: ModelConfig): boolean {
+  return model?.authMethod === "oauth" && !!model?.oauthToken;
+}
+
+function getBinary(model?: ModelConfig): string {
+  // Use the official Claude CLI for OAuth models (Max subscription) —
+  // Anthropic blocks non-official clients for Opus/Sonnet.
+  if (isOAuthModel(model) && fs.existsSync(CLAUDE_CLI)) {
+    return CLAUDE_CLI;
+  }
+  return CLAW_BINARY;
+}
+
+function buildArgs(
+  prompt: string,
+  model?: ModelConfig,
+  attachments: Attachment[] = [],
+  threadId?: string
+): string[] {
+  const useClaudeCli = isOAuthModel(model) && fs.existsSync(CLAUDE_CLI);
   const args: string[] = ["--output-format", "json"];
   if (model?.name) args.push("--model", model.name);
-  args.push("--permission-mode", "danger-full-access");
-  args.push("prompt", prompt);
+
+  if (useClaudeCli) {
+    args.push("--permission-mode", "dontAsk");
+    // Resume previous Claude CLI session for conversation continuity
+    const sessionId = threadId ? claudeCliSessions.get(threadId) : undefined;
+    if (sessionId) {
+      args.push("--resume", sessionId);
+    }
+  } else {
+    args.push("--permission-mode", "danger-full-access");
+  }
+
+  // `--image` flags are positional-agnostic but conventionally placed
+  // before the `prompt` subcommand. Each pushes one image into the
+  // current turn's user message as a multimodal content block.
+  for (const att of attachments) {
+    if (att.kind === "image") {
+      args.push("--image", att.path);
+    }
+  }
+
+  if (useClaudeCli) {
+    args.push("-p", prompt);
+  } else {
+    args.push("prompt", prompt);
+  }
   return args;
+}
+
+/**
+ * Build the effective prompt text the model sees. Image attachments
+ * already ride along as `--image` flags (so the model literally sees
+ * the pixels via the multimodal content block); non-image files get a
+ * short note prepended so the agent knows the file exists in the
+ * workdir and can open it with its filesystem tools.
+ */
+function decoratePromptWithAttachments(
+  prompt: string,
+  attachments: Attachment[]
+): string {
+  if (attachments.length === 0) return prompt;
+  const images = attachments.filter((a) => a.kind === "image");
+  const files = attachments.filter((a) => a.kind === "file");
+  const lines: string[] = [];
+  if (images.length > 0) {
+    const names = images.map((a) => a.fileName).join(", ");
+    lines.push(
+      `(${images.length} image${images.length === 1 ? "" : "s"} attached: ${names})`
+    );
+  }
+  if (files.length > 0) {
+    for (const f of files) {
+      lines.push(`(attached file: ${f.relativePath})`);
+    }
+  }
+  if (lines.length === 0) return prompt;
+  return `${lines.join("\n")}\n\n${prompt}`;
 }
 
 function buildCompactArgs(model?: ModelConfig): string[] {
@@ -178,6 +334,13 @@ async function streamWords(
 function emitTerminal(threadId: string, line: string) {
   terminalService.appendChunk(threadId, line);
   streamService.publish(threadId, { type: "terminal", chunk: line + "\n" });
+  // Capture into the active run's per-turn log so it can be persisted
+  // on finalize. Bounded so a runaway tool doesn't blow up the blob.
+  const active = activeRuns.get(threadId);
+  if (active) {
+    active.turnLog.push(line);
+    if (active.turnLog.length > 800) active.turnLog.splice(0, active.turnLog.length - 800);
+  }
 }
 
 /**
@@ -192,14 +355,46 @@ function spawnOnce(
   model: ModelConfig | undefined,
   active: ActiveRun,
   isCompact = false,
-  messageId?: string
+  messageId?: string,
+  attachments: Attachment[] = []
 ): Promise<SpawnResult> {
   return new Promise((resolve) => {
-    const args = isCompact ? buildCompactArgs(model) : buildArgs(content, model);
+    // For the Claude CLI, check if there's an existing session to resume
+      const args = isCompact
+      ? buildCompactArgs(model)
+      : buildArgs(content, model, attachments, threadId);
     const env = buildEnv(model, sessionDir);
-    logger.info({ threadId, cwd, model: model?.name ?? model?.provider, args }, "Spawning claw");
+    const binary = getBinary(model);
+    const isClaudeCli = binary === CLAUDE_CLI;
+    logger.info({
+      threadId,
+      cwd,
+      model: model?.name ?? model?.provider,
+      args,
+      binary,
+      isClaudeCli,
+      authMethod: model?.authMethod,
+    }, "Spawning process");
 
-    const child = spawn(CLAW_BINARY, args, {
+    eventsService.record({
+      source: "runtime",
+      type: "spawn_detail",
+      threadId,
+      runId: active.runId,
+      payload: {
+        binary,
+        isClaudeCli,
+        args,
+        cwd,
+        authMethod: model?.authMethod,
+        hasOauthToken: !!model?.oauthToken,
+        envKeys: Object.keys(env).filter(k =>
+          k.startsWith("ANTHROPIC") || k.startsWith("OPENAI") || k.startsWith("CLAW") || k === "GIT_EXTERNAL_DIFF"
+        ),
+      },
+    });
+
+    const child = spawn(binary, args, {
       cwd,
       env,
       stdio: ["ignore", "pipe", "pipe"],
@@ -217,30 +412,56 @@ function spawnOnce(
       stdoutBuf += chunk.toString();
     });
 
-    child.stderr.on("data", (chunk: Buffer) => {
-      const text = chunk.toString();
-      stderrBuf += text;
-      for (const line of text.split("\n")) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        // Don't send internal [stream] protocol lines to the terminal view
-        if (!trimmed.startsWith("[stream]")) {
-          emitTerminal(threadId, trimmed);
-        }
-
-        // Parse real-time streaming events and hook progress events from stderr.
-        // Claw writes two kinds of structured lines:
-        //   [stream]{"type":"text_delta","text":"Hello"}   — real-time streaming (new)
-        //   [hook PreToolUse] bash: ls -la                 — hook progress (existing)
-        // We try [stream] first; if it doesn't match, fall through to hook parsing.
-        if (messageId && !isCompact) {
-          parseStreamEvent(trimmed, threadId, active, openSteps);
-          parseHookEvent(trimmed, threadId, active, openSteps);
-        }
+    // Line-aware buffering for stderr — see utils/lineBuffer.ts for why.
+    // The short version: a single claw `[stream]{…}` event can span
+    // multiple child-process chunks; if we don't accumulate across
+    // chunks before splitting on "\n", the JSON.parse fragments on
+    // both sides of every chunk boundary fail and silently drop the
+    // event. That's how we ended up with "chat an AI" / "code, files"
+    // in assistant responses. Any partial line on close is flushed.
+    const stderrLines = createLineBuffer((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      // Don't send internal [stream] protocol lines to the terminal view
+      if (!trimmed.startsWith("[stream]")) {
+        emitTerminal(threadId, trimmed);
+      }
+      // Parse real-time streaming events and hook progress events from stderr.
+      // Claw writes two kinds of structured lines:
+      //   [stream]{"type":"text_delta","text":"Hello"}   — real-time streaming
+      //   [hook PreToolUse] bash: ls -la                 — hook progress
+      if (messageId && !isCompact) {
+        parseStreamEvent(trimmed, threadId, active, openSteps);
+        parseHookEvent(trimmed, threadId, active, openSteps);
       }
     });
 
+    child.stderr.on("data", (chunk: Buffer) => {
+      const text = chunk.toString();
+      stderrBuf += text;
+      stderrLines.push(text);
+    });
+
     child.on("close", (code) => {
+      stderrLines.flush();
+
+      eventsService.record({
+        source: "runtime",
+        type: "spawn_exit",
+        threadId,
+        runId: active.runId,
+        payload: {
+          binary,
+          isClaudeCli,
+          exitCode: code,
+          stopped: active.stopped,
+          stdoutLen: stdoutBuf.length,
+          stderrLen: stderrBuf.length,
+          stdoutPreview: stdoutBuf.slice(0, 500),
+          stderrPreview: stderrBuf.slice(0, 500),
+        },
+      });
+
       if (active.stopped) {
         resolve({ succeeded: false, stdoutBuf, stderrBuf, stopped: true });
         return;
@@ -249,7 +470,14 @@ function spawnOnce(
     });
 
     child.on("error", (err) => {
-      logger.error({ err }, "Failed to spawn claw");
+      logger.error({ err, binary, isClaudeCli }, "Failed to spawn process");
+      eventsService.record({
+        source: "runtime",
+        type: "spawn_error",
+        threadId,
+        runId: active.runId,
+        payload: { binary, isClaudeCli, error: err.message },
+      });
       resolve({ succeeded: false, stdoutBuf, stderrBuf: err.message, stopped: false });
     });
   });
@@ -366,12 +594,16 @@ function parseStreamEvent(
       // "thinking" so the UI oscillates correctly between tool cycles.
       setRunPhase(threadId, "thinking");
 
+      const detail = typeof rawInput === "string"
+        ? rawInput.slice(0, 300)
+        : rawInput != null ? JSON.stringify(rawInput).slice(0, 300) : undefined;
       streamService.publish(threadId, {
         type: "tool_start",
         id: stepId,
         messageId: active.currentMessageId,
         tool: name,
         label: label.slice(0, 80),
+        detail,
       });
       openSteps.set(name, stepId);
       active.realtimeStepIds.add(stepId);
@@ -457,6 +689,25 @@ function parseHookEvent(
  * Claw sometimes writes structured JSON to stderr or stdout on error exit.
  * Also detects context-window overflow and returns a user-friendly message.
  */
+const MAX_RETRIES = 3;
+const RETRY_BASE_MS = 2000;
+
+function isRetryableError(errText: string): boolean {
+  const lower = errText.toLowerCase();
+  return (
+    lower.includes("502") ||
+    lower.includes("503") ||
+    lower.includes("429") ||
+    lower.includes("rate") ||
+    lower.includes("too many requests") ||
+    lower.includes("too quickly") ||
+    lower.includes("provider_unavailable") ||
+    lower.includes("overloaded") ||
+    lower.includes("temporarily unavailable") ||
+    lower.includes("request rate")
+  );
+}
+
 function extractClawError(stdoutBuf: string, stderrBuf: string): string {
   // Try parsing stderr as JSON first (claw writes error JSON there)
   for (const raw of [stderrBuf, stdoutBuf]) {
@@ -508,6 +759,103 @@ function isContextOverflow(text: string): boolean {
     lower.includes("exceeds the model") ||
     lower.includes("token limit")
   );
+}
+
+/**
+ * Rough tokens estimate from a session file's byte count. Assumes JSON-
+ * encoded conversation with ~3.5 bytes per token average for English
+ * mixed with tool JSON — good enough for "~X tokens freed" display.
+ */
+/**
+ * Snapshot every `.jsonl` file under the session directory so a failed
+ * model attempt can be rolled back cleanly. Without this, each failed
+ * spawn leaves data in the session that the next model reads — inflating
+ * token counts and cost for every fallback attempt.
+ */
+function snapshotSession(
+  sessionDir: string
+): Map<string, Buffer> | null {
+  const sessionsRoot = path.join(sessionDir, "sessions");
+  if (!fs.existsSync(sessionsRoot)) return null;
+  const snap = new Map<string, Buffer>();
+  try {
+    for (const sub of fs.readdirSync(sessionsRoot)) {
+      const subPath = path.join(sessionsRoot, sub);
+      if (!fs.statSync(subPath).isDirectory()) continue;
+      for (const entry of fs.readdirSync(subPath)) {
+        if (!entry.endsWith(".jsonl")) continue;
+        const filePath = path.join(subPath, entry);
+        snap.set(filePath, fs.readFileSync(filePath));
+      }
+    }
+  } catch {
+    return null;
+  }
+  return snap.size > 0 ? snap : null;
+}
+
+function restoreSession(snap: Map<string, Buffer> | null): void {
+  if (!snap) return;
+  for (const [filePath, data] of snap) {
+    try {
+      fs.writeFileSync(filePath, data);
+    } catch {
+      // Best-effort — if the file was deleted, skip
+    }
+  }
+}
+
+function sessionBytes(sessionDir: string): number {
+  return analyzeSessionBreakdown(sessionDir)?.totalBytes ?? 0;
+}
+
+/**
+ * Finalize a compact operation: compute tokens-freed delta, persist a
+ * user-visible "Compacted context" system message to SQLite so it
+ * survives refresh, and return the publish-ready payload for SSE.
+ */
+function finalizeCompact(
+  threadId: string,
+  sessionDir: string,
+  bytesBefore: number,
+  succeeded: boolean,
+  info: { removedMessages: number; keptMessages: number },
+): {
+  removedMessages: number;
+  keptMessages: number;
+  approxTokensFreed: number;
+  systemMessage?: {
+    id: string;
+    threadId: string;
+    content: string;
+    createdAt: string;
+  };
+} {
+  const bytesAfter = sessionBytes(sessionDir);
+  const bytesFreed = Math.max(0, bytesBefore - bytesAfter);
+  const approxTokensFreed = Math.round(bytesFreed / 3.5);
+  let content: string;
+  if (!succeeded) {
+    content = "⚠ Compaction failed";
+  } else if (info.removedMessages > 0) {
+    const tokStr = approxTokensFreed > 0
+      ? ` (~${approxTokensFreed.toLocaleString()} tokens freed)`
+      : "";
+    content = `Compacted context — removed ${info.removedMessages} messages, kept ${info.keptMessages}${tokStr}`;
+  } else {
+    content = "Compaction ran — nothing to remove";
+  }
+  const msg = messageService.addSystemMessage(threadId, content);
+  return {
+    ...info,
+    approxTokensFreed,
+    systemMessage: {
+      id: msg.id,
+      threadId: msg.threadId,
+      content: msg.content,
+      createdAt: msg.createdAt,
+    },
+  };
 }
 
 function parseCompactResult(stdoutBuf: string): { removedMessages: number; keptMessages: number } {
@@ -646,17 +994,39 @@ async function processSuccess(
   active: ActiveRun,
   streamingEnabled = true
 ): Promise<void> {
-  const result = JSON.parse(stdoutBuf.trim()) as {
+  const raw = JSON.parse(stdoutBuf.trim());
+
+  // Claude CLI returns { type: "result", result: "...", session_id: "..." }
+  // Claw returns { message: "...", tool_uses: [...], ... }
+  if (raw.session_id) {
+    claudeCliSessions.set(threadId, raw.session_id);
+  }
+
+  // Normalize Claude CLI output to claw format
+  const result = raw as {
     type?: string;
+    subtype?: string;
     message: string;
+    result?: string;
+    is_error?: boolean;
     // Claw emits { id, name, input } — note: "name", NOT "tool_name"
     tool_uses?: Array<{ id?: string; name: string; input: unknown }>;
     tool_results?: Array<{ content: string }>;
     usage?: { input_tokens: number; output_tokens: number };
     estimated_cost?: string;
+    total_cost_usd?: number;
   };
 
-  if (result.type === "error") {
+  // Claude CLI uses "result" field instead of "message"
+  if (result.result !== undefined && result.message === undefined) {
+    result.message = result.result;
+  }
+  // Claude CLI uses total_cost_usd instead of estimated_cost
+  if (result.total_cost_usd !== undefined && !result.estimated_cost) {
+    result.estimated_cost = `$${result.total_cost_usd.toFixed(4)}`;
+  }
+
+  if (result.type === "error" || result.is_error) {
     const raw = (result.message ?? "").trim();
     const msg = raw || "claw reported an error";
     const overflow = isContextOverflow(msg);
@@ -703,44 +1073,72 @@ async function processSuccess(
           id: matchedStepId,
           messageId,
         });
+        active.turnToolSteps.push({
+          id: matchedStepId,
+          tool: toolName,
+          label,
+          status: "done",
+        });
       }
-      emitTerminal(threadId, `[${toolName}] ${JSON.stringify(tu.input).slice(0, 200)}`);
       continue;
     }
 
     const stepId = `step-${toolName}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const detail = JSON.stringify(tu.input ?? {}).slice(0, 300);
     streamService.publish(threadId, {
       type: "tool_start",
       id: stepId,
       messageId,
       tool: toolName,
       label,
+      detail,
     });
-    // Brief pause so the badge renders as "running" before flipping to done
+    active.turnToolSteps.push({
+      id: stepId,
+      tool: toolName,
+      label,
+      detail,
+      status: "done",
+    });
     await sleep(90);
     streamService.publish(threadId, {
       type: "tool_end",
       id: stepId,
       messageId,
     });
-    // Also emit to terminal for the debug view
-    emitTerminal(threadId, `[${toolName}] ${JSON.stringify(tu.input).slice(0, 200)}`);
-    // Short gap between steps for a natural appearance
     await sleep(55);
   }
-  // Pause briefly so user can see all steps before the text begins streaming.
-  // If tools were already shown in real-time, a shorter pause is fine.
   if (toolUses.length > 0 && !active.stopped) {
     await sleep(hadRealtimeTools ? 50 : 220);
   }
-  for (const tr of result.tool_results ?? []) {
-    if (tr.content) emitTerminal(threadId, tr.content.slice(0, 400));
+  // Capture usage onto the active run so finalize can persist it.
+  const inTok = result.usage?.input_tokens ?? 0;
+  const outTok = result.usage?.output_tokens ?? 0;
+  if (typeof result.usage?.input_tokens === "number") {
+    active.turnTokensIn = result.usage.input_tokens;
   }
-  if (result.estimated_cost) {
+  if (typeof result.usage?.output_tokens === "number") {
+    active.turnTokensOut = result.usage.output_tokens;
+  }
+
+  // Calculate cost from real OpenRouter pricing instead of claw's
+  // hardcoded Anthropic rates — claw can be 40-50x off for non-Anthropic
+  // models.
+  const realCost = calculateRealCost(active.turnModel, inTok, outTok);
+  const costDisplay = realCost ?? result.estimated_cost;
+  const savingsLine = buildSavingsLine(active.turnModel, inTok, outTok);
+  if (costDisplay) {
     emitTerminal(
       threadId,
-      `Cost: ${result.estimated_cost} | in: ${result.usage?.input_tokens ?? 0} out: ${result.usage?.output_tokens ?? 0}`
+      `Cost: ${costDisplay} | in: ${inTok} out: ${outTok}${savingsLine}`
     );
+  }
+  if (realCost) {
+    const n = parseFloat(realCost.replace(/[^0-9.]/g, ""));
+    if (Number.isFinite(n)) active.turnCostUsd = n;
+  } else if (result.estimated_cost) {
+    const n = parseFloat(String(result.estimated_cost).replace(/[^0-9.]/g, ""));
+    if (Number.isFinite(n)) active.turnCostUsd = n;
   }
 
   // Parse <thinking>...</thinking> blocks from the model's text response.
@@ -785,28 +1183,137 @@ async function processSuccess(
  * user-configurable `autoCompactThreshold` (a percentage) to decide when
  * to proactively summarize a conversation before the next turn fails.
  */
+// ── Dynamic model metadata via OpenRouter ─────────────────────────────
+//
+// Fetches https://openrouter.ai/api/v1/models once, caches for 1 hour.
+// Provides context window sizes AND pricing per model so compact
+// thresholds are accurate and cost estimates use real rates instead of
+// hardcoded Anthropic pricing.
+
+type ModelMeta = {
+  contextLength: number;
+  inputCostPerToken: number;  // USD per token
+  outputCostPerToken: number; // USD per token
+};
+
+let openRouterModelsCache: {
+  fetchedAt: number;
+  map: Map<string, ModelMeta>;
+} | null = null;
+
+const CTX_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+async function loadOpenRouterModels(): Promise<Map<string, ModelMeta>> {
+  if (openRouterModelsCache && Date.now() - openRouterModelsCache.fetchedAt < CTX_CACHE_TTL_MS) {
+    return openRouterModelsCache.map;
+  }
+  try {
+    const res = await fetch("https://openrouter.ai/api/v1/models");
+    if (!res.ok) throw new Error(`OpenRouter models ${res.status}`);
+    const json = (await res.json()) as {
+      data?: Array<{
+        id?: string;
+        context_length?: number;
+        pricing?: { prompt?: string; completion?: string };
+      }>;
+    };
+    const map = new Map<string, ModelMeta>();
+    for (const m of json.data ?? []) {
+      if (!m.id) continue;
+      const contextLength = typeof m.context_length === "number" && m.context_length > 0
+        ? m.context_length
+        : 128_000;
+      const inputCostPerToken = parseFloat(m.pricing?.prompt ?? "0") || 0;
+      const outputCostPerToken = parseFloat(m.pricing?.completion ?? "0") || 0;
+      map.set(m.id, { contextLength, inputCostPerToken, outputCostPerToken });
+    }
+    openRouterModelsCache = { fetchedAt: Date.now(), map };
+    logger.info({ models: map.size }, "Loaded OpenRouter model metadata");
+    return map;
+  } catch (err) {
+    logger.warn({ err }, "Failed to fetch OpenRouter models — using cached/fallback");
+    return openRouterModelsCache?.map ?? new Map();
+  }
+}
+
+// Eagerly populate the cache on backend startup.
+loadOpenRouterModels().catch(() => {});
+
+function lookupModelMeta(modelName?: string): ModelMeta | null {
+  if (!modelName || !openRouterModelsCache?.map) return null;
+  const direct = openRouterModelsCache.map.get(modelName);
+  if (direct) return direct;
+  for (const [id, meta] of openRouterModelsCache.map) {
+    if (id.endsWith(`/${modelName}`)) return meta;
+  }
+  return null;
+}
+
+function calculateRealCost(
+  modelName: string | undefined,
+  inputTokens: number,
+  outputTokens: number,
+): string | null {
+  const meta = lookupModelMeta(modelName);
+  if (!meta || (meta.inputCostPerToken === 0 && meta.outputCostPerToken === 0)) return null;
+  const cost = inputTokens * meta.inputCostPerToken + outputTokens * meta.outputCostPerToken;
+  return `$${cost.toFixed(4)}`;
+}
+
+// Anthropic direct pricing (per token, from https://docs.anthropic.com/en/docs/about-claude/pricing)
+const ANTHROPIC_PRICING = {
+  "opus": { input: 15 / 1_000_000, output: 75 / 1_000_000 },
+  "sonnet": { input: 3 / 1_000_000, output: 15 / 1_000_000 },
+} as const;
+
+function isAnthropicModel(modelName?: string): boolean {
+  if (!modelName) return false;
+  const m = modelName.toLowerCase();
+  return (
+    m.includes("claude") || m.includes("opus") ||
+    m.includes("sonnet") || m.includes("haiku")
+  );
+}
+
+function buildSavingsLine(
+  modelName: string | undefined,
+  inputTokens: number,
+  outputTokens: number,
+): string {
+  if (!modelName || isAnthropicModel(modelName)) return "";
+  const userMeta = lookupModelMeta(modelName);
+  if (!userMeta) return "";
+  const userCost =
+    inputTokens * userMeta.inputCostPerToken +
+    outputTokens * userMeta.outputCostPerToken;
+  if (userCost <= 0) return "";
+
+  const opusCost =
+    inputTokens * ANTHROPIC_PRICING.opus.input +
+    outputTokens * ANTHROPIC_PRICING.opus.output;
+  const sonnetCost =
+    inputTokens * ANTHROPIC_PRICING.sonnet.input +
+    outputTokens * ANTHROPIC_PRICING.sonnet.output;
+  const opusSaved = opusCost - userCost;
+  const sonnetSaved = sonnetCost - userCost;
+  if (opusSaved <= 0) return "";
+
+  const parts = [`Saved $${opusSaved.toFixed(4)} vs Opus 4.6`];
+  if (sonnetSaved > 0) {
+    parts.push(`$${sonnetSaved.toFixed(4)} vs Sonnet 4.6`);
+  }
+  return `\n${parts.join(" | ")}`;
+}
+
 function getModelContextWindow(modelName?: string): number {
   if (!modelName) return 128_000;
-  const m = modelName.toLowerCase();
-  // 1M+ context
-  if (m.includes("gemini-2") || m.includes("gemini-1.5")) return 1_000_000;
-  if (m.includes("gpt-4.1")) return 1_000_000;
-  // 200K
-  if (
-    m.includes("claude") ||
-    m.includes("glm-5") ||
-    m.includes("glm-4.6") ||
-    m.includes("sonnet") ||
-    m.includes("opus") ||
-    m.includes("haiku")
-  ) {
-    return 200_000;
-  }
-  // 128K
-  if (m.includes("gpt-4o") || m.includes("deepseek") || m.includes("mistral")) {
-    return 128_000;
-  }
-  return 128_000;
+  return lookupModelMeta(modelName)?.contextLength ?? 128_000;
+}
+
+async function getModelContextWindowAsync(modelName?: string): Promise<number> {
+  if (!modelName) return 128_000;
+  await loadOpenRouterModels();
+  return lookupModelMeta(modelName)?.contextLength ?? 128_000;
 }
 
 /**
@@ -1054,13 +1561,17 @@ export const clawRuntime = {
     autoCompact = true,
     streamingEnabled = true,
     autoCompactThreshold = 70,
-    autoContinueEnabled = true
+    autoContinueEnabled = true,
+    attachments: Attachment[] = []
   ): Promise<string> {
     const thread = threadService.get(threadId);
     if (!thread) return "";
 
-    if (!fs.existsSync(CLAW_BINARY)) {
-      const errMsg = "claw binary not found. Run `bash scripts/build-claw.sh` first.";
+    const primaryBinary = getBinary(models[0]);
+    if (!fs.existsSync(primaryBinary)) {
+      const errMsg = primaryBinary === CLAUDE_CLI
+        ? "Claude CLI not found. Install it with: npm install -g @anthropic-ai/claude-code"
+        : "claw binary not found. Run `bash scripts/build-claw.sh` first.";
       logger.error(errMsg);
       // Persist immediately so a re-fetch (e.g. re-entering the thread) shows
       // the error even if the live SSE stream missed the events.
@@ -1098,6 +1609,12 @@ export const clawRuntime = {
         ? thread.workDir
         : workspaceDir(threadId);
 
+    // Decorate the user prompt so the agent learns about non-image
+    // file attachments via plain text (it'll use Read/Grep/Glob to
+    // open them); image attachments ride along as `--image` flags so
+    // the model literally sees the pixels via its multimodal input.
+    const decoratedPrompt = decoratePromptWithAttachments(content, attachments);
+
     const active: ActiveRun = {
       runId: run.id,
       child: null,
@@ -1108,6 +1625,9 @@ export const clawRuntime = {
       currentMessageId: messageId,
       hadToolSinceLastText: false,
       allMessageIds: [messageId],
+      startedAt: Date.now(),
+      turnLog: [],
+      turnToolSteps: [],
     };
     activeRuns.set(threadId, active);
     setRunPhase(threadId, "thinking");
@@ -1143,7 +1663,7 @@ export const clawRuntime = {
     // error rather than a clean overflow.
     if (autoCompact && !active.stopped) {
       const primary = queue[0];
-      const contextSize = getModelContextWindow(primary?.name);
+      const contextSize = await getModelContextWindowAsync(primary?.name);
       const lastTokens = readLastInputTokens(sessionDir);
       const thresholdTokens = Math.floor((autoCompactThreshold / 100) * contextSize);
       eventsService.record({
@@ -1184,6 +1704,7 @@ export const clawRuntime = {
           `↻ Proactively compacting — last turn used ${lastTokens.toLocaleString()} tokens (≥ ${autoCompactThreshold}% of ${contextSize.toLocaleString()})`
         );
         streamService.publish(threadId, { type: "compact_start" });
+        const bytesBefore = sessionBytes(sessionDir);
         const { succeeded: ok, stopped: cs, stdoutBuf: compactOut } = await spawnOnce(
           threadId, "", cwd, sessionDir, primary, active, true /* isCompact */
         );
@@ -1195,31 +1716,26 @@ export const clawRuntime = {
           setRunPhase(threadId, "idle");
           return "";
         }
+        const info = ok
+          ? parseCompactResult(compactOut)
+          : { removedMessages: 0, keptMessages: 0 };
+        const finalized = finalizeCompact(threadId, sessionDir, bytesBefore, ok, info);
         if (ok) {
-          const info = parseCompactResult(compactOut);
           emitTerminal(
             threadId,
-            `✓ Context compacted — removed ${info.removedMessages} messages, kept ${info.keptMessages}`
+            `✓ Context compacted — removed ${info.removedMessages} messages, kept ${info.keptMessages} (~${finalized.approxTokensFreed.toLocaleString()} tokens freed)`
           );
-          streamService.publish(threadId, { type: "compact_end", ...info });
-          eventsService.record({
-            source: "runtime",
-            type: "compact_end",
-            threadId,
-            runId: run.id,
-            payload: { reason: "proactive_threshold", succeeded: true, ...info },
-          });
         } else {
           emitTerminal(threadId, "⚠ Proactive compact failed — proceeding anyway");
-          streamService.publish(threadId, { type: "compact_end", removedMessages: 0, keptMessages: 0 });
-          eventsService.record({
-            source: "runtime",
-            type: "compact_end",
-            threadId,
-            runId: run.id,
-            payload: { reason: "proactive_threshold", succeeded: false },
-          });
         }
+        streamService.publish(threadId, { type: "compact_end", ...finalized });
+        eventsService.record({
+          source: "runtime",
+          type: "compact_end",
+          threadId,
+          runId: run.id,
+          payload: { reason: "proactive_threshold", succeeded: ok, ...finalized },
+        });
         setRunPhase(threadId, "thinking");
       }
     }
@@ -1231,6 +1747,12 @@ export const clawRuntime = {
       const label = model?.name ?? model?.provider ?? "default";
 
       if (i > 0) emitTerminal(threadId, `↻ Trying fallback: ${label}`);
+
+      // Snapshot the session before each model attempt so we can roll
+      // back if this model fails. Prevents session pollution where
+      // each failed spawn leaves data that inflates token counts for
+      // the next model in the queue.
+      const sessionSnap = snapshotSession(sessionDir);
 
       const spawnStartTs = Date.now();
       eventsService.record({
@@ -1247,8 +1769,14 @@ export const clawRuntime = {
       });
 
       const { succeeded, stdoutBuf, stderrBuf, stopped } = await spawnOnce(
-        threadId, content, cwd, sessionDir, model, active, false, messageId
+        threadId, decoratedPrompt, cwd, sessionDir, model, active, false, messageId, attachments
       );
+
+      // Capture whichever model was actually used on this attempt so the
+      // finalize step can persist it as the turn's model of record.
+      if (succeeded && model?.name) {
+        active.turnModel = model.name;
+      }
 
       // Read tokens from the session immediately after the spawn so we
       // can record them regardless of which branch we take below.
@@ -1288,23 +1816,73 @@ export const clawRuntime = {
             setRunPhase(threadId, "compacting");
             emitTerminal(threadId, "↻ Auto-compacting context…");
             streamService.publish(threadId, { type: "compact_start" });
+            const bytesBefore = sessionBytes(sessionDir);
             const { succeeded: ok, stopped: cs, stdoutBuf: compactOut } = await spawnOnce(
               threadId, "", cwd, sessionDir, model, active, true /* isCompact */
             );
-            if (!cs && ok) {
-              const info = parseCompactResult(compactOut);
-              emitTerminal(threadId, `✓ Context compacted — removed ${info.removedMessages} messages, kept ${info.keptMessages}`);
-              streamService.publish(threadId, { type: "compact_end", ...info });
+            if (cs) break;
+            const info = ok
+              ? parseCompactResult(compactOut)
+              : { removedMessages: 0, keptMessages: 0 };
+            const finalized = finalizeCompact(threadId, sessionDir, bytesBefore, ok, info);
+            if (ok) {
+              emitTerminal(
+                threadId,
+                `✓ Context compacted — removed ${info.removedMessages} messages, kept ${info.keptMessages} (~${finalized.approxTokensFreed.toLocaleString()} tokens freed)`
+              );
+              streamService.publish(threadId, { type: "compact_end", ...finalized });
               setRunPhase(threadId, "thinking");
               i--;
               continue;
             }
-            if (cs) break;
-            streamService.publish(threadId, { type: "compact_end", removedMessages: 0, keptMessages: 0 });
+            streamService.publish(threadId, { type: "compact_end", ...finalized });
             setRunPhase(threadId, "thinking");
             emitTerminal(threadId, "⚠ Compact failed");
           }
-          if (err.isClawError) {
+          // Retry retryable errors (502, 429, rate limits) on the
+          // same model with exponential backoff before surfacing.
+          if ((err.isClawError || err.message) && isRetryableError(err.message ?? "")) {
+            let retryOk = false;
+            for (let r = 1; r <= MAX_RETRIES; r++) {
+              if (active.stopped) break;
+              const delayMs = RETRY_BASE_MS * Math.pow(2, r - 1);
+              emitTerminal(
+                threadId,
+                `↻ Retryable error — waiting ${(delayMs / 1000).toFixed(0)}s then retrying ${label} (${r}/${MAX_RETRIES})`
+              );
+              await sleep(delayMs);
+              if (active.stopped) break;
+              setRunPhase(threadId, "thinking");
+              const retry = await spawnOnce(
+                threadId, decoratedPrompt, cwd, sessionDir, model, active, false, messageId, attachments
+              );
+              if (retry.stopped) break;
+              if (retry.succeeded) {
+                try {
+                  setRunPhase(threadId, "responding");
+                  await processSuccess(threadId, messageId, retry.stdoutBuf, active, streamingEnabled);
+                  if (model?.name) active.turnModel = model.name;
+                  finalSuccess = true;
+                  retryOk = true;
+                } catch (innerErr: any) {
+                  // If the retry itself hits another retryable error, loop again
+                  if (isRetryableError(innerErr.message ?? "")) continue;
+                  // Non-retryable — surface it
+                  const text2 = friendlyError(innerErr.message) || "An error occurred — please try again.";
+                  const errMsgId2 = active.currentMessageId;
+                  messageService.appendAssistantDelta(threadId, errMsgId2, text2);
+                  messageService.markError(threadId, errMsgId2);
+                  streamService.publish(threadId, { type: "message_error", messageId: errMsgId2, text: text2 });
+                }
+                break;
+              }
+              const retryErr = extractClawError(retry.stdoutBuf, retry.stderrBuf);
+              if (!isRetryableError(retryErr)) break;
+            }
+            if (retryOk || active.stopped) break;
+            // All retries exhausted — fall through to emit error
+            emitTerminal(threadId, `⚠ ${label} failed after ${MAX_RETRIES} retries`);
+          } else if (err.isClawError) {
             logger.warn({ model: label }, "claw exited ok but reported error");
             const text = friendlyError(err.message) || "An error occurred — please try again.";
             const errMsgId = active.currentMessageId;
@@ -1324,7 +1902,7 @@ export const clawRuntime = {
       }
 
       // ── Failure path ───────────────────────────────────────────
-      const errText = extractClawError(stdoutBuf, stderrBuf);
+      let errText = extractClawError(stdoutBuf, stderrBuf);
       logger.error({ stderrBuf: stderrBuf.slice(-200), model: label }, "claw attempt failed");
 
       eventsService.record({
@@ -1338,8 +1916,55 @@ export const clawRuntime = {
           errorPreview: errText.slice(0, 500),
           isOverflow: isContextOverflow(errText),
           isEmptyResponse: isEmptyResponse(errText),
+          isRetryable: isRetryableError(errText),
         },
       });
+
+      // ── Retry transient errors (502, 429, rate limits) on the
+      //    SAME model with exponential backoff before falling through
+      //    to the next model in the queue. This preserves context —
+      //    switching models can lose the claw session state.
+      if (isRetryableError(errText)) {
+        let retrySucceeded = false;
+        for (let r = 1; r <= MAX_RETRIES; r++) {
+          if (active.stopped) break;
+          const delayMs = RETRY_BASE_MS * Math.pow(2, r - 1); // 2s, 4s, 8s
+          emitTerminal(
+            threadId,
+            `↻ Retryable error — waiting ${(delayMs / 1000).toFixed(0)}s then retrying ${label} (${r}/${MAX_RETRIES})`
+          );
+          await sleep(delayMs);
+          if (active.stopped) break;
+          setRunPhase(threadId, "thinking");
+          const retry = await spawnOnce(
+            threadId, decoratedPrompt, cwd, sessionDir, model, active, false, messageId, attachments
+          );
+          if (retry.stopped) break;
+          if (retry.succeeded) {
+            if (model?.name) active.turnModel = model.name;
+            try {
+              setRunPhase(threadId, "responding");
+              await processSuccess(threadId, messageId, retry.stdoutBuf, active, streamingEnabled);
+              finalSuccess = true;
+              retrySucceeded = true;
+            } catch (retryErr: any) {
+              emitTerminal(threadId, `⚠ Retry ${r} succeeded but processSuccess failed: ${retryErr.message?.slice(0, 200)}`);
+            }
+            break;
+          }
+          errText = extractClawError(retry.stdoutBuf, retry.stderrBuf);
+          if (!isRetryableError(errText)) {
+            emitTerminal(threadId, `⚠ Retry ${r} failed with non-retryable error`);
+            break;
+          }
+        }
+        if (retrySucceeded) break;
+        if (active.stopped) break;
+        // All retries exhausted — fall through to compact / next model.
+        // Restore the session first so the next model starts clean.
+        restoreSession(sessionSnap);
+        emitTerminal(threadId, `⚠ ${label} failed after ${MAX_RETRIES} retries`);
+      }
 
       // Broaden the compact trigger: explicit overflow (Anthropic-style)
       // OR an empty-response failure. Some providers (notably GLM via
@@ -1349,7 +1974,7 @@ export const clawRuntime = {
       // model, so we no longer gate the empty-response retry on the
       // user's compact threshold — any empty response with autoCompact
       // on gets one shot at compact+retry.
-      const contextSize = getModelContextWindow(model?.name);
+      const contextSize = await getModelContextWindowAsync(model?.name);
       const lastTokens = readLastInputTokens(sessionDir);
       const thresholdTokens = Math.floor((autoCompactThreshold / 100) * contextSize);
       const empty = isEmptyResponse(errText);
@@ -1384,24 +2009,35 @@ export const clawRuntime = {
           emitTerminal(threadId, "↻ Auto-compacting context…");
         }
         streamService.publish(threadId, { type: "compact_start" });
+        const bytesBefore = sessionBytes(sessionDir);
         const { succeeded: ok, stopped: cs, stdoutBuf: compactOut } = await spawnOnce(
           threadId, "", cwd, sessionDir, model, active, true /* isCompact */
         );
         if (cs) break;
+        const info = ok
+          ? parseCompactResult(compactOut)
+          : { removedMessages: 0, keptMessages: 0 };
+        const finalized = finalizeCompact(threadId, sessionDir, bytesBefore, ok, info);
         if (ok) {
-          const info = parseCompactResult(compactOut);
-          emitTerminal(threadId, `✓ Context compacted — removed ${info.removedMessages} messages, kept ${info.keptMessages}`);
-          streamService.publish(threadId, { type: "compact_end", ...info });
+          emitTerminal(
+            threadId,
+            `✓ Context compacted — removed ${info.removedMessages} messages, kept ${info.keptMessages} (~${finalized.approxTokensFreed.toLocaleString()} tokens freed)`
+          );
+          streamService.publish(threadId, { type: "compact_end", ...finalized });
           setRunPhase(threadId, "thinking");
           i--;
           continue;
         }
-        streamService.publish(threadId, { type: "compact_end", removedMessages: 0, keptMessages: 0 });
+        streamService.publish(threadId, { type: "compact_end", ...finalized });
         setRunPhase(threadId, "thinking");
         emitTerminal(threadId, "⚠ Compact failed — trying next model if available");
       }
 
       if (i < queue.length - 1) {
+        // Roll back the session so the next model starts clean —
+        // without this, each failed spawn's data would accumulate
+        // and the next model would re-read (and pay for) all of it.
+        restoreSession(sessionSnap);
         emitTerminal(threadId, `⚠ ${label} failed — trying next model`);
         continue;
       }
@@ -1493,6 +2129,36 @@ export const clawRuntime = {
     for (const mid of active.allMessageIds) {
       messageService.finalizeAssistant(threadId, mid);
     }
+
+    // Persist per-turn telemetry on the last surviving assistant bubble.
+    // Walk backwards through allMessageIds and pick the first one that
+    // still exists (finalizeAssistant deletes empty bubbles). Tokens,
+    // cost, model, duration go into real columns; thinking, turn log,
+    // and tool steps go into the metadata JSON blob.
+    let telemetryTarget: string | null = null;
+    for (let i = active.allMessageIds.length - 1; i >= 0; i--) {
+      if (messageService.get(active.allMessageIds[i])) {
+        telemetryTarget = active.allMessageIds[i];
+        break;
+      }
+    }
+    if (telemetryTarget && finalSuccess) {
+      const durationMs = Date.now() - active.startedAt;
+      messageService.setTurnTelemetry(telemetryTarget, {
+        model: active.turnModel,
+        tokensIn: active.turnTokensIn,
+        tokensOut: active.turnTokensOut,
+        costUsd: active.turnCostUsd,
+        turnDurationMs: durationMs,
+        metadata: {
+          thinking: active.streamedThinking || undefined,
+          turnLog: active.turnLog.length > 0 ? active.turnLog : undefined,
+          toolSteps:
+            active.turnToolSteps.length > 0 ? active.turnToolSteps : undefined,
+        },
+      });
+    }
+
     // Signal done on the last active bubble so the client clears its run state.
     streamService.publish(threadId, { type: "done", messageId: active.currentMessageId });
 

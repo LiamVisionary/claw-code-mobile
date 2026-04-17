@@ -480,7 +480,21 @@ impl AnthropicClient {
             .post(request_url)
             .header("content-type", "application/json");
         let mut request_builder = self.auth.apply(request_builder);
-        for (header_name, header_value) in self.request_profile.header_pairs() {
+        let mut headers = self.request_profile.header_pairs();
+        // When using OAuth bearer auth, add the oauth beta header so the
+        // Anthropic API accepts the token (required for Max subscriptions).
+        if self.auth.bearer_token().is_some() {
+            const OAUTH_BETA: &str = "oauth-2025-04-20";
+            if let Some(pos) = headers.iter().position(|(k, _)| k == "anthropic-beta") {
+                let existing = &headers[pos].1;
+                if !existing.contains(OAUTH_BETA) {
+                    headers[pos].1 = format!("{},{}", existing, OAUTH_BETA);
+                }
+            } else {
+                headers.push(("anthropic-beta".to_string(), OAUTH_BETA.to_string()));
+            }
+        }
+        for (header_name, header_value) in headers {
             request_builder = request_builder.header(header_name, header_value);
         }
         request_builder
@@ -889,7 +903,11 @@ async fn expect_success(response: reqwest::Response) -> Result<reqwest::Response
 }
 
 const fn is_retryable_status(status: reqwest::StatusCode) -> bool {
-    matches!(status.as_u16(), 408 | 409 | 429 | 500 | 502 | 503 | 504)
+    // 429 (rate limit) is NOT retried — with Max subscription's tight
+    // per-minute limits, retrying with exponential backoff just burns
+    // through the window. The error surfaces immediately so the mobile
+    // client can show it and the user can retry manually.
+    matches!(status.as_u16(), 408 | 409 | 500 | 502 | 503 | 504)
 }
 
 /// Anthropic API keys (`sk-ant-*`) are accepted over the `x-api-key` header
