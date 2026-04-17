@@ -43,12 +43,21 @@ export function fixupStuckHeaders(content: string): string {
  */
 export function stripMalformedCodeSpans(content: string): string {
   if (!content) return content;
-  return content.replace(/`([^`\n]*)`/g, (match: string, inner: string) => {
+  // First protect fenced code blocks (``` ... ```) by replacing them
+  // with placeholders so the single-backtick regex doesn't eat them.
+  const fences: string[] = [];
+  let protected_ = content.replace(/```[\s\S]*?```/g, (m) => {
+    fences.push(m);
+    return `\x00FENCE${fences.length - 1}\x00`;
+  });
+  protected_ = protected_.replace(/`([^`\n]*)`/g, (match: string, inner: string) => {
     if (!/\w/.test(inner)) return inner;
     if (inner.length > 60) return inner;
     if (/\*\*|__|#{1,6} /.test(inner)) return inner;
     return match;
   });
+  // Restore fenced code blocks
+  return protected_.replace(/\x00FENCE(\d+)\x00/g, (_, i) => fences[Number(i)]);
 }
 
 /** Run every safe preprocessor over an assistant message before it hits the markdown renderer. */
@@ -92,5 +101,6 @@ function formatYamlFrontmatter(content: string): string {
 }
 
 export function cleanModelMarkdown(content: string): string {
-  return formatYamlFrontmatter(stripMalformedCodeSpans(fixupStuckHeaders(content)));
+  // Format YAML first (removes fenced blocks), then fix headers, then strip bad spans
+  return stripMalformedCodeSpans(fixupStuckHeaders(formatYamlFrontmatter(content)));
 }
