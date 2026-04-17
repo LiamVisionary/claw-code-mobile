@@ -5,6 +5,7 @@
   "version": "1.0.0",
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "dev:lan": "TUNNEL=false node scripts/dev.mjs",
     "dev:tunnel": "node scripts/dev-tunnel.mjs",
     "start": "expo start",
     "start:tunnel": "expo start --tunnel",
