@@ -33,7 +33,7 @@ function obBin(): string {
 /** Check if obsidian-headless is installed. */
 export function isInstalled(): boolean {
   try {
-    execSync("ob --help", { stdio: "ignore" });
+    execSync("ob --help", { stdio: "ignore", timeout: 5_000 });
     return true;
   } catch {
     return false;
@@ -59,14 +59,19 @@ export async function install(): Promise<{ ok: boolean; message: string }> {
 /** Check login status. Returns the logged-in email or null. */
 export function getLoginStatus(): string | null {
   try {
-    const out = execSync(`${obBin()} login`, {
+    // Use sync-list-remote as a login probe — it fails fast if not logged in
+    // and doesn't prompt for credentials like `ob login` does.
+    const out = execSync(`${obBin()} sync-list-remote`, {
       encoding: "utf8",
       timeout: 10_000,
+      stdio: ["ignore", "pipe", "pipe"],
     });
-    // ob login shows account info if already logged in
-    const match = out.match(/logged in as (.+)/i) || out.match(/email:\s*(.+)/i);
-    return match?.[1]?.trim() ?? (out.includes("@") ? out.trim() : null);
-  } catch {
+    // If we get output (even empty list), we're logged in
+    return "logged-in";
+  } catch (err: any) {
+    const msg = (err?.stderr || err?.stdout || "").toString();
+    if (msg.includes("not logged in") || msg.includes("login")) return null;
+    // Other error — might still be logged in but hit a network issue
     return null;
   }
 }

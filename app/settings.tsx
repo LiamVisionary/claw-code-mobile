@@ -1546,10 +1546,25 @@ export default function SettingsScreen() {
   };
 
   const checkHeadlessStatus = async () => {
-    if (!serverUrl || !bearerToken) return;
+    if (!serverUrl || !bearerToken) {
+      setHeadlessStep("not_installed");
+      setHeadlessMessage("Set server URL and token first.");
+      return;
+    }
     setHeadlessBusy(true);
+    setHeadlessStep("checking");
     try {
-      const data = await headlessApi("/status");
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15_000);
+      const res = await fetch(
+        `${serverUrl.replace(/\/+$/, "")}/obsidian/headless/status`,
+        {
+          headers: { Authorization: `Bearer ${bearerToken}` },
+          signal: controller.signal,
+        }
+      );
+      clearTimeout(timeout);
+      const data = await res.json();
       if (data.state === "not_installed") setHeadlessStep("not_installed");
       else if (data.state === "not_logged_in") setHeadlessStep("not_logged_in");
       else if (data.state === "syncing") {
@@ -1563,9 +1578,16 @@ export default function SettingsScreen() {
       } else if (data.state === "error") {
         setHeadlessMessage(data.message);
         setHeadlessStep("not_logged_in");
+      } else {
+        setHeadlessStep("not_installed");
       }
     } catch (err: any) {
-      setHeadlessMessage(err.message ?? "Cannot reach server");
+      setHeadlessStep("not_installed");
+      setHeadlessMessage(
+        err?.name === "AbortError"
+          ? "Server took too long to respond."
+          : (err.message ?? "Cannot reach server")
+      );
     } finally {
       setHeadlessBusy(false);
     }
