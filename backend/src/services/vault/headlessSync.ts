@@ -189,19 +189,13 @@ export async function login(
     });
     return { ok: true, message: out.trim() || "Logged in" };
   } catch (err: any) {
-    // ob dumps stack traces and error objects — extract just the human message
+    // ob dumps stack traces and raw Error objects to stderr — never show those.
     const raw = err?.stderr?.trim() || err?.stdout?.trim() || err?.message || "";
-    // Look for the nested response.error first (ob wraps the API error)
-    const responseMatch = raw.match(/error:\s*'([^']+)'/);
-    if (responseMatch) return { ok: false, message: responseMatch[1] };
-    // Look for "Login failed, ..." pattern
-    const loginMatch = raw.match(/Login failed[^.]*/i);
-    if (loginMatch) return { ok: false, message: "Incorrect email or password." };
-    // Strip stack traces — just keep the first meaningful line
-    const firstLine = raw.split("\n").find((l: string) =>
-      l.trim() && !l.includes("at ") && !l.includes("node_modules") && !l.includes("node:internal")
-    );
-    return { ok: false, message: firstLine?.trim() || "Login failed. Check your email and password." };
+    if (raw.toLowerCase().includes("2fa") || raw.toLowerCase().includes("mfa"))
+      return { ok: false, message: "2FA code required or incorrect." };
+    if (raw.toLowerCase().includes("login failed") || raw.toLowerCase().includes("email and password"))
+      return { ok: false, message: "Incorrect email or password." };
+    return { ok: false, message: "Login failed. Check your credentials." };
   }
 }
 
