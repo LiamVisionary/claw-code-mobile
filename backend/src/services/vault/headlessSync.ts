@@ -1,4 +1,5 @@
 import { execSync, spawn, ChildProcess } from "child_process";
+import fs from "fs";
 import path from "path";
 import os from "os";
 
@@ -55,7 +56,7 @@ function obBin(): string {
     ...(() => {
       try {
         const nvmDir = path.join(os.homedir(), ".nvm/versions/node");
-        const dirs = require("fs").readdirSync(nvmDir).filter((d: string) => {
+        const dirs = fs.readdirSync(nvmDir).filter((d: string) => {
           const m = d.match(/^v(\d+)\./);
           return m && parseInt(m[1], 10) >= 22;
         }).sort().reverse();
@@ -65,7 +66,7 @@ function obBin(): string {
   ];
   for (const c of candidates) {
     try {
-      require("fs").accessSync(c, require("fs").constants.X_OK);
+      fs.accessSync(c, fs.constants.X_OK);
       return c;
     } catch { /* not found */ }
   }
@@ -86,7 +87,7 @@ export function isInstalled(): boolean {
   } catch {
     // ob --help may exit non-zero; check if the binary exists at all
     try {
-      require("fs").accessSync(obBin(), require("fs").constants.X_OK);
+      fs.accessSync(obBin(), fs.constants.X_OK);
       return true;
     } catch {
       return false;
@@ -98,7 +99,7 @@ export function isInstalled(): boolean {
 function node22Bin(): string | null {
   try {
     const nvmDir = path.join(os.homedir(), ".nvm/versions/node");
-    const dirs = require("fs").readdirSync(nvmDir).filter((d: string) => {
+    const dirs = fs.readdirSync(nvmDir).filter((d: string) => {
       const m = d.match(/^v(\d+)\./);
       return m && parseInt(m[1], 10) >= 22;
     }).sort().reverse();
