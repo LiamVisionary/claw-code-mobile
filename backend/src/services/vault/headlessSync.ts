@@ -213,40 +213,21 @@ export function logout(): { ok: boolean; message: string } {
 export function listRemoteVaults(): RemoteVault[] {
   try {
     const out = obExec("sync-list-remote", { timeout: 15_000 });
-    // Parse output — each line typically has vault info
+    // ob output format:
+    //   Fetching vaults...
+    //
+    //   Vaults:
+    //     4d225aa1df74daefae50c2ad66a70efb  "claw code mobile"  (Asia)
+    //     abcdef1234567890abcdef1234567890  "My Notes"  (US)  e2ee
     const vaults: RemoteVault[] = [];
     for (const line of out.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("No ")) continue;
-      // Try to parse structured output; format varies
-      // Common: "id: abc123  name: My Vault  encryption: e2ee"
-      // Or just: "My Vault (abc123) - e2ee"
-      const idMatch = trimmed.match(/id:\s*(\S+)/i);
-      const nameMatch = trimmed.match(/name:\s*(.+?)(?:\s{2,}|$)/i);
-      if (idMatch && nameMatch) {
+      const m = line.match(/^\s*([0-9a-f]{32})\s+"([^"]+)"\s*(?:\(([^)]*)\))?\s*(e2ee)?/);
+      if (m) {
         vaults.push({
-          id: idMatch[1],
-          name: nameMatch[1].trim(),
-          encryption: trimmed.match(/encryption:\s*(\S+)/i)?.[1] ?? "unknown",
+          id: m[1],
+          name: m[2],
+          encryption: m[4] ?? "standard",
         });
-      } else {
-        // Fallback: treat the whole line as a vault entry
-        const parenMatch = trimmed.match(/^(.+?)\s*\((\S+)\)/);
-        if (parenMatch) {
-          vaults.push({
-            id: parenMatch[2],
-            name: parenMatch[1].trim(),
-            encryption: trimmed.includes("e2ee") ? "e2ee" : "standard",
-          });
-        }
-      }
-    }
-    // If parsing failed but we got output, return raw
-    if (vaults.length === 0 && out.trim()) {
-      // Return each non-empty line as a vault with name = line
-      for (const line of out.split("\n")) {
-        const t = line.trim();
-        if (t) vaults.push({ id: t, name: t, encryption: "unknown" });
       }
     }
     return vaults;
