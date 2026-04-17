@@ -25,9 +25,9 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use api::{
     detect_provider_kind, resolve_startup_auth_source, AnthropicClient, AuthSource,
-    ContentBlockDelta, InputContentBlock, InputMessage, MessageRequest, MessageResponse,
-    OutputContentBlock, PromptCache, ProviderClient as ApiProviderClient, ProviderKind,
-    StreamEvent as ApiStreamEvent, ToolChoice, ToolDefinition, ToolResultContentBlock,
+    ContentBlockDelta, ImageSource, InputContentBlock, InputMessage, MessageRequest,
+    MessageResponse, OutputContentBlock, PromptCache, ProviderClient as ApiProviderClient,
+    ProviderKind, StreamEvent as ApiStreamEvent, ToolChoice, ToolDefinition, ToolResultContentBlock,
 };
 
 use commands::{
@@ -58,10 +58,19 @@ use tools::{
 
 const DEFAULT_MODEL: &str = "claude-opus-4-6";
 fn max_tokens_for_model(model: &str) -> u32 {
+    if let Ok(val) = env::var("CLAW_MAX_TOKENS") {
+        if let Ok(n) = val.parse::<u32>() {
+            return n;
+        }
+    }
     if model.contains("opus") {
         32_000
-    } else {
+    } else if model.contains("sonnet") || model.contains("haiku") || model.contains("claude") {
         64_000
+    } else if model.contains("grok") {
+        64_000
+    } else {
+        16_000
     }
 }
 // Build-time constants injected by build.rs (fall back to static values when
@@ -117,8 +126,8 @@ fn main() {
         let argv: Vec<String> = std::env::args().collect();
         let json_output = argv
             .windows(2)
-            .any(|w| w[0] == "--output-format" && w[1] == "json")
-            || argv.iter().any(|a| a == "--output-format=json");
+            .any(|w| w[0] == "--output-format" && matches!(w[1].as_str(), "json" | "stream-json"))
+            || argv.iter().any(|a| a == "--output-format=json" || a == "--output-format=stream-json");
         if json_output {
             eprintln!(
                 "{}",
@@ -179,6 +188,42 @@ fn merge_prompt_with_stdin(prompt: &str, stdin_content: Option<&str>) -> String 
     format!("{prompt}\n\n{trimmed}")
 }
 
+/// Read each path, base64-encode the bytes, and pair with a media type
+/// sniffed from the file extension. Returns `(media_type, base64_data)`
+/// tuples ready to be attached as `InputContentBlock::Image` blocks.
+fn load_images_from_paths(paths: &[String]) -> Result<Vec<(String, String)>, String> {
+    use base64::Engine;
+    let mut out = Vec::with_capacity(paths.len());
+    for path in paths {
+        let bytes = std::fs::read(path).map_err(|e| format!("--image {path}: {e}"))?;
+        let media_type = guess_image_media_type(path);
+        let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        out.push((media_type, data));
+    }
+    Ok(out)
+}
+
+fn guess_image_media_type(path: &str) -> String {
+    let lower = path.to_ascii_lowercase();
+    if lower.ends_with(".png") {
+        "image/png"
+    } else if lower.ends_with(".gif") {
+        "image/gif"
+    } else if lower.ends_with(".webp") {
+        "image/webp"
+    } else if lower.ends_with(".heic") {
+        "image/heic"
+    } else if lower.ends_with(".heif") {
+        "image/heif"
+    } else {
+        // Default to JPEG for .jpg/.jpeg and unknown extensions —
+        // most providers accept this and it's the most common
+        // mobile-camera output.
+        "image/jpeg"
+    }
+    .to_string()
+}
+
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().skip(1).collect();
     match parse_args(&args)? {
@@ -231,6 +276,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             base_commit,
             reasoning_effort,
             allow_broad_cwd,
+            image_paths,
         } => {
             enforce_broad_cwd_policy(allow_broad_cwd, output_format)?;
             run_stale_base_preflight(base_commit.as_deref());
@@ -245,9 +291,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 None
             };
             let effective_prompt = merge_prompt_with_stdin(&prompt, stdin_context.as_deref());
+            let loaded_images = load_images_from_paths(&image_paths)
+                .map_err(|error| -> Box<dyn std::error::Error> { error.into() })?;
             let mut cli = LiveCli::new(model, true, allowed_tools, permission_mode)?;
             cli.set_reasoning_effort(reasoning_effort);
-            cli.run_turn_with_output(&effective_prompt, output_format, compact)?;
+            cli.run_turn_with_output(&effective_prompt, output_format, compact, loaded_images)?;
         }
         CliAction::Doctor { output_format } => run_doctor(output_format)?,
         CliAction::Acp { output_format } => print_acp_status(output_format)?,
@@ -336,6 +384,9 @@ enum CliAction {
         base_commit: Option<String>,
         reasoning_effort: Option<String>,
         allow_broad_cwd: bool,
+        /// Filesystem paths to image attachments. Resolved and base64
+        /// encoded just before the API request is built.
+        image_paths: Vec<String>,
     },
     Doctor {
         output_format: CliOutputFormat,
@@ -381,6 +432,7 @@ enum LocalHelpTopic {
 enum CliOutputFormat {
     Text,
     Json,
+    StreamJson,
 }
 
 impl CliOutputFormat {
@@ -388,8 +440,9 @@ impl CliOutputFormat {
         match value {
             "text" => Ok(Self::Text),
             "json" => Ok(Self::Json),
+            "stream-json" => Ok(Self::StreamJson),
             other => Err(format!(
-                "unsupported value for --output-format: {other} (expected text or json)"
+                "unsupported value for --output-format: {other} (expected text, json, or stream-json)"
             )),
         }
     }
@@ -407,6 +460,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
     let mut base_commit: Option<String> = None;
     let mut reasoning_effort: Option<String> = None;
     let mut allow_broad_cwd = false;
+    let mut image_paths: Vec<String> = Vec::new();
     let mut rest: Vec<String> = Vec::new();
     let mut index = 0;
 
@@ -521,6 +575,17 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
                 allow_broad_cwd = true;
                 index += 1;
             }
+            "--image" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "missing value for --image".to_string())?;
+                image_paths.push(value.clone());
+                index += 2;
+            }
+            flag if flag.starts_with("--image=") => {
+                image_paths.push(flag[8..].to_string());
+                index += 1;
+            }
             "-p" => {
                 // Claw Code compat: -p "prompt" = one-shot prompt
                 let prompt = args[index + 1..].join(" ");
@@ -538,6 +603,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
                     base_commit: base_commit.clone(),
                     reasoning_effort: reasoning_effort.clone(),
                     allow_broad_cwd,
+                    image_paths: image_paths.clone(),
                 });
             }
             "--print" => {
@@ -614,6 +680,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
                     base_commit,
                     reasoning_effort,
                     allow_broad_cwd,
+                    image_paths,
                 });
             }
         }
@@ -664,6 +731,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
                     base_commit,
                     reasoning_effort: reasoning_effort.clone(),
                     allow_broad_cwd,
+                    image_paths: image_paths.clone(),
                 }),
                 SkillSlashDispatch::Local => Ok(CliAction::Skills {
                     args,
@@ -691,6 +759,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
                 base_commit: base_commit.clone(),
                 reasoning_effort: reasoning_effort.clone(),
                 allow_broad_cwd,
+                image_paths,
             })
         }
         other if other.starts_with('/') => parse_direct_slash_cli_action(
@@ -703,6 +772,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
             base_commit,
             reasoning_effort,
             allow_broad_cwd,
+            image_paths,
         ),
         _other => Ok(CliAction::Prompt {
             prompt: rest.join(" "),
@@ -714,6 +784,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
             base_commit,
             reasoning_effort: reasoning_effort.clone(),
             allow_broad_cwd,
+            image_paths,
         }),
     }
 }
@@ -841,6 +912,7 @@ fn parse_direct_slash_cli_action(
     base_commit: Option<String>,
     reasoning_effort: Option<String>,
     allow_broad_cwd: bool,
+    image_paths: Vec<String>,
 ) -> Result<CliAction, String> {
     let raw = rest.join(" ");
     match SlashCommand::parse(&raw) {
@@ -870,6 +942,7 @@ fn parse_direct_slash_cli_action(
                     base_commit,
                     reasoning_effort: reasoning_effort.clone(),
                     allow_broad_cwd,
+                    image_paths: image_paths.clone(),
                 }),
                 SkillSlashDispatch::Local => Ok(CliAction::Skills {
                     args,
@@ -1516,7 +1589,7 @@ fn run_doctor(output_format: CliOutputFormat) -> Result<(), Box<dyn std::error::
     let message = report.render();
     match output_format {
         CliOutputFormat::Text => println!("{message}"),
-        CliOutputFormat::Json => {
+        CliOutputFormat::Json | CliOutputFormat::StreamJson => {
             println!("{}", serde_json::to_string_pretty(&report.json_value())?);
         }
     }
@@ -1553,7 +1626,7 @@ fn run_worker_state(output_format: CliOutputFormat) -> Result<(), Box<dyn std::e
     let raw = std::fs::read_to_string(&state_path)?;
     match output_format {
         CliOutputFormat::Text => println!("{raw}"),
-        CliOutputFormat::Json => {
+        CliOutputFormat::Json | CliOutputFormat::StreamJson => {
             // Validate it parses as JSON before re-emitting
             let _: serde_json::Value = serde_json::from_str(&raw)?;
             println!("{raw}");
@@ -2073,7 +2146,7 @@ fn dump_manifests_at_path(
                     println!("tools: {}", manifest.tools.entries().len());
                     println!("bootstrap phases: {}", manifest.bootstrap.phases().len());
                 }
-                CliOutputFormat::Json => println!(
+                CliOutputFormat::Json | CliOutputFormat::StreamJson => println!(
                     "{}",
                     serde_json::to_string_pretty(&json!({
                         "kind": "dump-manifests",
@@ -2105,7 +2178,7 @@ fn print_bootstrap_plan(output_format: CliOutputFormat) -> Result<(), Box<dyn st
                 println!("- {phase}");
             }
         }
-        CliOutputFormat::Json => println!(
+        CliOutputFormat::Json | CliOutputFormat::StreamJson => println!(
             "{}",
             serde_json::to_string_pretty(&json!({
                 "kind": "bootstrap-plan",
@@ -2129,7 +2202,7 @@ fn print_system_prompt(
     );
     match output_format {
         CliOutputFormat::Text => println!("{message}"),
-        CliOutputFormat::Json => println!(
+        CliOutputFormat::Json | CliOutputFormat::StreamJson => println!(
             "{}",
             serde_json::to_string_pretty(&json!({
                 "kind": "system-prompt",
@@ -2144,7 +2217,7 @@ fn print_system_prompt(
 fn print_version(output_format: CliOutputFormat) -> Result<(), Box<dyn std::error::Error>> {
     match output_format {
         CliOutputFormat::Text => println!("{}", render_version_report()),
-        CliOutputFormat::Json => {
+        CliOutputFormat::Json | CliOutputFormat::StreamJson => {
             println!("{}", serde_json::to_string_pretty(&version_json_value())?);
         }
     }
@@ -2167,7 +2240,7 @@ fn resume_session(session_path: &Path, commands: &[String], output_format: CliOu
     let (handle, session) = match load_session_reference(&session_reference) {
         Ok(loaded) => loaded,
         Err(error) => {
-            if output_format == CliOutputFormat::Json {
+            if matches!(output_format, CliOutputFormat::Json | CliOutputFormat::StreamJson) {
                 eprintln!(
                     "{}",
                     serde_json::json!({
@@ -2184,7 +2257,7 @@ fn resume_session(session_path: &Path, commands: &[String], output_format: CliOu
     let resolved_path = handle.path.clone();
 
     if commands.is_empty() {
-        if output_format == CliOutputFormat::Json {
+        if matches!(output_format, CliOutputFormat::Json | CliOutputFormat::StreamJson) {
             println!(
                 "{}",
                 serde_json::json!({
@@ -2218,7 +2291,7 @@ fn resume_session(session_path: &Path, commands: &[String], output_format: CliOu
                 .next()
                 .unwrap_or("");
             if STUB_COMMANDS.contains(&cmd_root) {
-                if output_format == CliOutputFormat::Json {
+                if matches!(output_format, CliOutputFormat::Json | CliOutputFormat::StreamJson) {
                     eprintln!(
                         "{}",
                         serde_json::json!({
@@ -2236,7 +2309,7 @@ fn resume_session(session_path: &Path, commands: &[String], output_format: CliOu
         let command = match SlashCommand::parse(raw_command) {
             Ok(Some(command)) => command,
             Ok(None) => {
-                if output_format == CliOutputFormat::Json {
+                if matches!(output_format, CliOutputFormat::Json | CliOutputFormat::StreamJson) {
                     eprintln!(
                         "{}",
                         serde_json::json!({
@@ -2251,7 +2324,7 @@ fn resume_session(session_path: &Path, commands: &[String], output_format: CliOu
                 std::process::exit(2);
             }
             Err(error) => {
-                if output_format == CliOutputFormat::Json {
+                if matches!(output_format, CliOutputFormat::Json | CliOutputFormat::StreamJson) {
                     eprintln!(
                         "{}",
                         serde_json::json!({
@@ -2273,7 +2346,7 @@ fn resume_session(session_path: &Path, commands: &[String], output_format: CliOu
                 json,
             }) => {
                 session = next_session;
-                if output_format == CliOutputFormat::Json {
+                if matches!(output_format, CliOutputFormat::Json | CliOutputFormat::StreamJson) {
                     if let Some(value) = json {
                         println!(
                             "{}",
@@ -2288,7 +2361,7 @@ fn resume_session(session_path: &Path, commands: &[String], output_format: CliOu
                 }
             }
             Err(error) => {
-                if output_format == CliOutputFormat::Json {
+                if matches!(output_format, CliOutputFormat::Json | CliOutputFormat::StreamJson) {
                     eprintln!(
                         "{}",
                         serde_json::json!({
@@ -3038,7 +3111,7 @@ fn enforce_broad_cwd_policy(
             cwd.display()
         );
         match output_format {
-            CliOutputFormat::Json => {
+            CliOutputFormat::Json | CliOutputFormat::StreamJson => {
                 eprintln!(
                     "{}",
                     serde_json::json!({
@@ -3117,12 +3190,12 @@ fn run_repl(
                 if let Some(prompt) = try_resolve_bare_skill_prompt(&cwd, &trimmed) {
                     editor.push_history(input);
                     cli.record_prompt_history(&trimmed);
-                    cli.run_turn(&prompt)?;
+                    cli.run_turn(&prompt, Vec::new())?;
                     continue;
                 }
                 editor.push_history(input);
                 cli.record_prompt_history(&trimmed);
-                cli.run_turn(&trimmed)?;
+                cli.run_turn(&trimmed, Vec::new())?;
             }
             input::ReadOutcome::Cancel => {}
             input::ReadOutcome::Exit => {
@@ -3762,8 +3835,13 @@ impl LiveCli {
         Ok(())
     }
 
-    fn run_turn(&mut self, input: &str) -> Result<(), Box<dyn std::error::Error>> {
+    fn run_turn(
+        &mut self,
+        input: &str,
+        images: Vec<(String, String)>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let (mut runtime, hook_abort_monitor) = self.prepare_turn_runtime(true)?;
+        runtime.api_client_mut().set_pending_user_images(images);
         let mut spinner = Spinner::new();
         let mut stdout = io::stdout();
         spinner.tick(
@@ -3809,16 +3887,24 @@ impl LiveCli {
         input: &str,
         output_format: CliOutputFormat,
         compact: bool,
+        images: Vec<(String, String)>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         match output_format {
-            CliOutputFormat::Text if compact => self.run_prompt_compact(input),
-            CliOutputFormat::Text => self.run_turn(input),
-            CliOutputFormat::Json => self.run_prompt_json(input),
+            CliOutputFormat::Text if compact => self.run_prompt_compact(input, images),
+            CliOutputFormat::Text => self.run_turn(input, images),
+            CliOutputFormat::Json | CliOutputFormat::StreamJson => {
+                self.run_prompt_json(input, images)
+            }
         }
     }
 
-    fn run_prompt_compact(&mut self, input: &str) -> Result<(), Box<dyn std::error::Error>> {
+    fn run_prompt_compact(
+        &mut self,
+        input: &str,
+        images: Vec<(String, String)>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let (mut runtime, hook_abort_monitor) = self.prepare_turn_runtime(false)?;
+        runtime.api_client_mut().set_pending_user_images(images);
         let mut permission_prompter = CliPermissionPrompter::new(self.permission_mode);
         let result = runtime.run_turn(input, Some(&mut permission_prompter));
         hook_abort_monitor.stop();
@@ -3830,8 +3916,13 @@ impl LiveCli {
         Ok(())
     }
 
-    fn run_prompt_json(&mut self, input: &str) -> Result<(), Box<dyn std::error::Error>> {
+    fn run_prompt_json(
+        &mut self,
+        input: &str,
+        images: Vec<(String, String)>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let (mut runtime, hook_abort_monitor) = self.prepare_turn_runtime(false)?;
+        runtime.api_client_mut().set_pending_user_images(images);
         let mut permission_prompter = CliPermissionPrompter::new(self.permission_mode);
         let result = runtime.run_turn(input, Some(&mut permission_prompter));
         hook_abort_monitor.stop();
@@ -3972,7 +4063,7 @@ impl LiveCli {
             }
             SlashCommand::Skills { args } => {
                 match classify_skills_slash_command(args.as_deref()) {
-                    SkillSlashDispatch::Invoke(prompt) => self.run_turn(&prompt)?,
+                    SkillSlashDispatch::Invoke(prompt) => self.run_turn(&prompt, Vec::new())?,
                     SkillSlashDispatch::Local => {
                         Self::print_skills(args.as_deref(), CliOutputFormat::Text)?;
                     }
@@ -4319,7 +4410,7 @@ impl LiveCli {
         let cwd = env::current_dir()?;
         match output_format {
             CliOutputFormat::Text => println!("{}", handle_agents_slash_command(args, &cwd)?),
-            CliOutputFormat::Json => println!(
+            CliOutputFormat::Json | CliOutputFormat::StreamJson => println!(
                 "{}",
                 serde_json::to_string_pretty(&handle_agents_slash_command_json(args, &cwd)?)?
             ),
@@ -4340,7 +4431,7 @@ impl LiveCli {
         let cwd = env::current_dir()?;
         match output_format {
             CliOutputFormat::Text => println!("{}", handle_mcp_slash_command(args, &cwd)?),
-            CliOutputFormat::Json => println!(
+            CliOutputFormat::Json | CliOutputFormat::StreamJson => println!(
                 "{}",
                 serde_json::to_string_pretty(&handle_mcp_slash_command_json(args, &cwd)?)?
             ),
@@ -4355,7 +4446,7 @@ impl LiveCli {
         let cwd = env::current_dir()?;
         match output_format {
             CliOutputFormat::Text => println!("{}", handle_skills_slash_command(args, &cwd)?),
-            CliOutputFormat::Json => println!(
+            CliOutputFormat::Json | CliOutputFormat::StreamJson => println!(
                 "{}",
                 serde_json::to_string_pretty(&handle_skills_slash_command_json(args, &cwd)?)?
             ),
@@ -4375,7 +4466,7 @@ impl LiveCli {
         let result = handle_plugins_slash_command(action, target, &mut manager)?;
         match output_format {
             CliOutputFormat::Text => println!("{}", result.message),
-            CliOutputFormat::Json => println!(
+            CliOutputFormat::Json | CliOutputFormat::StreamJson => println!(
                 "{}",
                 serde_json::to_string_pretty(&json!({
                     "kind": "plugin",
@@ -4694,11 +4785,64 @@ fn sessions_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
 
 fn current_session_store() -> Result<runtime::SessionStore, Box<dyn std::error::Error>> {
     let cwd = env::current_dir()?;
-    runtime::SessionStore::from_cwd(&cwd).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+    if let Ok(dir) = env::var("CLAW_SESSION_DIR") {
+        runtime::SessionStore::from_data_dir(dir, &cwd)
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+    } else {
+        runtime::SessionStore::from_cwd(&cwd)
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+    }
 }
 
 fn new_cli_session() -> Result<Session, Box<dyn std::error::Error>> {
-    Ok(Session::new().with_workspace_root(env::current_dir()?))
+    let workspace_root = env::current_dir()?;
+    // Auto-resume: if a prior session exists in this workspace, continue from it.
+    // Sessions live in  .claw/sessions/<hash>/<session>.jsonl  (legacy layout)
+    // or .claw/sessions/<session_id>.jsonl (managed layout from a previous auto-resume).
+    //
+    // CLAW_SESSION_DIR overrides the data directory so the gateway can
+    // store per-thread sessions in isolated directories even when multiple
+    // threads share the same project working directory. Both reads (auto-resume)
+    // and writes (session persistence via current_session_store) honour it.
+    let sessions_dir = current_session_store()?.sessions_dir().to_path_buf();
+    if sessions_dir.exists() {
+        let mut latest_mtime: Option<std::time::SystemTime> = None;
+        let mut latest_path: Option<std::path::PathBuf> = None;
+        let scan = |path: std::path::PathBuf,
+                    latest_mtime: &mut Option<std::time::SystemTime>,
+                    latest_path: &mut Option<std::path::PathBuf>| {
+            if path.extension().map_or(false, |e| e == "jsonl") {
+                if let Ok(meta) = std::fs::metadata(&path) {
+                    if let Ok(mtime) = meta.modified() {
+                        if latest_mtime.map_or(true, |t| mtime > t) {
+                            *latest_mtime = Some(mtime);
+                            *latest_path = Some(path);
+                        }
+                    }
+                }
+            }
+        };
+        if let Ok(top) = std::fs::read_dir(&sessions_dir) {
+            for entry in top.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    if let Ok(sub) = std::fs::read_dir(&path) {
+                        for sub_entry in sub.flatten() {
+                            scan(sub_entry.path(), &mut latest_mtime, &mut latest_path);
+                        }
+                    }
+                } else {
+                    scan(path, &mut latest_mtime, &mut latest_path);
+                }
+            }
+        }
+        if let Some(path) = latest_path {
+            if let Ok(session) = Session::load_from_path(&path) {
+                return Ok(session.with_workspace_root(workspace_root));
+            }
+        }
+    }
+    Ok(Session::new().with_workspace_root(workspace_root))
 }
 
 fn create_managed_session_handle(
@@ -4911,7 +5055,7 @@ fn print_status_snapshot(
             "{}",
             format_status_report(model, usage, permission_mode.as_str(), &context)
         ),
-        CliOutputFormat::Json => println!(
+        CliOutputFormat::Json | CliOutputFormat::StreamJson => println!(
             "{}",
             serde_json::to_string_pretty(&status_json_value(
                 Some(model),
@@ -5151,7 +5295,7 @@ fn print_sandbox_status_snapshot(
     let status = resolve_sandbox_status(runtime_config.sandbox(), &cwd);
     match output_format {
         CliOutputFormat::Text => println!("{}", format_sandbox_report(&status)),
-        CliOutputFormat::Json => println!(
+        CliOutputFormat::Json | CliOutputFormat::StreamJson => println!(
             "{}",
             serde_json::to_string_pretty(&sandbox_json_value(&status))?
         ),
@@ -5220,7 +5364,7 @@ fn print_acp_status(output_format: CliOutputFormat) -> Result<(), Box<dyn std::e
                 "ACP / Zed\n  Status           discoverability only\n  Launch           `claw acp serve` / `claw --acp` / `claw -acp` report status only; no editor daemon is available yet\n  Today            use `claw prompt`, the REPL, or `claw doctor` for local verification\n  Tracking         ROADMAP #76\n  Message          {message}"
             );
         }
-        CliOutputFormat::Json => {
+        CliOutputFormat::Json | CliOutputFormat::StreamJson => {
             println!(
                 "{}",
                 serde_json::to_string_pretty(&json!({
@@ -5437,7 +5581,7 @@ fn run_init(output_format: CliOutputFormat) -> Result<(), Box<dyn std::error::Er
     let message = init_claude_md()?;
     match output_format {
         CliOutputFormat::Text => println!("{message}"),
-        CliOutputFormat::Json => println!(
+        CliOutputFormat::Json | CliOutputFormat::StreamJson => println!(
             "{}",
             serde_json::to_string_pretty(&init_json_value(&message))?
         ),
@@ -6036,7 +6180,7 @@ fn run_export(
         );
         match output_format {
             CliOutputFormat::Text => println!("{report}"),
-            CliOutputFormat::Json => println!(
+            CliOutputFormat::Json | CliOutputFormat::StreamJson => println!(
                 "{}",
                 serde_json::to_string_pretty(&json!({
                     "kind": "export",
@@ -6057,7 +6201,7 @@ fn run_export(
                 println!();
             }
         }
-        CliOutputFormat::Json => println!(
+        CliOutputFormat::Json | CliOutputFormat::StreamJson => println!(
             "{}",
             serde_json::to_string_pretty(&json!({
                 "kind": "export",
@@ -6658,9 +6802,13 @@ fn build_runtime_with_plugin_state(
         system_prompt,
         &feature_config,
     );
-    if emit_output {
-        runtime = runtime.with_hook_progress_reporter(Box::new(CliHookProgressReporter));
-    }
+    // Always attach the hook progress reporter so that tool lifecycle events
+    // are emitted to stderr in real-time, even in --output-format json mode.
+    // The reporter only writes to stderr (eprintln!), so it never corrupts
+    // the JSON blob on stdout.  The backend's clawRuntime.ts parses these
+    // [hook ...] lines to emit tool_start / tool_end SSE events while the
+    // claw process is still running.
+    runtime = runtime.with_hook_progress_reporter(Box::new(CliHookProgressReporter));
     Ok(BuiltRuntime::new(runtime, plugin_registry, mcp_state))
 }
 
@@ -6763,6 +6911,10 @@ struct AnthropicRuntimeClient {
     tool_registry: GlobalToolRegistry,
     progress_reporter: Option<InternalPromptProgressReporter>,
     reasoning_effort: Option<String>,
+    /// One-shot user images attached to the current turn's first
+    /// request. Drained after the first `stream()` call so subsequent
+    /// tool-result iterations don't re-attach them.
+    pending_user_images: Vec<(String, String)>,
 }
 
 impl AnthropicRuntimeClient {
@@ -6795,7 +6947,21 @@ impl AnthropicRuntimeClient {
         // prompt cache is Anthropic-only so non-Anthropic variants
         // skip it.
         let resolved_model = api::resolve_model_alias(&model);
-        let client = match detect_provider_kind(&resolved_model) {
+        // If the caller explicitly configured an OpenAI-compat proxy
+        // via OPENAI_BASE_URL + OPENAI_API_KEY, route every model
+        // through it — including `claude-*` and `anthropic/*` slugs.
+        // OpenRouter and other aggregators expose Anthropic models via
+        // this path, and hardcoding the Anthropic branch would skip
+        // the proxy entirely. Matches the guard in
+        // `ProviderClient::from_model_with_anthropic_auth`.
+        let force_openai_compat = std::env::var_os("OPENAI_BASE_URL").is_some()
+            && std::env::var_os("OPENAI_API_KEY").is_some();
+        let effective_kind = if force_openai_compat {
+            ProviderKind::OpenAi
+        } else {
+            detect_provider_kind(&resolved_model)
+        };
+        let client = match effective_kind {
             ProviderKind::Anthropic => {
                 let auth = resolve_cli_auth_source()?;
                 let inner = AnthropicClient::from_auth(auth)
@@ -6828,11 +6994,16 @@ impl AnthropicRuntimeClient {
             tool_registry,
             progress_reporter,
             reasoning_effort: None,
+            pending_user_images: Vec::new(),
         })
     }
 
     fn set_reasoning_effort(&mut self, effort: Option<String>) {
         self.reasoning_effort = effort;
+    }
+
+    fn set_pending_user_images(&mut self, images: Vec<(String, String)>) {
+        self.pending_user_images = images;
     }
 }
 
@@ -6851,10 +7022,30 @@ impl ApiClient for AnthropicRuntimeClient {
             progress_reporter.mark_model_phase();
         }
         let is_post_tool = request_ends_with_tool_result(&request);
+        let mut messages = convert_messages(&request.messages);
+        // Attach any pending user images to the most recent user
+        // message (the one we're about to send). Drained so subsequent
+        // tool-result iterations within this turn don't re-attach.
+        if !self.pending_user_images.is_empty() {
+            if let Some(last_user) = messages.iter_mut().rev().find(|m| m.role == "user") {
+                let drained: Vec<(String, String)> =
+                    self.pending_user_images.drain(..).collect();
+                let mut prefix: Vec<InputContentBlock> = drained
+                    .into_iter()
+                    .map(|(media_type, data)| InputContentBlock::Image {
+                        source: ImageSource::Base64 { media_type, data },
+                    })
+                    .collect();
+                prefix.append(&mut last_user.content);
+                last_user.content = prefix;
+            } else {
+                self.pending_user_images.clear();
+            }
+        }
         let message_request = MessageRequest {
             model: self.model.clone(),
             max_tokens: max_tokens_for_model(&self.model),
-            messages: convert_messages(&request.messages),
+            messages,
             system: (!request.system_prompt.is_empty()).then(|| request.system_prompt.join("\n\n")),
             tools: self
                 .enable_tools
@@ -6917,6 +7108,11 @@ impl AnthropicRuntimeClient {
         } else {
             &mut sink
         };
+        // When emit_output is off (--output-format json mode), emit real-time
+        // streaming events to stderr as NDJSON lines prefixed with [stream].
+        // This lets the TS backend show text/thinking/tools as they happen
+        // instead of waiting for the full JSON blob on stdout at the end.
+        let stream_stderr = !self.emit_output;
         let renderer = TerminalRenderer::new();
         let mut markdown_stream = MarkdownStreamState::default();
         let mut events = Vec::new();
@@ -6974,6 +7170,9 @@ impl AnthropicRuntimeClient {
                 ApiStreamEvent::ContentBlockDelta(delta) => match delta.delta {
                     ContentBlockDelta::TextDelta { text } => {
                         if !text.is_empty() {
+                            if stream_stderr {
+                                eprintln!("[stream]{}", json!({"type": "text_delta", "text": text}));
+                            }
                             if let Some(progress_reporter) = &self.progress_reporter {
                                 progress_reporter.mark_text_phase(&text);
                             }
@@ -6990,7 +7189,10 @@ impl AnthropicRuntimeClient {
                             input.push_str(&partial_json);
                         }
                     }
-                    ContentBlockDelta::ThinkingDelta { .. } => {
+                    ContentBlockDelta::ThinkingDelta { thinking } => {
+                        if stream_stderr {
+                            eprintln!("[stream]{}", json!({"type": "thinking_delta", "thinking": thinking}));
+                        }
                         if !block_has_thinking_summary {
                             render_thinking_block_summary(out, None, false)?;
                             block_has_thinking_summary = true;
@@ -7006,6 +7208,11 @@ impl AnthropicRuntimeClient {
                             .map_err(|error| RuntimeError::new(error.to_string()))?;
                     }
                     if let Some((id, name, input)) = pending_tool.take() {
+                        if stream_stderr {
+                            let input_val: serde_json::Value = serde_json::from_str(&input)
+                                .unwrap_or(serde_json::Value::String(input.clone()));
+                            eprintln!("[stream]{}", json!({"type": "tool_start", "id": id, "name": name, "input": input_val}));
+                        }
                         if let Some(progress_reporter) = &self.progress_reporter {
                             progress_reporter.mark_tool_phase(&name, &input);
                         }
@@ -8126,6 +8333,23 @@ fn permission_policy(
     ))
 }
 
+const TOOL_RESULT_CHAR_LIMIT: usize = 16_000;
+
+fn truncate_tool_result(output: &str) -> String {
+    if output.len() <= TOOL_RESULT_CHAR_LIMIT {
+        return output.to_string();
+    }
+    let half = TOOL_RESULT_CHAR_LIMIT / 2;
+    let head: String = output.chars().take(half).collect();
+    let tail: String = {
+        let chars: Vec<char> = output.chars().collect();
+        let start = chars.len().saturating_sub(half);
+        chars[start..].iter().collect()
+    };
+    let omitted = output.len() - head.len() - tail.len();
+    format!("{head}\n\n… [{omitted} characters omitted] …\n\n{tail}")
+}
+
 fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMessage> {
     messages
         .iter()
@@ -8153,7 +8377,7 @@ fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMessage> {
                     } => InputContentBlock::ToolResult {
                         tool_use_id: tool_use_id.clone(),
                         content: vec![ToolResultContentBlock::Text {
-                            text: output.clone(),
+                            text: truncate_tool_result(output),
                         }],
                         is_error: *is_error,
                     },
@@ -8327,7 +8551,7 @@ fn print_help(output_format: CliOutputFormat) -> Result<(), Box<dyn std::error::
     let message = String::from_utf8(buffer)?;
     match output_format {
         CliOutputFormat::Text => print!("{message}"),
-        CliOutputFormat::Json => println!(
+        CliOutputFormat::Json | CliOutputFormat::StreamJson => println!(
             "{}",
             serde_json::to_string_pretty(&json!({
                 "kind": "help",
@@ -8421,6 +8645,7 @@ mod tests {
             request_id: Some("req_jobdori_789".to_string()),
             body: String::new(),
             retryable: true,
+            suggested_action: None,
         };
 
         let rendered = format_user_visible_api_error("session-issue-22", &error);
@@ -8443,6 +8668,7 @@ mod tests {
                 request_id: Some("req_jobdori_790".to_string()),
                 body: String::new(),
                 retryable: true,
+                suggested_action: None,
             }),
         };
 
@@ -8506,6 +8732,7 @@ mod tests {
             request_id: Some("req_ctx_456".to_string()),
             body: String::new(),
             retryable: false,
+            suggested_action: None,
         };
 
         let rendered = format_user_visible_api_error("session-issue-32", &error);
@@ -8537,6 +8764,7 @@ mod tests {
                 request_id: Some("req_ctx_retry_789".to_string()),
                 body: String::new(),
                 retryable: false,
+                suggested_action: None,
             }),
         };
 
@@ -8804,6 +9032,7 @@ mod tests {
                 base_commit: None,
                 reasoning_effort: None,
                 allow_broad_cwd: false,
+                image_paths: Vec::new(),
             }
         );
     }
@@ -8895,6 +9124,7 @@ mod tests {
                 base_commit: None,
                 reasoning_effort: None,
                 allow_broad_cwd: false,
+                image_paths: Vec::new(),
             }
         );
     }
@@ -8926,6 +9156,7 @@ mod tests {
                 base_commit: None,
                 reasoning_effort: None,
                 allow_broad_cwd: false,
+                image_paths: Vec::new(),
             }
         );
     }
@@ -8969,6 +9200,7 @@ mod tests {
                 base_commit: None,
                 reasoning_effort: None,
                 allow_broad_cwd: false,
+                image_paths: Vec::new(),
             }
         );
     }
@@ -9099,6 +9331,7 @@ mod tests {
                 base_commit: None,
                 reasoning_effort: None,
                 allow_broad_cwd: false,
+                image_paths: Vec::new(),
             }
         );
     }
@@ -9229,6 +9462,7 @@ mod tests {
                 base_commit: None,
                 reasoning_effort: None,
                 allow_broad_cwd: false,
+                image_paths: Vec::new(),
             }
         );
         assert_eq!(
@@ -9673,6 +9907,7 @@ mod tests {
                 base_commit: None,
                 reasoning_effort: None,
                 allow_broad_cwd: false,
+                image_paths: Vec::new(),
             }
         );
     }
@@ -9741,6 +9976,7 @@ mod tests {
                 base_commit: None,
                 reasoning_effort: None,
                 allow_broad_cwd: false,
+                image_paths: Vec::new(),
             }
         );
         assert_eq!(
@@ -9768,6 +10004,7 @@ mod tests {
                 base_commit: None,
                 reasoning_effort: None,
                 allow_broad_cwd: false,
+                image_paths: Vec::new(),
             }
         );
         let error = parse_args(&["/status".to_string()])

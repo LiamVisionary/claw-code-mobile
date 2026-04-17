@@ -23,6 +23,23 @@ impl ProviderClient {
         anthropic_auth: Option<AuthSource>,
     ) -> Result<Self, ApiError> {
         let resolved_model = providers::resolve_model_alias(model);
+
+        // Explicit OPENAI_BASE_URL override: when the user has wired
+        // up an OpenAI-compatible proxy (OpenRouter, Ollama, LM Studio,
+        // vLLM, etc.) route every model through that endpoint using
+        // OPENAI_API_KEY. Without this, namespaced names like
+        // `qwen/*` and `google/*` hit the hardcoded native provider
+        // paths (DashScope, Google AI Studio) even though the caller
+        // clearly intended the proxy — which then fails with
+        // "missing DashScope credentials" or similar.
+        if std::env::var_os("OPENAI_BASE_URL").is_some()
+            && openai_compat::has_api_key("OPENAI_API_KEY")
+        {
+            return Ok(Self::OpenAi(OpenAiCompatClient::from_env(
+                OpenAiCompatConfig::openai(),
+            )?));
+        }
+
         match providers::detect_provider_kind(&resolved_model) {
             ProviderKind::Anthropic => Ok(Self::Anthropic(match anthropic_auth {
                 Some(auth) => AnthropicClient::from_auth(auth),

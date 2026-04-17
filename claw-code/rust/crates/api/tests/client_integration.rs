@@ -84,9 +84,10 @@ async fn send_message_posts_json_and_parses_response() {
         request.headers.get("user-agent").map(String::as_str),
         Some("claude-code/0.1.0")
     );
+    // When bearer auth is present, the oauth-2025-04-20 beta header is added
     assert_eq!(
         request.headers.get("anthropic-beta").map(String::as_str),
-        Some("claude-code-20250219,prompt-caching-scope-2026-01-05")
+        Some("claude-code-20250219,prompt-caching-scope-2026-01-05,oauth-2025-04-20")
     );
     let body: serde_json::Value =
         serde_json::from_str(&request.body).expect("request body should be json");
@@ -431,9 +432,9 @@ async fn retries_retryable_failures_before_succeeding() {
         state.clone(),
         vec![
             http_response(
-                "429 Too Many Requests",
+                "500 Internal Server Error",
                 "application/json",
-                "{\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"slow down\"}}",
+                "{\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"internal error\"}}",
             ),
             http_response(
                 "200 OK",
@@ -553,9 +554,9 @@ async fn retries_multiple_retryable_failures_with_exponential_backoff_and_jitter
         state.clone(),
         vec![
             http_response(
-                "429 Too Many Requests",
+                "500 Internal Server Error",
                 "application/json",
-                "{\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"slow down\"}}",
+                "{\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"server error\"}}",
             ),
             http_response(
                 "500 Internal Server Error",
@@ -568,9 +569,9 @@ async fn retries_multiple_retryable_failures_with_exponential_backoff_and_jitter
                 "{\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"busy\"}}",
             ),
             http_response(
-                "429 Too Many Requests",
+                "500 Internal Server Error",
                 "application/json",
-                "{\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"slow down again\"}}",
+                "{\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"still erroring\"}}",
             ),
             http_response(
                 "503 Service Unavailable",
