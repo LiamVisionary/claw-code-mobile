@@ -52,6 +52,39 @@ export function stripMalformedCodeSpans(content: string): string {
 }
 
 /** Run every safe preprocessor over an assistant message before it hits the markdown renderer. */
+/**
+ * Convert YAML frontmatter code blocks into a compact readable format.
+ * Turns:
+ *   ```yaml
+ *   ---
+ *   name: test-memory
+ *   description: A test note
+ *   type: project
+ *   ---
+ *   ```
+ * Into:
+ *   > **name:** test-memory
+ *   > **description:** A test note
+ *   > **type:** project
+ */
+function formatYamlFrontmatter(content: string): string {
+  if (!content) return content;
+  return content.replace(
+    /```ya?ml\s*\n---\n([\s\S]*?)\n---\s*\n```/g,
+    (_match, body: string) => {
+      const lines = body
+        .split("\n")
+        .filter((l: string) => l.trim())
+        .map((l: string) => {
+          const m = l.match(/^(\s*[\w-]+):\s*(.*)/);
+          if (m) return `> **${m[1].trim()}:** ${m[2]}`;
+          return `> ${l}`;
+        });
+      return lines.join("\n");
+    }
+  );
+}
+
 export function cleanModelMarkdown(content: string): string {
-  return stripMalformedCodeSpans(fixupStuckHeaders(content));
+  return formatYamlFrontmatter(stripMalformedCodeSpans(fixupStuckHeaders(content)));
 }
