@@ -35,7 +35,7 @@ export function VaultNotesPane({ palette }: { palette: Palette }) {
 
   const source = useMemo(() => {
     if (!vault?.enabled) return null;
-    if (vault.provider === "backend" && vault.path) {
+    if ((vault.provider === "backend" || vault.provider === "sync") && vault.path) {
       return { kind: "backend" as const, path: vault.path };
     }
     if (vault.provider === "local" && vault.localDirectoryUri) {

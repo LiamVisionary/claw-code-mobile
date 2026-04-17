@@ -31,7 +31,7 @@ export default function NoteReader() {
         if (params.provider === "local" && params.uri) {
           const text = await readLocalNoteContent(params.uri);
           if (!cancelled) setContent(text);
-        } else if (params.provider === "backend" && params.vault && params.note) {
+        } else if ((params.provider === "backend" || params.provider === "sync") && params.vault && params.note) {
           if (!serverUrl || !bearerToken) {
             throw new Error("Server URL or token missing.");
           }
