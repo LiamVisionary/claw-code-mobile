@@ -1347,7 +1347,7 @@ export default function SettingsScreen() {
     settings.obsidianVault?.useForReference ?? true
   );
   const [obsidianUseMcpVault, setObsidianUseMcpVault] = useState(
-    settings.obsidianVault?.useMcpVault ?? true
+    settings.obsidianVault?.useMcpVault ?? false
   );
   const [obsidianStatus, setObsidianStatus] = useState<"idle" | "ok" | "error">(
     // If vault was previously connected and enabled, show as connected
@@ -1410,7 +1410,7 @@ export default function SettingsScreen() {
     setObsidianLocalDisplay(settings.obsidianVault?.localDisplayPath ?? "");
     setObsidianUseForMemory(settings.obsidianVault?.useForMemory ?? true);
     setObsidianUseForReference(settings.obsidianVault?.useForReference ?? true);
-    setObsidianUseMcpVault(settings.obsidianVault?.useMcpVault ?? true);
+    setObsidianUseMcpVault(settings.obsidianVault?.useMcpVault ?? false);
     setQueue(buildQueue(settings));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [_hasHydrated]);
@@ -2531,7 +2531,7 @@ export default function SettingsScreen() {
                       <Hairline palette={palette} inset={20} />
                       <ToggleRow
                         title="Vault tools (MCP)"
-                        description="Give the AI rich vault tools — search with relevance ranking, frontmatter editing, tag management, and more."
+                        description="Rich vault tools (search, frontmatter, tags). Adds ~60s startup time per message — enable only when needed."
                         value={obsidianUseMcpVault}
                         onValueChange={setObsidianUseMcpVault}
                         palette={palette}
