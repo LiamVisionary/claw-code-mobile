@@ -522,6 +522,10 @@ type GatewayState = {
     closeStream: (threadId: string) => void;
     loadTerminal: (threadId: string) => Promise<void>;
     sendTerminalCommand: (threadId: string, command: string) => Promise<void>;
+    sendTerminalStdin: (threadId: string, data: string) => Promise<void>;
+    interruptTerminal: (threadId: string) => Promise<void>;
+    killTerminal: (threadId: string) => Promise<void>;
+    snapshotTerminal: (threadId: string) => Promise<string[]>;
     setActiveThread: (threadId: string) => void;
     /** Respond to a permission request (approve/deny) */
     respondToPermission: (threadId: string, permissionId: string, approved: boolean) => Promise<void>;
@@ -1269,6 +1273,46 @@ export const useGatewayStore = create<GatewayState>()(
             headers,
             body: JSON.stringify({ command }),
           });
+        },
+
+        sendTerminalStdin: async (threadId: string, data: string) => {
+          const state = get();
+          const { baseUrl, headers } = getClientConfig(state);
+          await fetch(`${baseUrl}/threads/${threadId}/terminal/stdin`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ data }),
+          });
+        },
+
+        interruptTerminal: async (threadId: string) => {
+          const state = get();
+          const { baseUrl, headers } = getClientConfig(state);
+          await fetch(`${baseUrl}/threads/${threadId}/terminal/interrupt`, {
+            method: "POST",
+            headers,
+          });
+        },
+
+        killTerminal: async (threadId: string) => {
+          const state = get();
+          const { baseUrl, headers } = getClientConfig(state);
+          await fetch(`${baseUrl}/threads/${threadId}/terminal/kill`, {
+            method: "POST",
+            headers,
+          });
+        },
+
+        snapshotTerminal: async (threadId: string): Promise<string[]> => {
+          const state = get();
+          const { baseUrl, headers } = getClientConfig(state);
+          const res = await fetch(
+            `${baseUrl}/threads/${threadId}/terminal/snapshot`,
+            { headers }
+          );
+          if (!res.ok) return [];
+          const data = await res.json();
+          return Array.isArray(data.lines) ? (data.lines as string[]) : [];
         },
 
         setActiveThread: (threadId: string) => set({ activeThreadId: threadId }),

@@ -1,4 +1,4 @@
-import raw from './app.json';
+import raw from './app.json' with { type: 'json' };
 import type { ExpoConfig } from 'expo/config';
 
 const base = (raw as { expo: ExpoConfig }).expo;
