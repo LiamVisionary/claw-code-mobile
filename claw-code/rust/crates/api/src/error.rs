@@ -53,6 +53,8 @@ pub enum ApiError {
         request_id: Option<String>,
         body: String,
         retryable: bool,
+        /// Suggested user action based on error type (e.g., "Reduce prompt size" for 413)
+        suggested_action: Option<String>,
     },
     RetriesExhausted {
         attempts: u32,
@@ -62,6 +64,11 @@ pub enum ApiError {
     BackoffOverflow {
         attempt: u32,
         base_delay: Duration,
+    },
+    RequestBodySizeExceeded {
+        estimated_bytes: usize,
+        max_bytes: usize,
+        provider: &'static str,
     },
 }
 
@@ -129,7 +136,8 @@ impl ApiError {
             | Self::Io(_)
             | Self::Json { .. }
             | Self::InvalidSseFrame(_)
-            | Self::BackoffOverflow { .. } => false,
+            | Self::BackoffOverflow { .. }
+            | Self::RequestBodySizeExceeded { .. } => false,
         }
     }
 
@@ -147,7 +155,8 @@ impl ApiError {
             | Self::Io(_)
             | Self::Json { .. }
             | Self::InvalidSseFrame(_)
-            | Self::BackoffOverflow { .. } => None,
+            | Self::BackoffOverflow { .. }
+            | Self::RequestBodySizeExceeded { .. } => None,
         }
     }
 
@@ -172,6 +181,7 @@ impl ApiError {
                 "provider_transport"
             }
             Self::InvalidApiKeyEnv(_) | Self::Io(_) | Self::Json { .. } => "runtime_io",
+            Self::RequestBodySizeExceeded { .. } => "request_size",
         }
     }
 
@@ -194,7 +204,8 @@ impl ApiError {
             | Self::Io(_)
             | Self::Json { .. }
             | Self::InvalidSseFrame(_)
-            | Self::BackoffOverflow { .. } => false,
+            | Self::BackoffOverflow { .. }
+            | Self::RequestBodySizeExceeded { .. } => false,
         }
     }
 
@@ -223,12 +234,14 @@ impl ApiError {
             | Self::Io(_)
             | Self::Json { .. }
             | Self::InvalidSseFrame(_)
-            | Self::BackoffOverflow { .. } => false,
+            | Self::BackoffOverflow { .. }
+            | Self::RequestBodySizeExceeded { .. } => false,
         }
     }
 }
 
 impl Display for ApiError {
+    #[allow(clippy::too_many_lines)]
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::MissingCredentials {
@@ -323,6 +336,14 @@ impl Display for ApiError {
             } => write!(
                 f,
                 "retry backoff overflowed on attempt {attempt} with base delay {base_delay:?}"
+            ),
+            Self::RequestBodySizeExceeded {
+                estimated_bytes,
+                max_bytes,
+                provider,
+            } => write!(
+                f,
+                "request body size ({estimated_bytes} bytes) exceeds {provider} limit ({max_bytes} bytes); reduce prompt length or context before retrying"
             ),
         }
     }
@@ -469,6 +490,7 @@ mod tests {
             request_id: Some("req_jobdori_123".to_string()),
             body: String::new(),
             retryable: true,
+            suggested_action: None,
         };
 
         assert!(error.is_generic_fatal_wrapper());
@@ -491,6 +513,7 @@ mod tests {
                 request_id: Some("req_nested_456".to_string()),
                 body: String::new(),
                 retryable: true,
+                suggested_action: None,
             }),
         };
 
@@ -511,6 +534,7 @@ mod tests {
             request_id: Some("req_ctx_123".to_string()),
             body: String::new(),
             retryable: false,
+            suggested_action: None,
         };
 
         assert!(error.is_context_window_failure());

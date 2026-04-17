@@ -122,6 +122,15 @@ const MODEL_REGISTRY: &[(&str, ProviderMetadata)] = &[
             default_base_url: openai_compat::DEFAULT_XAI_BASE_URL,
         },
     ),
+    (
+        "kimi",
+        ProviderMetadata {
+            provider: ProviderKind::OpenAi,
+            auth_env: "DASHSCOPE_API_KEY",
+            base_url_env: "DASHSCOPE_BASE_URL",
+            default_base_url: openai_compat::DEFAULT_DASHSCOPE_BASE_URL,
+        },
+    ),
 ];
 
 #[must_use]
@@ -144,7 +153,10 @@ pub fn resolve_model_alias(model: &str) -> String {
                     "grok-2" => "grok-2",
                     _ => trimmed,
                 },
-                ProviderKind::OpenAi => trimmed,
+                ProviderKind::OpenAi => match *alias {
+                    "kimi" => "kimi-k2.5",
+                    _ => trimmed,
+                },
             })
         })
         .map_or_else(|| trimmed.to_string(), ToOwned::to_owned)
@@ -187,6 +199,16 @@ pub fn metadata_for_model(model: &str) -> Option<ProviderMetadata> {
     // Uses the OpenAi provider kind because DashScope speaks the OpenAI REST
     // shape — only the base URL and auth env var differ.
     if canonical.starts_with("qwen/") || canonical.starts_with("qwen-") {
+        return Some(ProviderMetadata {
+            provider: ProviderKind::OpenAi,
+            auth_env: "DASHSCOPE_API_KEY",
+            base_url_env: "DASHSCOPE_BASE_URL",
+            default_base_url: openai_compat::DEFAULT_DASHSCOPE_BASE_URL,
+        });
+    }
+    // Kimi models (kimi-k2.5, kimi-k1.5, etc.) via DashScope compatible-mode.
+    // Routes kimi/* and kimi-* model names to DashScope endpoint.
+    if canonical.starts_with("kimi/") || canonical.starts_with("kimi-") {
         return Some(ProviderMetadata {
             provider: ProviderKind::OpenAi,
             auth_env: "DASHSCOPE_API_KEY",
@@ -266,6 +288,12 @@ pub fn model_token_limit(model: &str) -> Option<ModelTokenLimit> {
         "grok-3" | "grok-3-mini" => Some(ModelTokenLimit {
             max_output_tokens: 64_000,
             context_window_tokens: 131_072,
+        }),
+        // Kimi models via DashScope (Moonshot AI)
+        // Source: https://platform.moonshot.cn/docs/intro
+        "kimi-k2.5" | "kimi-k1.5" => Some(ModelTokenLimit {
+            max_output_tokens: 16_384,
+            context_window_tokens: 256_000,
         }),
         _ => None,
     }
@@ -555,6 +583,34 @@ mod tests {
     }
 
     #[test]
+    fn kimi_prefix_routes_to_dashscope() {
+        // Kimi models via DashScope (kimi-k2.5, kimi-k1.5, etc.)
+        let meta = super::metadata_for_model("kimi-k2.5")
+            .expect("kimi-k2.5 must resolve to DashScope metadata");
+        assert_eq!(meta.auth_env, "DASHSCOPE_API_KEY");
+        assert_eq!(meta.base_url_env, "DASHSCOPE_BASE_URL");
+        assert!(meta.default_base_url.contains("dashscope.aliyuncs.com"));
+        assert_eq!(meta.provider, ProviderKind::OpenAi);
+
+        // With provider prefix
+        let meta2 = super::metadata_for_model("kimi/kimi-k2.5")
+            .expect("kimi/kimi-k2.5 must resolve to DashScope metadata");
+        assert_eq!(meta2.auth_env, "DASHSCOPE_API_KEY");
+        assert_eq!(meta2.provider, ProviderKind::OpenAi);
+
+        // Different kimi variants
+        let meta3 = super::metadata_for_model("kimi-k1.5")
+            .expect("kimi-k1.5 must resolve to DashScope metadata");
+        assert_eq!(meta3.auth_env, "DASHSCOPE_API_KEY");
+    }
+
+    #[test]
+    fn kimi_alias_resolves_to_kimi_k2_5() {
+        assert_eq!(super::resolve_model_alias("kimi"), "kimi-k2.5");
+        assert_eq!(super::resolve_model_alias("KIMI"), "kimi-k2.5"); // case insensitive
+    }
+
+    #[test]
     fn keeps_existing_max_token_heuristic() {
         assert_eq!(max_tokens_for_model("opus"), 32_000);
         assert_eq!(max_tokens_for_model("grok-3"), 64_000);
@@ -692,6 +748,69 @@ mod tests {
 
         preflight_message_request(&request)
             .expect("models without context metadata should skip the guarded preflight");
+    }
+
+    #[test]
+    fn returns_context_window_metadata_for_kimi_models() {
+        // kimi-k2.5
+        let k25_limit = model_token_limit("kimi-k2.5")
+            .expect("kimi-k2.5 should have token limit metadata");
+        assert_eq!(k25_limit.max_output_tokens, 16_384);
+        assert_eq!(k25_limit.context_window_tokens, 256_000);
+
+        // kimi-k1.5
+        let k15_limit = model_token_limit("kimi-k1.5")
+            .expect("kimi-k1.5 should have token limit metadata");
+        assert_eq!(k15_limit.max_output_tokens, 16_384);
+        assert_eq!(k15_limit.context_window_tokens, 256_000);
+    }
+
+    #[test]
+    fn kimi_alias_resolves_to_kimi_k25_token_limits() {
+        // The "kimi" alias resolves to "kimi-k2.5" via resolve_model_alias()
+        let alias_limit = model_token_limit("kimi")
+            .expect("kimi alias should resolve to kimi-k2.5 limits");
+        let direct_limit = model_token_limit("kimi-k2.5")
+            .expect("kimi-k2.5 should have limits");
+        assert_eq!(alias_limit.max_output_tokens, direct_limit.max_output_tokens);
+        assert_eq!(
+            alias_limit.context_window_tokens,
+            direct_limit.context_window_tokens
+        );
+    }
+
+    #[test]
+    fn preflight_blocks_oversized_requests_for_kimi_models() {
+        let request = MessageRequest {
+            model: "kimi-k2.5".to_string(),
+            max_tokens: 16_384,
+            messages: vec![InputMessage {
+                role: "user".to_string(),
+                content: vec![InputContentBlock::Text {
+                    text: "x".repeat(1_000_000), // Large input to exceed context window
+                }],
+            }],
+            system: Some("Keep the answer short.".to_string()),
+            tools: None,
+            tool_choice: None,
+            stream: true,
+            ..Default::default()
+        };
+
+        let error = preflight_message_request(&request)
+            .expect_err("oversized request should be rejected for kimi models");
+
+        match error {
+            ApiError::ContextWindowExceeded {
+                model,
+                context_window_tokens,
+                ..
+            } => {
+                assert_eq!(model, "kimi-k2.5");
+                assert_eq!(context_window_tokens, 256_000);
+            }
+            other => panic!("expected context-window preflight failure, got {other:?}"),
+        }
     }
 
     #[test]
