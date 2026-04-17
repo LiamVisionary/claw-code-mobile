@@ -245,8 +245,8 @@ function writeMcpVaultConfig(cwd: string, vaultPath: string): string {
   const mcpConfig = {
     mcpServers: {
       obsidian: {
-        command: "npx",
-        args: ["@bitbonsai/mcpvault@latest", vaultPath],
+        command: "mcpvault",
+        args: [vaultPath],
       },
     },
   };

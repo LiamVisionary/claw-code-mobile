@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef } from "react";
+import { memo, useCallback, useEffect, useRef } from "react";
 import { Text } from "react-native";
 import Animated, {
   useSharedValue,
@@ -16,9 +16,15 @@ type Props = {
 };
 
 /**
- * Animated letter component — each letter fades in and rises from below.
+ * Animated letter — starts below and transparent, rises into place.
  */
-function AnimatedLetter({ char, delay }: { char: string; delay: number }) {
+const AnimatedLetter = memo(function AnimatedLetter({
+  char,
+  delay,
+}: {
+  char: string;
+  delay: number;
+}) {
   const progress = useSharedValue(0);
 
   useEffect(() => {
@@ -38,37 +44,36 @@ function AnimatedLetter({ char, delay }: { char: string; delay: number }) {
     ],
   }));
 
-  // Whitespace doesn't need animation
   if (char === " " || char === "\n") {
     return <Text>{char}</Text>;
   }
 
   return <Animated.Text style={style}>{char}</Animated.Text>;
-}
+});
 
 /**
- * Streaming text with per-letter blur-in-up animation.
+ * Streaming markdown text with per-letter animation on new content.
  *
- * Words that have already been rendered are plain text.
- * When a new word finishes streaming in, each of its letters
- * animates individually — starting slightly below and transparent,
- * rising to final position and full opacity with a stagger.
+ * Renders the full content as a Text tree. Already-streamed words are
+ * plain text; newly arrived words animate letter-by-letter with a
+ * staggered rise+fade effect.
+ *
+ * NOTE: This renders as plain styled Text (not Markdown) during streaming.
+ * The parent component should switch to a full Markdown renderer once
+ * streaming completes to get rich formatting (bold, code blocks, etc.).
+ * During streaming, basic readability is fine — users are watching text
+ * arrive, not reading formatted documentation.
  */
 function StreamingTextBase({ content, style, streaming }: Props) {
   const prevWordCountRef = useRef(0);
-  const prevContentRef = useRef("");
 
-  // Split into words (preserving whitespace as separate tokens)
   const tokens = content.split(/(\s+)/);
-
   const prevWordCount = prevWordCountRef.current;
 
   useEffect(() => {
     prevWordCountRef.current = tokens.length;
-    prevContentRef.current = content;
   }, [content]);
 
-  // Completed messages: plain text, no animation
   if (!streaming) {
     return (
       <Text style={style} selectable>
@@ -80,21 +85,18 @@ function StreamingTextBase({ content, style, streaming }: Props) {
   return (
     <Text style={style} selectable>
       {tokens.map((token, wordIdx) => {
-        // Already rendered words — plain text
         if (wordIdx < prevWordCount) {
           return <Text key={wordIdx}>{token}</Text>;
         }
 
-        // Whitespace token
         if (/^\s+$/.test(token)) {
           return <Text key={wordIdx}>{token}</Text>;
         }
 
-        // New word — animate each letter, staggered across all new words
-        const wordOffset = wordIdx - prevWordCount;
         const charsInPriorNewWords = tokens
           .slice(prevWordCount, wordIdx)
-          .join("").replace(/\s/g, "").length;
+          .join("")
+          .replace(/\s/g, "").length;
 
         return (
           <Text key={wordIdx}>
