@@ -26,3 +26,12 @@ expo-env.d.ts
 .env.local
 .env.production
 .env.development
+
+# Local data & sessions
+.claude/
+.claw/
+.uploads/
+backend/data/
+claw-code/rust/.claw/
+modules/
+package-lock.json
