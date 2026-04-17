@@ -2684,7 +2684,7 @@ function resolveToolMeta(step: { tool: string; label?: string; detail?: string }
     const isWrite = /edit|write|create|append|mkdir/i.test(step.tool);
     return isWrite ? TOOL_META.vault_write : TOOL_META.vault_read;
   }
-  return resolveToolMeta(step);
+  return TOOL_META[step.tool] ?? TOOL_META.unknown;
 }
 
 const THINKING_PHRASES = [
