@@ -476,9 +476,14 @@ function AddModelForm({
     sizeBytes?: number;
     parameterSize?: string;
     quantization?: string;
+    // Endpoint (/v1 URL) that actually serves this model, stamped on each
+    // model so the picker works with multiple runners side-by-side.
+    endpoint: string;
+    runner: string;
   };
+  /** "current" = scan the backend host. "other" = scan an arbitrary URL. */
+  const [localHostMode, setLocalHostMode] = useState<"current" | "other">("current");
   const [localModels, setLocalModels] = useState<DiscoveredLocalModel[] | null>(null);
-  const [localRunner, setLocalRunner] = useState<string | null>(null);
   const [localDiscovering, setLocalDiscovering] = useState(false);
   const [localDiscoverError, setLocalDiscoverError] = useState<string | null>(null);
 
@@ -490,10 +495,18 @@ function AddModelForm({
       setLocalDiscoverError("Configure server connection first.");
       return;
     }
-    // The endpoint the user enters is the /v1 URL; Ollama's discovery
-    // lives one level up at /api/tags, so strip a trailing /v1.
-    const raw = endpoint.trim() || "http://127.0.0.1:11434/v1";
-    const baseUrl = raw.replace(/\/v1\/?$/, "").replace(/\/+$/, "");
+    // Current-backend mode sends no baseUrl — the server scans its own
+    // loopback for known runner ports. Other mode sends the user-entered
+    // URL (trailing /v1 stripped, since discovery uses /api/tags or /models).
+    let body: { baseUrl?: string } = {};
+    if (localHostMode === "other") {
+      const raw = endpoint.trim();
+      if (!raw) {
+        setLocalDiscoverError("Enter a URL first.");
+        return;
+      }
+      body = { baseUrl: raw.replace(/\/v1\/?$/, "").replace(/\/+$/, "") };
+    }
     setLocalDiscovering(true);
     setLocalDiscoverError(null);
     try {
@@ -503,16 +516,22 @@ function AddModelForm({
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ baseUrl }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) {
         setLocalDiscoverError(data?.error ?? `Server returned ${res.status}`);
         setLocalModels(null);
       } else {
-        setLocalModels(data.models ?? []);
-        setLocalRunner(data.runner ?? null);
-        if (data.endpoint) setEndpoint(data.endpoint);
+        // Flatten runners into one list so pills render uniformly even if
+        // Ollama + LM Studio are both up.
+        const flat: DiscoveredLocalModel[] = [];
+        for (const r of data.runners ?? []) {
+          for (const m of r.models ?? []) {
+            flat.push({ ...m, endpoint: r.endpoint, runner: r.runner });
+          }
+        }
+        setLocalModels(flat);
       }
     } catch (err: any) {
       setLocalDiscoverError(err?.message ?? "Discovery failed");
@@ -1192,28 +1211,52 @@ function AddModelForm({
             </>
           )}
 
-          {/* Local provider — endpoint URL + discoverable model picker */}
+          {/* Local provider — pick where the model server lives, then scan. */}
           {provider === "local" && (
             <>
-              <Field
-                placeholder="Endpoint, e.g. http://127.0.0.1:11434/v1"
-                value={endpoint}
-                onChangeText={setEndpoint}
-                palette={palette}
-                keyboardType="url"
+              <Text
+                style={{
+                  color: palette.textSoft,
+                  fontSize: 12,
+                  lineHeight: 17,
+                  marginLeft: 4,
+                }}
+              >
+                Where is the model server?
+              </Text>
+              <SegmentedControl
+                values={["Current backend", "Other"]}
+                selectedIndex={localHostMode === "current" ? 0 : 1}
+                onChange={(e) => {
+                  const idx = e.nativeEvent.selectedSegmentIndex;
+                  setLocalHostMode(idx === 0 ? "current" : "other");
+                  setLocalModels(null);
+                  setLocalDiscoverError(null);
+                }}
               />
               <Text
                 style={{
                   color: palette.textSoft,
                   fontSize: 12,
                   lineHeight: 17,
-                  marginTop: -4,
+                  marginTop: -2,
                   marginLeft: 4,
                 }}
               >
-                OpenAI-compatible URL as seen from the backend host. Tap
-                Detect to list installed models and skip the typing.
+                {localHostMode === "current"
+                  ? "Scan the same host your backend is running on (Ollama, LM Studio, llama.cpp, vLLM)."
+                  : "Reach a model server at a custom URL — LAN IP, tunnel, or remote host."}
               </Text>
+
+              {localHostMode === "other" && (
+                <Field
+                  placeholder="http://your-host:11434"
+                  value={endpoint}
+                  onChangeText={setEndpoint}
+                  palette={palette}
+                  keyboardType="url"
+                />
+              )}
 
               <GlassButton
                 onPress={discoverLocalModels}
@@ -1233,10 +1276,10 @@ function AddModelForm({
                   }}
                 >
                   {localDiscovering
-                    ? "Detecting…"
+                    ? "Scanning…"
                     : localModels
-                    ? "Re-detect models"
-                    : "Detect installed models"}
+                    ? "Rescan"
+                    : "Scan for models"}
                 </Text>
               </GlassButton>
 
@@ -1277,10 +1320,8 @@ function AddModelForm({
                       marginLeft: 4,
                     }}
                   >
-                    {localRunner === "ollama" ? "Ollama" : "OpenAI-compatible"}
-                    {" · "}
                     {localModels.length} model
-                    {localModels.length === 1 ? "" : "s"} found
+                    {localModels.length === 1 ? "" : "s"} found — tap to select
                   </Text>
                   <ScrollView
                     horizontal
@@ -1288,12 +1329,16 @@ function AddModelForm({
                     contentContainerStyle={{ gap: 8, paddingRight: 4 }}
                   >
                     {localModels.map((m) => {
-                      const selected = name === m.name;
+                      const selected =
+                        name === m.name && endpoint === m.endpoint;
                       return (
                         <TouchableBounce
-                          key={m.name}
+                          key={`${m.runner}:${m.name}`}
                           sensory
-                          onPress={() => setName(m.name)}
+                          onPress={() => {
+                            setName(m.name);
+                            setEndpoint(m.endpoint);
+                          }}
                         >
                           <View
                             style={{
@@ -1322,13 +1367,6 @@ function AddModelForm({
                   </ScrollView>
                 </View>
               )}
-
-              <Field
-                placeholder="Model name or path"
-                value={name}
-                onChangeText={setName}
-                palette={palette}
-              />
             </>
           )}
 
