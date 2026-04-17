@@ -1345,10 +1345,12 @@ export default function SettingsScreen() {
     settings.obsidianVault?.useForReference ?? true
   );
   const [obsidianStatus, setObsidianStatus] = useState<"idle" | "ok" | "error">(
-    "idle"
+    // If vault was previously connected and enabled, show as connected
+    (settings.obsidianVault?.enabled && (settings.obsidianVault?.path || settings.obsidianVault?.localDirectoryUri)) ? "ok" : "idle"
   );
   const [obsidianMessage, setObsidianMessage] = useState<string | null>(null);
   const [obsidianChecking, setObsidianChecking] = useState(false);
+  const [detectedVaults, setDetectedVaults] = useState<{ path: string; name: string; noteCount: number }[]>([]);
 
   const effectiveScheme =
     darkMode === "system" ? scheme ?? "light" : darkMode;
@@ -1496,15 +1498,21 @@ export default function SettingsScreen() {
     setObsidianLocalDisplay(s.obsidianLocalDisplay);
     setObsidianUseForMemory(s.obsidianUseForMemory);
     setObsidianUseForReference(s.obsidianUseForReference);
+    setObsidianStatus(
+      (s.obsidianEnabled && (s.obsidianPath || s.obsidianLocalUri)) ? "ok" : "idle"
+    );
+    setObsidianMessage(null);
+    setDetectedVaults([]);
   };
 
-  const validateObsidianBackend = async () => {
+  const validateObsidianBackend = async (pathOverride?: string) => {
+    const vaultPath = pathOverride ?? obsidianPath;
     if (!serverUrl || !bearerToken) {
       setObsidianMessage("Set server URL and token first.");
       setObsidianStatus("error");
       return;
     }
-    if (!obsidianPath.trim()) {
+    if (!vaultPath.trim()) {
       setObsidianMessage("Enter a vault path first.");
       setObsidianStatus("error");
       return;
@@ -1521,7 +1529,7 @@ export default function SettingsScreen() {
             Authorization: `Bearer ${bearerToken}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ path: obsidianPath.trim() }),
+          body: JSON.stringify({ path: vaultPath.trim() }),
         }
       );
       const data = await res.json();
@@ -1531,14 +1539,53 @@ export default function SettingsScreen() {
       } else {
         const n = data.noteCount ?? 0;
         setObsidianMessage(
-          `Connected — ${n} note${n === 1 ? "" : "s"} found` +
-            (data.resolvedPath ? ` at ${data.resolvedPath}` : "")
+          `Connected — ${n} note${n === 1 ? "" : "s"} found`
         );
         setObsidianStatus("ok");
         setObsidianEnabled(true);
       }
     } catch (err: any) {
       setObsidianMessage(err.message ?? "Validation failed");
+      setObsidianStatus("error");
+    } finally {
+      setObsidianChecking(false);
+    }
+  };
+
+  const detectVaultsOnBackend = async () => {
+    if (!serverUrl || !bearerToken) {
+      setObsidianMessage("Set server URL and token first.");
+      setObsidianStatus("error");
+      return;
+    }
+    setObsidianChecking(true);
+    setObsidianMessage(null);
+    setDetectedVaults([]);
+    try {
+      const res = await fetch(
+        `${serverUrl.replace(/\/+$/, "")}/obsidian/detect`,
+        {
+          headers: { Authorization: `Bearer ${bearerToken}` },
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        setObsidianMessage(data.error ?? `Server returned ${res.status}`);
+        setObsidianStatus("error");
+      } else if (!data.vaults?.length) {
+        setObsidianMessage("No Obsidian vaults found on server. Enter a path manually.");
+        setObsidianStatus("error");
+      } else if (data.vaults.length === 1) {
+        // Single vault — auto-connect
+        const v = data.vaults[0];
+        setObsidianPath(v.path);
+        await validateObsidianBackend(v.path);
+        return; // validateObsidianBackend handles setObsidianChecking
+      } else {
+        setDetectedVaults(data.vaults);
+      }
+    } catch (err: any) {
+      setObsidianMessage(err.message ?? "Detection failed");
       setObsidianStatus("error");
     } finally {
       setObsidianChecking(false);
@@ -1922,89 +1969,142 @@ export default function SettingsScreen() {
                 setObsidianProvider(k as "backend" | "local");
                 setObsidianStatus("idle");
                 setObsidianMessage(null);
+                setDetectedVaults([]);
               }}
               palette={palette}
             />
             {obsidianProvider === "backend" ? (
               <>
-                <Field
-                  placeholder="Vault path (absolute path on your backend host)"
-                  value={obsidianPath}
-                  onChangeText={setObsidianPath}
-                  palette={palette}
-                />
-                <TouchableBounce sensory onPress={validateObsidianBackend}>
-                  <View
-                    style={{
+                {/* Show detected vaults as tappable pills */}
+                {detectedVaults.length > 0 && !obsidianPath.trim() && (
+                  <View style={{ gap: 6 }}>
+                    <Text style={{ color: palette.textMuted, fontSize: 12, fontWeight: "600", letterSpacing: 0.8, textTransform: "uppercase" }}>
+                      Found on server
+                    </Text>
+                    {detectedVaults.map((v) => (
+                      <TouchableBounce
+                        key={v.path}
+                        sensory
+                        onPress={() => {
+                          setObsidianPath(v.path);
+                          setDetectedVaults([]);
+                          // Auto-validate
+                          setTimeout(() => validateObsidianBackend(v.path), 100);
+                        }}
+                      >
+                        <View style={{
+                          backgroundColor: palette.surfaceAlt,
+                          borderRadius: 10,
+                          paddingHorizontal: 14,
+                          paddingVertical: 10,
+                          flexDirection: "row",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                        }}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ color: palette.text, fontSize: 14, fontWeight: "600" }}>{v.name}</Text>
+                            <Text style={{ color: palette.textMuted, fontSize: 11, marginTop: 2 }} numberOfLines={1}>{v.path}</Text>
+                          </View>
+                          <Text style={{ color: palette.textSoft, fontSize: 12 }}>
+                            {v.noteCount} note{v.noteCount === 1 ? "" : "s"}
+                          </Text>
+                        </View>
+                      </TouchableBounce>
+                    ))}
+                  </View>
+                )}
+                {/* Show path field only if no vault is connected yet, or user wants to change */}
+                {obsidianStatus !== "ok" && (
+                  <Field
+                    placeholder="Vault path on server (or tap Detect below)"
+                    value={obsidianPath}
+                    onChangeText={setObsidianPath}
+                    palette={palette}
+                  />
+                )}
+                {/* Connected vault display */}
+                {obsidianStatus === "ok" && obsidianPath.trim() && (
+                  <View style={{
+                    backgroundColor: palette.surfaceAlt,
+                    borderRadius: 12,
+                    paddingHorizontal: 16,
+                    paddingVertical: 14,
+                  }}>
+                    <Text style={{ color: palette.textMuted, fontSize: 11, fontWeight: "600", letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 4 }}>
+                      Connected vault
+                    </Text>
+                    <Text style={{ color: palette.text, fontSize: 14, fontWeight: "500" }} numberOfLines={2}>
+                      {obsidianPath}
+                    </Text>
+                  </View>
+                )}
+                <View style={{ flexDirection: "row", gap: 10 }}>
+                  {obsidianStatus !== "ok" && (
+                    <TouchableBounce sensory onPress={detectVaultsOnBackend} style={{ flex: 1 }}>
+                      <View style={{
+                        borderRadius: 12,
+                        paddingVertical: 13,
+                        alignItems: "center",
+                        backgroundColor: palette.surfaceAlt,
+                        opacity: obsidianChecking ? 0.6 : 1,
+                      }}>
+                        <Text style={{ color: palette.text, fontWeight: "600", fontSize: 14, letterSpacing: 0.2 }}>
+                          {obsidianChecking ? "Scanning…" : "Detect vaults"}
+                        </Text>
+                      </View>
+                    </TouchableBounce>
+                  )}
+                  <TouchableBounce sensory onPress={() => obsidianPath.trim() ? validateObsidianBackend() : null} style={{ flex: 1 }}>
+                    <View style={{
                       borderRadius: 12,
                       paddingVertical: 13,
                       alignItems: "center",
-                      backgroundColor: palette.surfaceAlt,
-                      opacity: obsidianChecking ? 0.6 : 1,
-                    }}
-                  >
-                    <Text
-                      style={{
-                        color: palette.text,
+                      backgroundColor: obsidianStatus === "ok" ? palette.surfaceAlt : palette.accent,
+                      opacity: obsidianChecking || (!obsidianPath.trim() && obsidianStatus !== "ok") ? 0.4 : 1,
+                    }}>
+                      <Text style={{
+                        color: obsidianStatus === "ok" ? palette.text : "#fff",
                         fontWeight: "600",
                         fontSize: 14,
                         letterSpacing: 0.2,
-                      }}
-                    >
-                      {obsidianChecking ? "Checking…" : "Connect vault"}
-                    </Text>
-                  </View>
-                </TouchableBounce>
+                      }}>
+                        {obsidianChecking ? "Checking…" : obsidianStatus === "ok" ? "Reconnect" : "Connect"}
+                      </Text>
+                    </View>
+                  </TouchableBounce>
+                </View>
               </>
             ) : (
               <>
                 {obsidianLocalDisplay ? (
-                  <View
-                    style={{
-                      backgroundColor: palette.surfaceAlt,
-                      borderRadius: 12,
-                      paddingHorizontal: 16,
-                      paddingVertical: 14,
-                    }}
-                  >
-                    <Text
-                      style={{
-                        color: palette.textMuted,
-                        fontSize: 11,
-                        fontWeight: "600",
-                        letterSpacing: 1.2,
-                        textTransform: "uppercase",
-                        marginBottom: 4,
-                      }}
-                    >
-                      Current folder
+                  <View style={{
+                    backgroundColor: palette.surfaceAlt,
+                    borderRadius: 12,
+                    paddingHorizontal: 16,
+                    paddingVertical: 14,
+                  }}>
+                    <Text style={{ color: palette.textMuted, fontSize: 11, fontWeight: "600", letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 4 }}>
+                      Connected vault
                     </Text>
-                    <Text
-                      style={{ color: palette.text, fontSize: 14, fontWeight: "500" }}
-                      numberOfLines={2}
-                    >
+                    <Text style={{ color: palette.text, fontSize: 14, fontWeight: "500" }} numberOfLines={2}>
                       {obsidianLocalDisplay}
                     </Text>
                   </View>
                 ) : null}
                 <TouchableBounce sensory onPress={pickLocalVault}>
-                  <View
-                    style={{
-                      borderRadius: 12,
-                      paddingVertical: 13,
-                      alignItems: "center",
-                      backgroundColor: palette.surfaceAlt,
-                      opacity: obsidianChecking ? 0.6 : 1,
-                    }}
-                  >
-                    <Text
-                      style={{
-                        color: palette.text,
-                        fontWeight: "600",
-                        fontSize: 14,
-                        letterSpacing: 0.2,
-                      }}
-                    >
+                  <View style={{
+                    borderRadius: 12,
+                    paddingVertical: 13,
+                    alignItems: "center",
+                    backgroundColor: obsidianLocalUri ? palette.surfaceAlt : palette.accent,
+                    opacity: obsidianChecking ? 0.6 : 1,
+                  }}>
+                    <Text style={{
+                      color: obsidianLocalUri ? palette.text : "#fff",
+                      fontWeight: "600",
+                      fontSize: 14,
+                      letterSpacing: 0.2,
+                    }}>
                       {obsidianChecking
                         ? "Checking…"
                         : obsidianLocalUri
@@ -2013,62 +2113,80 @@ export default function SettingsScreen() {
                     </Text>
                   </View>
                 </TouchableBounce>
-                <Text
-                  style={{
-                    color: palette.textSoft,
-                    fontSize: 12,
-                    lineHeight: 17,
-                  }}
-                >
-                  Read-only: the agent sees your vault as context but can't
-                  write back to this device. For memory write-back, use the
-                  backend provider.
-                </Text>
+                {!obsidianLocalUri && (
+                  <Text style={{ color: palette.textSoft, fontSize: 12, lineHeight: 17 }}>
+                    Read-only: the agent sees your vault as context but can't
+                    write back to this device. For memory write-back, use the
+                    backend provider.
+                  </Text>
+                )}
               </>
             )}
             {obsidianMessage && (
-              <Text
-                style={{
-                  color:
-                    obsidianStatus === "ok" ? palette.success : palette.danger,
-                  fontSize: 13,
-                  marginTop: 2,
-                }}
-              >
+              <Text style={{
+                color: obsidianStatus === "ok" ? palette.success : palette.danger,
+                fontSize: 13,
+                marginTop: 2,
+              }}>
                 {obsidianMessage}
               </Text>
             )}
           </View>
-          <Hairline palette={palette} inset={20} />
-          <ToggleRow
-            title="Enable Obsidian integration"
-            description="Let the AI read and write your vault for memory and reference. Auto-enabled once a vault connects; toggle off to pause without losing the path."
-            value={obsidianEnabled}
-            onValueChange={setObsidianEnabled}
-            palette={palette}
-          />
-          {obsidianEnabled && (
+          {/* Only show configuration options once a vault is connected */}
+          {obsidianStatus === "ok" && (
             <>
               <Hairline palette={palette} inset={20} />
               <ToggleRow
-                title="Use for memory"
-                description={
-                  obsidianProvider === "backend"
-                    ? "Inject notes from claw-code/memory/ as persistent context, and let the AI add or update memory notes there."
-                    : "Inject notes from claw-code/memory/ as read-only persistent context."
-                }
-                value={obsidianUseForMemory}
-                onValueChange={setObsidianUseForMemory}
+                title="Enable Obsidian integration"
+                description="Pause vault integration without disconnecting."
+                value={obsidianEnabled}
+                onValueChange={setObsidianEnabled}
                 palette={palette}
               />
+              {obsidianEnabled && (
+                <>
+                  <Hairline palette={palette} inset={20} />
+                  <ToggleRow
+                    title="Use for memory"
+                    description={
+                      obsidianProvider === "backend"
+                        ? "Inject notes from claw-code/memory/ as persistent context, and let the AI add or update memory notes there."
+                        : "Inject notes from claw-code/memory/ as read-only persistent context."
+                    }
+                    value={obsidianUseForMemory}
+                    onValueChange={setObsidianUseForMemory}
+                    palette={palette}
+                  />
+                  <Hairline palette={palette} inset={20} />
+                  <ToggleRow
+                    title="Use for reference"
+                    description="Let the AI read and search any note in your vault when answering."
+                    value={obsidianUseForReference}
+                    onValueChange={setObsidianUseForReference}
+                    palette={palette}
+                  />
+                </>
+              )}
+            </>
+          )}
+          {/* Disconnect button when vault is connected */}
+          {obsidianStatus === "ok" && (
+            <>
               <Hairline palette={palette} inset={20} />
-              <ToggleRow
-                title="Use for reference"
-                description="Let the AI read and search any note in your vault when answering."
-                value={obsidianUseForReference}
-                onValueChange={setObsidianUseForReference}
-                palette={palette}
-              />
+              <TouchableBounce sensory onPress={() => {
+                setObsidianPath("");
+                setObsidianLocalUri("");
+                setObsidianLocalDisplay("");
+                setObsidianStatus("idle");
+                setObsidianMessage(null);
+                setObsidianEnabled(false);
+              }}>
+                <View style={{ paddingVertical: 14, alignItems: "center" }}>
+                  <Text style={{ color: palette.danger, fontSize: 14, fontWeight: "500" }}>
+                    Disconnect vault
+                  </Text>
+                </View>
+              </TouchableBounce>
             </>
           )}
         </Card>

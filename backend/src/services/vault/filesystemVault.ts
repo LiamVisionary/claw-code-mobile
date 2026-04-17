@@ -61,6 +61,64 @@ async function walkMarkdown(root: string, subdir = ""): Promise<string[]> {
   return out;
 }
 
+/**
+ * Scan common locations for Obsidian vaults. An Obsidian vault is any directory
+ * containing a `.obsidian/` subfolder.
+ */
+export async function detectVaults(): Promise<
+  { path: string; name: string; noteCount: number }[]
+> {
+  const home = os.homedir();
+  const candidates = [
+    // Common vault parent directories
+    home,
+    path.join(home, "Documents"),
+    path.join(home, "Obsidian"),
+    path.join(home, "obsidian"),
+    path.join(home, "vaults"),
+    path.join(home, "Notes"),
+    path.join(home, "notes"),
+    // iCloud / Dropbox / OneDrive common sync roots
+    path.join(home, "Library/Mobile Documents/iCloud~md~obsidian/Documents"),
+    path.join(home, "Dropbox"),
+    path.join(home, "OneDrive/Documents"),
+  ];
+
+  const found: { path: string; name: string; noteCount: number }[] = [];
+  const seen = new Set<string>();
+
+  for (const dir of candidates) {
+    try {
+      const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+        const full = path.join(dir, entry.name);
+        const realFull = path.resolve(full);
+        if (seen.has(realFull)) continue;
+        const obsidianDir = path.join(full, ".obsidian");
+        try {
+          const stat = await fs.promises.stat(obsidianDir);
+          if (stat.isDirectory()) {
+            seen.add(realFull);
+            const mdFiles = await walkMarkdown(full);
+            found.push({
+              path: realFull,
+              name: entry.name,
+              noteCount: mdFiles.length,
+            });
+          }
+        } catch {
+          // No .obsidian/ — not a vault, skip
+        }
+      }
+    } catch {
+      // Directory doesn't exist or isn't readable — skip
+    }
+  }
+
+  return found.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export function createFilesystemVault(vaultPath: string): VaultProvider {
   const root = resolveVaultRoot(vaultPath);
 
