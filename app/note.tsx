@@ -108,6 +108,7 @@ export default function NoteReader() {
           contentInsetAdjustmentBehavior="automatic"
         >
           <Markdown
+            children={(content ?? "").replace(/^---\n[\s\S]*?\n---\n*/, "")}
             style={{
               body: { color: palette.text, fontSize: 16, lineHeight: 24 },
               heading1: {
@@ -154,7 +155,6 @@ export default function NoteReader() {
               link: { color: palette.accent },
             }}
           >
-            {content ?? ""}
           </Markdown>
         </ScrollView>
       )}
