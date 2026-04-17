@@ -90,14 +90,19 @@ function StreamingTextBase({ content, style, streaming }: Props) {
           return <Text key={wordIdx}>{token}</Text>;
         }
 
-        // New word — animate each letter
+        // New word — animate each letter, staggered across all new words
+        const wordOffset = wordIdx - prevWordCount;
+        const charsInPriorNewWords = tokens
+          .slice(prevWordCount, wordIdx)
+          .join("").replace(/\s/g, "").length;
+
         return (
           <Text key={wordIdx}>
             {token.split("").map((char, charIdx) => (
               <AnimatedLetter
                 key={`${wordIdx}-${charIdx}`}
                 char={char}
-                delay={charIdx * 25}
+                delay={(charsInPriorNewWords + charIdx) * 20}
               />
             ))}
           </Text>
