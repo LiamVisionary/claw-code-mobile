@@ -92,9 +92,5 @@ function formatYamlFrontmatter(content: string): string {
 }
 
 export function cleanModelMarkdown(content: string): string {
-  const result = formatYamlFrontmatter(stripMalformedCodeSpans(fixupStuckHeaders(content)));
-  if (result !== content) {
-    console.log("[markdown] YAML frontmatter cleaned");
-  }
-  return result;
+  return formatYamlFrontmatter(stripMalformedCodeSpans(fixupStuckHeaders(content)));
 }
