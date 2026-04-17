@@ -1,5 +1,6 @@
-import { memo, useEffect, useRef } from "react";
-import { Text, TextStyle } from "react-native";
+import { memo, useEffect, useMemo, useRef } from "react";
+import { Text } from "react-native";
+import Markdown from "react-native-markdown-display";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -11,18 +12,20 @@ import Animated, {
 
 type Props = {
   content: string;
-  style?: any;
+  /** Markdown styles (same as you'd pass to <Markdown style={...}>) */
+  mdStyles?: Record<string, any>;
+  /** Whether the message is still streaming. */
   streaming?: boolean;
 };
+
+// ── Animated letter ─────────────────────────────────────────────────
 
 const AnimatedLetter = memo(function AnimatedLetter({
   char,
   delay,
-  extraStyle,
 }: {
   char: string;
   delay: number;
-  extraStyle?: TextStyle;
 }) {
   const progress = useSharedValue(0);
 
@@ -36,186 +39,104 @@ const AnimatedLetter = memo(function AnimatedLetter({
     );
   }, []);
 
-  const animStyle = useAnimatedStyle(() => ({
+  const style = useAnimatedStyle(() => ({
     opacity: interpolate(progress.value, [0, 0.5, 1], [0, 0.7, 1]),
     transform: [
       { translateY: interpolate(progress.value, [0, 1], [8, 0]) },
     ],
   }));
 
-  if (char === " " || char === "\n") {
-    return <Text style={extraStyle}>{char}</Text>;
-  }
-
-  return (
-    <Animated.Text style={[animStyle, extraStyle]}>{char}</Animated.Text>
-  );
+  return <Animated.Text style={style}>{char}</Animated.Text>;
 });
 
-// ── Inline markdown parsing ─────────────────────────────────────────
-
-type Segment = { text: string; style?: TextStyle };
-
-const BOLD_RE = /\*\*(.+?)\*\*/g;
-const ITALIC_RE = /(?<!\*)\*([^*]+)\*(?!\*)/g;
-const CODE_RE = /`([^`\n]+)`/g;
+// ── Streaming markdown ──────────────────────────────────────────────
 
 /**
- * Parse basic inline markdown (bold, italic, inline code) into
- * styled segments. Handles nesting (bold inside text, etc.).
+ * Full markdown rendering with per-letter animation on new text.
+ *
+ * Overrides the markdown `text` render rule so leaf text nodes animate
+ * their characters in with a staggered rise+fade. Already-seen characters
+ * render instantly; only newly arrived ones animate.
+ *
+ * Uses a global character counter across all text nodes to compute
+ * consistent stagger delays — characters from a single SSE chunk
+ * cascade smoothly regardless of which markdown node they belong to.
  */
-function parseInlineMarkdown(text: string): Segment[] {
-  const segments: Segment[] = [];
-  let remaining = text;
+function StreamingTextBase({ content, mdStyles, streaming }: Props) {
+  const prevLenRef = useRef(0);
+  // Global character position tracker — shared across text rule calls
+  // within a single render. Reset on each render via ref.
+  const globalCharIdx = useRef(0);
 
-  // Process bold first, then italic, then code
-  const patterns: [RegExp, TextStyle][] = [
-    [/\*\*(.+?)\*\*/g, { fontWeight: "700" as const }],
-    [/`([^`\n]+)`/g, {
-      fontFamily: "Menlo",
-      fontSize: 13,
-      backgroundColor: "rgba(128,128,128,0.12)",
-      borderRadius: 3,
-    }],
-    [/(?<!\*)\*([^*]+)\*(?!\*)/g, { fontStyle: "italic" as const }],
-  ];
-
-  // Simple approach: find the earliest match of any pattern
-  while (remaining.length > 0) {
-    let earliest: { index: number; length: number; inner: string; style: TextStyle } | null = null;
-
-    for (const [re, style] of patterns) {
-      re.lastIndex = 0;
-      const m = re.exec(remaining);
-      if (m && (!earliest || m.index < earliest.index)) {
-        earliest = {
-          index: m.index,
-          length: m[0].length,
-          inner: m[1],
-          style,
-        };
-      }
-    }
-
-    if (!earliest) {
-      // No more patterns — rest is plain text
-      if (remaining) segments.push({ text: remaining });
-      break;
-    }
-
-    // Text before the match
-    if (earliest.index > 0) {
-      segments.push({ text: remaining.slice(0, earliest.index) });
-    }
-
-    // The matched segment with style
-    segments.push({ text: earliest.inner, style: earliest.style });
-
-    remaining = remaining.slice(earliest.index + earliest.length);
-  }
-
-  return segments;
-}
-
-// ── Heading detection ───────────────────────────────────────────────
-
-function getHeadingStyle(line: string): TextStyle | null {
-  if (line.startsWith("### ")) return { fontWeight: "700", fontSize: 16 };
-  if (line.startsWith("## ")) return { fontWeight: "700", fontSize: 18 };
-  if (line.startsWith("# ")) return { fontWeight: "700", fontSize: 21 };
-  return null;
-}
-
-function stripHeadingPrefix(line: string): string {
-  return line.replace(/^#{1,3}\s+/, "");
-}
-
-// ── Main component ──────────────────────────────────────────────────
-
-function StreamingTextBase({ content, style, streaming }: Props) {
-  const prevWordCountRef = useRef(0);
-
-  // Split preserving whitespace
-  const tokens = content.split(/(\s+)/);
-  const prevWordCount = prevWordCountRef.current;
+  const prevLen = prevLenRef.current;
 
   useEffect(() => {
-    prevWordCountRef.current = tokens.length;
+    prevLenRef.current = content.length;
   }, [content]);
 
-  if (!streaming) {
-    return (
-      <Text style={style} selectable>
-        {content}
-      </Text>
-    );
-  }
+  // Reset the global counter at the start of each render
+  globalCharIdx.current = 0;
 
-  // Track which line we're on for heading detection
-  let charsSoFar = "";
+  const rules = useMemo(() => {
+    if (!streaming) return undefined;
 
-  return (
-    <Text style={style} selectable>
-      {tokens.map((token, wordIdx) => {
-        charsSoFar += token;
+    return {
+      text: (
+        node: any,
+        _children: any,
+        _parent: any,
+        styles: any,
+        inheritedStyles: any = {}
+      ) => {
+        const text: string = node.content ?? "";
+        const startIdx = globalCharIdx.current;
+        globalCharIdx.current += text.length;
 
-        // Get the current line for heading detection
-        const lines = charsSoFar.split("\n");
-        const currentLine = lines[lines.length - 1];
-        const headingStyle = currentLine === token ? getHeadingStyle(currentLine) : null;
-
-        // Display text — strip heading prefix if it's a heading
-        const displayToken = headingStyle ? stripHeadingPrefix(token) : token;
-
-        // Already-rendered words — render with formatting but no animation
-        if (wordIdx < prevWordCount) {
-          if (/^\s+$/.test(token)) return <Text key={wordIdx}>{token}</Text>;
-          const segments = parseInlineMarkdown(displayToken);
+        // All characters in this node are old — render plain
+        if (startIdx + text.length <= prevLen) {
           return (
-            <Text key={wordIdx} style={headingStyle ?? undefined}>
-              {segments.map((seg, si) => (
-                <Text key={si} style={seg.style}>{seg.text}</Text>
-              ))}
+            <Text key={node.key} style={[inheritedStyles, styles.text]}>
+              {text}
             </Text>
           );
         }
 
-        // Whitespace
-        if (/^\s+$/.test(token)) {
-          return <Text key={wordIdx}>{token}</Text>;
-        }
+        // Split into old prefix and new suffix
+        const splitAt = Math.max(0, prevLen - startIdx);
+        const oldPart = text.slice(0, splitAt);
+        const newPart = text.slice(splitAt);
 
-        // New word — animate letter by letter with formatting
-        const charsInPriorNewWords = tokens
-          .slice(prevWordCount, wordIdx)
-          .join("")
-          .replace(/\s/g, "").length;
-
-        const segments = parseInlineMarkdown(displayToken);
-        let charOffset = 0;
+        // Compute delay offset: how many new chars came before this node
+        const newCharsBeforeThisNode = Math.max(0, startIdx - prevLen);
 
         return (
-          <Text key={wordIdx} style={headingStyle ?? undefined}>
-            {segments.map((seg, si) => (
-              <Text key={si} style={seg.style}>
-                {seg.text.split("").map((char, ci) => {
-                  const delay = (charsInPriorNewWords + charOffset + ci) * 20;
-                  if (ci === seg.text.length - 1) charOffset += seg.text.length;
-                  return (
-                    <AnimatedLetter
-                      key={`${wordIdx}-${si}-${ci}`}
-                      char={char}
-                      delay={delay}
-                      extraStyle={seg.style}
-                    />
-                  );
-                })}
-              </Text>
-            ))}
+          <Text key={node.key} style={[inheritedStyles, styles.text]}>
+            {oldPart}
+            {newPart.split("").map((char, i) => {
+              if (char === " " || char === "\n") {
+                return <Text key={i}>{char}</Text>;
+              }
+              return (
+                <AnimatedLetter
+                  key={i}
+                  char={char}
+                  delay={(newCharsBeforeThisNode + i) * 20}
+                />
+              );
+            })}
           </Text>
         );
-      })}
-    </Text>
+      },
+    };
+  }, [streaming, prevLen]);
+
+  return (
+    <Markdown
+      style={mdStyles}
+      rules={rules}
+    >
+      {content}
+    </Markdown>
   );
 }
 

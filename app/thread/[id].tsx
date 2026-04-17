@@ -1774,20 +1774,12 @@ function MessageBubble({
                   >
                     {message.content}
                   </Text>
-                ) : isStreaming ? (
-                  <StreamingText
-                    content={message.content}
-                    streaming
-                    style={{
-                      color: palette.text,
-                      fontSize: TYPOGRAPHY.fontSizes.md,
-                      lineHeight: TYPOGRAPHY.lineHeights.md,
-                    }}
-                  />
                 ) : (
-                  <Markdown style={mdStyles}>
-                    {cleanModelMarkdown(message.content)}
-                  </Markdown>
+                  <StreamingText
+                    content={cleanModelMarkdown(message.content)}
+                    mdStyles={mdStyles}
+                    streaming={isStreaming}
+                  />
                 )}
               </View>
             )}
