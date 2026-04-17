@@ -62,6 +62,137 @@ async function walkMarkdown(root: string, subdir = ""): Promise<string[]> {
 }
 
 /**
+ * Create and initialize a new Obsidian vault at the given path.
+ * Creates the directory, `.obsidian/` config dir, and `claw-code/memory/`
+ * for the AI memory system. If the directory already exists but isn't a
+ * vault, it adds `.obsidian/` to make it one. Returns validation info
+ * for the new vault.
+ */
+export async function initializeVault(
+  vaultPath: string
+): Promise<{ ok: true; path: string; name: string } | { ok: false; reason: string }> {
+  const root = resolveVaultRoot(vaultPath);
+  const vaultName = path.basename(root);
+
+  try {
+    // Create the vault directory
+    await fs.promises.mkdir(root, { recursive: true });
+
+    // Create .obsidian/ with minimal config
+    const obsidianDir = path.join(root, ".obsidian");
+    await fs.promises.mkdir(obsidianDir, { recursive: true });
+
+    // app.json — minimal Obsidian app config
+    const appJsonPath = path.join(obsidianDir, "app.json");
+    if (!fs.existsSync(appJsonPath)) {
+      await fs.promises.writeFile(
+        appJsonPath,
+        JSON.stringify(
+          {
+            alwaysUpdateLinks: true,
+            newFileLocation: "current",
+            attachmentFolderPath: "attachments",
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+    }
+
+    // appearance.json — default appearance
+    const appearancePath = path.join(obsidianDir, "appearance.json");
+    if (!fs.existsSync(appearancePath)) {
+      await fs.promises.writeFile(
+        appearancePath,
+        JSON.stringify({ baseFontSize: 16 }, null, 2),
+        "utf8"
+      );
+    }
+
+    // Create claw-code/memory/ for the AI memory system
+    const memoryDir = path.join(root, "claw-code", "memory");
+    await fs.promises.mkdir(memoryDir, { recursive: true });
+
+    // Seed a welcome note if vault is brand new (no .md files yet)
+    const existingNotes = await walkMarkdown(root);
+    if (existingNotes.length === 0) {
+      await fs.promises.writeFile(
+        path.join(root, "Welcome.md"),
+        [
+          "# Welcome to your Claw Code vault",
+          "",
+          "This Obsidian vault is connected to your Claw Code Mobile agent.",
+          "",
+          "## How it works",
+          "",
+          "- **Memory notes** in `claw-code/memory/` are injected as context on every conversation turn",
+          "- The AI can read, create, and update memory notes to remember things across sessions",
+          "- Any other notes in this vault can be referenced by the AI when answering questions",
+          "- Use `[[wikilinks]]` in your notes — Obsidian will resolve them when you open the vault",
+          "",
+          "## Syncing to your devices",
+          "",
+          "This vault lives on your server. To access it from Obsidian on your Mac/phone:",
+          "",
+          "1. **Git sync** (recommended) — install the [obsidian-git](https://github.com/denolehov/obsidian-git) community plugin",
+          `   - This vault has a git repo initialized at \`${root}\``,
+          "   - Push to a private GitHub/GitLab repo, then clone on your other devices",
+          "2. **Syncthing** — open-source folder sync that works headless",
+          "3. **Direct access** — browse notes through the Claw Code Mobile app",
+          "",
+        ].join("\n"),
+        "utf8"
+      );
+    }
+
+    // Initialize a git repo for sync (if git is available and not already a repo)
+    const gitDir = path.join(root, ".git");
+    if (!fs.existsSync(gitDir)) {
+      try {
+        const { execSync } = await import("child_process");
+        execSync("git init", { cwd: root, stdio: "ignore" });
+        // Add a .gitignore for Obsidian workspace files (device-specific)
+        const gitignorePath = path.join(root, ".gitignore");
+        if (!fs.existsSync(gitignorePath)) {
+          await fs.promises.writeFile(
+            gitignorePath,
+            [
+              "# Obsidian workspace (device-specific, don't sync)",
+              ".obsidian/workspace.json",
+              ".obsidian/workspace-mobile.json",
+              ".obsidian/plugins/*/data.json",
+              "",
+            ].join("\n"),
+            "utf8"
+          );
+        }
+        execSync("git add -A && git commit -m 'Initialize Claw Code vault'", {
+          cwd: root,
+          stdio: "ignore",
+          env: {
+            ...process.env,
+            GIT_AUTHOR_NAME: "Claw Code",
+            GIT_AUTHOR_EMAIL: "vault@claw-code.local",
+            GIT_COMMITTER_NAME: "Claw Code",
+            GIT_COMMITTER_EMAIL: "vault@claw-code.local",
+          },
+        });
+      } catch {
+        // git not available or failed — vault still works without it
+      }
+    }
+
+    return { ok: true, path: root, name: vaultName };
+  } catch (err: any) {
+    return {
+      ok: false,
+      reason: err?.message ?? "Failed to initialize vault",
+    };
+  }
+}
+
+/**
  * Scan common locations for Obsidian vaults. An Obsidian vault is any directory
  * containing a `.obsidian/` subfolder.
  */

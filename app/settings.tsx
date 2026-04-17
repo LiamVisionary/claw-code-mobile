@@ -1573,8 +1573,7 @@ export default function SettingsScreen() {
         setObsidianMessage(data.error ?? `Server returned ${res.status}`);
         setObsidianStatus("error");
       } else if (!data.vaults?.length) {
-        setObsidianMessage("No Obsidian vaults found on server. Enter a path manually.");
-        setObsidianStatus("error");
+        setObsidianMessage("No vaults found — tap \"Create vault\" to set one up.");
       } else if (data.vaults.length === 1) {
         // Single vault — auto-connect
         const v = data.vaults[0];
@@ -1586,6 +1585,46 @@ export default function SettingsScreen() {
       }
     } catch (err: any) {
       setObsidianMessage(err.message ?? "Detection failed");
+      setObsidianStatus("error");
+    } finally {
+      setObsidianChecking(false);
+    }
+  };
+
+  const createVaultOnBackend = async () => {
+    if (!serverUrl || !bearerToken) {
+      setObsidianMessage("Set server URL and token first.");
+      setObsidianStatus("error");
+      return;
+    }
+    setObsidianChecking(true);
+    setObsidianMessage(null);
+    try {
+      const res = await fetch(
+        `${serverUrl.replace(/\/+$/, "")}/obsidian/init`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${bearerToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({}),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        setObsidianMessage(data.reason ?? data.error ?? "Failed to create vault");
+        setObsidianStatus("error");
+      } else {
+        setObsidianPath(data.path);
+        setObsidianMessage(
+          `Vault created and connected. To sync with Obsidian on your devices, set up git sync — see the Welcome note inside the vault for instructions.`
+        );
+        setObsidianStatus("ok");
+        setObsidianEnabled(true);
+      }
+    } catch (err: any) {
+      setObsidianMessage(err.message ?? "Failed to create vault");
       setObsidianStatus("error");
     } finally {
       setObsidianChecking(false);
@@ -2038,9 +2077,22 @@ export default function SettingsScreen() {
                     </Text>
                   </View>
                 )}
-                <View style={{ flexDirection: "row", gap: 10 }}>
-                  {obsidianStatus !== "ok" && (
+                {obsidianStatus !== "ok" && (
+                  <View style={{ flexDirection: "row", gap: 10 }}>
                     <TouchableBounce sensory onPress={detectVaultsOnBackend} style={{ flex: 1 }}>
+                      <View style={{
+                        borderRadius: 12,
+                        paddingVertical: 13,
+                        alignItems: "center",
+                        backgroundColor: palette.accent,
+                        opacity: obsidianChecking ? 0.6 : 1,
+                      }}>
+                        <Text style={{ color: "#fff", fontWeight: "600", fontSize: 14, letterSpacing: 0.2 }}>
+                          {obsidianChecking ? "Scanning…" : "Detect"}
+                        </Text>
+                      </View>
+                    </TouchableBounce>
+                    <TouchableBounce sensory onPress={createVaultOnBackend} style={{ flex: 1 }}>
                       <View style={{
                         borderRadius: 12,
                         paddingVertical: 13,
@@ -2049,30 +2101,27 @@ export default function SettingsScreen() {
                         opacity: obsidianChecking ? 0.6 : 1,
                       }}>
                         <Text style={{ color: palette.text, fontWeight: "600", fontSize: 14, letterSpacing: 0.2 }}>
-                          {obsidianChecking ? "Scanning…" : "Detect vaults"}
+                          {obsidianChecking ? "Creating…" : "Create vault"}
                         </Text>
                       </View>
                     </TouchableBounce>
-                  )}
-                  <TouchableBounce sensory onPress={() => obsidianPath.trim() ? validateObsidianBackend() : null} style={{ flex: 1 }}>
+                  </View>
+                )}
+                {obsidianStatus !== "ok" && obsidianPath.trim() && (
+                  <TouchableBounce sensory onPress={() => validateObsidianBackend()}>
                     <View style={{
                       borderRadius: 12,
                       paddingVertical: 13,
                       alignItems: "center",
-                      backgroundColor: obsidianStatus === "ok" ? palette.surfaceAlt : palette.accent,
-                      opacity: obsidianChecking || (!obsidianPath.trim() && obsidianStatus !== "ok") ? 0.4 : 1,
+                      backgroundColor: palette.accent,
+                      opacity: obsidianChecking ? 0.4 : 1,
                     }}>
-                      <Text style={{
-                        color: obsidianStatus === "ok" ? palette.text : "#fff",
-                        fontWeight: "600",
-                        fontSize: 14,
-                        letterSpacing: 0.2,
-                      }}>
-                        {obsidianChecking ? "Checking…" : obsidianStatus === "ok" ? "Reconnect" : "Connect"}
+                      <Text style={{ color: "#fff", fontWeight: "600", fontSize: 14, letterSpacing: 0.2 }}>
+                        Connect
                       </Text>
                     </View>
                   </TouchableBounce>
-                </View>
+                )}
               </>
             ) : (
               <>

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { validate } from "../services/vaultService";
-import { detectVaults } from "../services/vault/filesystemVault";
+import { detectVaults, initializeVault } from "../services/vault/filesystemVault";
 
 export const obsidianRouter = Router();
 
@@ -24,6 +24,28 @@ obsidianRouter.get("/obsidian/detect", async (_req, res, next) => {
   try {
     const vaults = await detectVaults();
     res.json({ vaults });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const initSchema = z.object({
+  path: z.string().optional(),
+});
+
+/** Create and initialize a new Obsidian vault. Uses ~/Obsidian/claw-vault if no path given. */
+obsidianRouter.post("/obsidian/init", async (req, res, next) => {
+  try {
+    const body = initSchema.parse(req.body);
+    const vaultPath = body.path || "~/Obsidian/claw-vault";
+    const result = await initializeVault(vaultPath);
+    if (!result.ok) {
+      res.status(400).json(result);
+    } else {
+      // Also validate so we return noteCount
+      const validation = await validate({ path: result.path });
+      res.json({ ...result, noteCount: validation.noteCount ?? 0 });
+    }
   } catch (err) {
     next(err);
   }
