@@ -34,6 +34,7 @@ import { usePalette } from "@/hooks/usePalette";
 import { useModelCapabilities } from "@/hooks/useModelCapabilities";
 import type { Palette } from "@/constants/palette";
 import { cleanModelMarkdown } from "@/utils/markdownCleanup";
+import { StreamingText } from "@/components/StreamingText";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import SlashCommandPicker from "@/components/SlashCommandPicker";
@@ -690,6 +691,11 @@ export default function ThreadScreen() {
             : <MessageBubble
                 message={item}
                 threadId={id ?? ""}
+                isStreaming={
+                  runPhase === "responding" &&
+                  item.role === "assistant" &&
+                  index === messages.length - 1
+                }
                 onOpenPreview={(uri) => setPreviewUri(uri)}
                 onTurnConclusionExpand={() => {
                   // Suppress the FAB while the layout shift settles —
@@ -1363,11 +1369,13 @@ function SystemLine({ message, isDark }: { message: Message; isDark: boolean }) 
 function MessageBubble({
   message,
   threadId,
+  isStreaming,
   onOpenPreview,
   onTurnConclusionExpand,
 }: {
   message: Message;
   threadId: string;
+  isStreaming?: boolean;
   onOpenPreview?: (uri: string) => void;
   onTurnConclusionExpand?: (messageId: string) => void;
 }) {
@@ -1766,6 +1774,16 @@ function MessageBubble({
                   >
                     {message.content}
                   </Text>
+                ) : isStreaming ? (
+                  <StreamingText
+                    content={message.content}
+                    streaming
+                    style={{
+                      color: palette.text,
+                      fontSize: TYPOGRAPHY.fontSizes.md,
+                      lineHeight: TYPOGRAPHY.lineHeights.md,
+                    }}
+                  />
                 ) : (
                   <Markdown style={mdStyles}>
                     {cleanModelMarkdown(message.content)}
