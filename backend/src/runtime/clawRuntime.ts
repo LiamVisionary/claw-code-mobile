@@ -9,6 +9,7 @@ import { streamService } from "../services/streamService";
 import { threadService } from "../services/threadService";
 import { terminalService } from "../services/terminalService";
 import { runService } from "../services/runService";
+import { buildContextPreamble, type VaultConfig } from "../services/vaultService";
 import { createId } from "../utils/ids";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -32,6 +33,8 @@ export type ModelConfig = {
   provider: "claude" | "openrouter" | "local";
   name?: string;
   apiKey?: string;
+  /** OpenAI-compatible base URL for local providers (Ollama, LM Studio, llama.cpp). */
+  endpoint?: string;
 };
 
 type ActiveRun = {
@@ -98,7 +101,15 @@ function buildEnv(
 ): Record<string, string> {
   const env: Record<string, string> = { ...process.env } as Record<string, string>;
 
-  if (model?.apiKey) {
+  if (model?.provider === "local") {
+    // Route claw to the user's local OpenAI-compatible server (Ollama,
+    // LM Studio, llama.cpp). Most runners accept any non-empty bearer,
+    // so we fall back to a dummy token when none is provided.
+    env["OPENAI_BASE_URL"] = model.endpoint || "http://127.0.0.1:11434/v1";
+    env["OPENAI_API_KEY"] = model.apiKey || "local-dev-token";
+    delete env["ANTHROPIC_API_KEY"];
+    delete env["ANTHROPIC_AUTH_TOKEN"];
+  } else if (model?.apiKey) {
     if (model.provider === "openrouter") {
       env["OPENAI_API_KEY"] = model.apiKey;
       env["OPENAI_BASE_URL"] = "https://openrouter.ai/api/v1";
@@ -1054,7 +1065,8 @@ export const clawRuntime = {
     autoCompact = true,
     streamingEnabled = true,
     autoCompactThreshold = 70,
-    autoContinueEnabled = true
+    autoContinueEnabled = true,
+    obsidianVault?: VaultConfig
   ): Promise<string> {
     const thread = threadService.get(threadId);
     if (!thread) return "";
@@ -1224,6 +1236,21 @@ export const clawRuntime = {
       }
     }
 
+    // ── Obsidian vault preamble ────────────────────────────────────
+    // If the user has connected a vault, prepend memory/reference context
+    // to the prompt claw sees — the original `content` stays as the
+    // user-visible message. Preamble build is best-effort; on failure we
+    // log and proceed with the raw prompt.
+    let effectivePrompt = content;
+    if (obsidianVault && obsidianVault.enabled && obsidianVault.path) {
+      try {
+        const preamble = await buildContextPreamble(obsidianVault);
+        if (preamble) effectivePrompt = preamble + content;
+      } catch (err) {
+        logger.warn({ err, threadId }, "Obsidian preamble build failed");
+      }
+    }
+
     for (let i = 0; i < queue.length; i++) {
       if (active.stopped) break;
 
@@ -1243,11 +1270,12 @@ export const clawRuntime = {
           model: model?.name,
           provider: model?.provider,
           contentLength: content.length,
+          promptLength: effectivePrompt.length,
         },
       });
 
       const { succeeded, stdoutBuf, stderrBuf, stopped } = await spawnOnce(
-        threadId, content, cwd, sessionDir, model, active, false, messageId
+        threadId, effectivePrompt, cwd, sessionDir, model, active, false, messageId
       );
 
       // Read tokens from the session immediately after the spawn so we

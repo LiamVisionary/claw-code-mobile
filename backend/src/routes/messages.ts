@@ -24,6 +24,7 @@ const modelEntrySchema = z.object({
   provider: z.enum(["claude", "openrouter", "local"]).optional(),
   name: z.string().optional(),
   apiKey: z.string().optional(),
+  endpoint: z.string().optional(),
 });
 
 messagesRouter.post("/threads/:threadId/messages", async (req, res, next) => {
@@ -34,12 +35,28 @@ messagesRouter.post("/threads/:threadId/messages", async (req, res, next) => {
     const body = z
       .object({
         content: z.string().min(1),
+        /**
+         * Alternative prompt text passed to claw. When set, `content` is
+         * stored as the user-visible message and `promptOverride` is what
+         * the model actually sees. Used by the local Obsidian provider to
+         * inject a client-built preamble without polluting the saved
+         * message bubble.
+         */
+        promptOverride: z.string().optional(),
         modelQueue: z.array(modelEntrySchema).optional(),
         model: modelEntrySchema.optional(),
         autoCompact: z.boolean().optional(),
         autoCompactThreshold: z.number().min(0).max(100).optional(),
         streamingEnabled: z.boolean().optional(),
         autoContinueEnabled: z.boolean().optional(),
+        obsidianVault: z
+          .object({
+            enabled: z.boolean(),
+            path: z.string(),
+            useForMemory: z.boolean(),
+            useForReference: z.boolean(),
+          })
+          .optional(),
       })
       .parse(req.body);
 
@@ -60,13 +77,14 @@ messagesRouter.post("/threads/:threadId/messages", async (req, res, next) => {
     clawRuntime
       .sendMessage(
         thread.id,
-        body.content,
+        body.promptOverride ?? body.content,
         assistantMessageId,
         models,
         body.autoCompact ?? true,
         body.streamingEnabled ?? true,
         body.autoCompactThreshold ?? 70,
-        body.autoContinueEnabled ?? true
+        body.autoContinueEnabled ?? true,
+        body.obsidianVault
       )
       .catch((err: unknown) => {
         logger.error({ err }, "clawRuntime.sendMessage failed");

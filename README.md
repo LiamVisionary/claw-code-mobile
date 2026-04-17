@@ -16,7 +16,7 @@ Chat with an AI that can execute code, edit files, and manage projects on your r
 - **Live tool tracking** — See every action the agent takes as it works (file edits, terminal commands, searches)
 - **Permission prompts** — Approve or deny dangerous operations inline before the agent proceeds
 - **Terminal drawer** — Pull-up bottom sheet with live terminal output and command input
-- **Model queue with fallback** — Configure multiple AI models (Claude, OpenRouter, local) that auto-fallback if one fails
+- **Model queue with fallback** — Configure multiple AI models (Claude, OpenRouter, or any local OpenAI-compatible server — Ollama/LM Studio/llama.cpp) that auto-fallback if one fails. See [Local models](#local-models-ollama--lm-studio--llamacpp) for setup.
 - **Auto-compact** — Automatically summarizes conversation context when the window fills up
 - **Directory browser** — Browse your remote filesystem and pick a working directory per thread
 - **Dark & light mode** — Full native iOS theming with semantic colors
@@ -114,6 +114,37 @@ The terminal prints:
 | `PORT` | `5000` | Server port |
 | `GATEWAY_AUTH_TOKEN` | `dev-token` | Bearer token for API auth |
 | `DATABASE_FILE` | — | SQLite file path (optional) |
+
+### Local models (Ollama / LM Studio / llama.cpp)
+
+Claw talks to any OpenAI-compatible endpoint, so anything that serves `/v1/chat/completions` works — no API key required. Ollama is the easiest.
+
+1. **Install and run Ollama.**
+   ```bash
+   brew install ollama
+   brew services start ollama            # or: ollama serve
+   ```
+
+2. **Pull a model.** For coding, `qwen2.5-coder:7b` is a solid default (~4.7 GB, fits comfortably on 16 GB+ machines). Drop to `:3b` for tighter memory, go up to `:14b`/`:32b` if you have the RAM.
+   ```bash
+   ollama pull qwen2.5-coder:7b
+   ```
+
+3. **Add the model in the app.** Settings → Models → *Add a model* → **Local**, then:
+   - **Model name** — the Ollama tag, e.g. `qwen2.5-coder:7b`
+   - **Endpoint** — `http://127.0.0.1:11434/v1` (prefilled)
+
+That's it — send a message and Claw will route through Ollama.
+
+**Networking note:** the endpoint is reached by the **backend**, not your phone. If the backend runs on the same Mac as Ollama, `127.0.0.1` is correct. If the backend runs on a different host (VPS, other laptop), use that host's reachable address and make sure Ollama is listening on it:
+
+```bash
+OLLAMA_HOST=0.0.0.0:11434 ollama serve
+```
+
+**Model quality caveat:** small local models (≤3B) usually handle plain Q&A fine but can stumble on tool-heavy loops (multi-step edits, bash chains). If runs end abruptly or the model "gives up" mid-turn, move up to 7B+ before blaming the integration.
+
+**LM Studio / llama.cpp / vLLM / etc.** work the same way — start their OpenAI-compatible server, paste its base URL (including `/v1`) into the Endpoint field, and use whatever model identifier that server expects.
 
 ---
 
