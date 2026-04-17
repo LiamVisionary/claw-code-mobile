@@ -7,6 +7,7 @@ import { fsRouter } from "./routes/fs";
 import { healthRouter } from "./routes/health";
 import { openAppRouter } from "./routes/openApp";
 import { messagesRouter } from "./routes/messages";
+import { localModelsRouter } from "./routes/localModels";
 import { obsidianRouter } from "./routes/obsidian";
 import { streamRouter } from "./routes/stream";
 import { terminalRouter } from "./routes/terminal";
@@ -83,6 +84,7 @@ app.use(eventsRouter);
 app.use(uploadsRouter);
 app.use(oauthRouter);
 app.use(obsidianRouter);
+app.use(localModelsRouter);
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: any) => {
   const status = err instanceof HttpError ? err.status : 500;

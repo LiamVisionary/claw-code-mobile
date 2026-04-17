@@ -469,6 +469,57 @@ function AddModelForm({
   const [openRouterLoading, setOpenRouterLoading] = useState(false);
   const [openRouterError, setOpenRouterError] = useState<string | null>(null);
 
+  type DiscoveredLocalModel = {
+    name: string;
+    sizeBytes?: number;
+    parameterSize?: string;
+    quantization?: string;
+  };
+  const [localModels, setLocalModels] = useState<DiscoveredLocalModel[] | null>(null);
+  const [localRunner, setLocalRunner] = useState<string | null>(null);
+  const [localDiscovering, setLocalDiscovering] = useState(false);
+  const [localDiscoverError, setLocalDiscoverError] = useState<string | null>(null);
+
+  const discoverLocalModels = async () => {
+    const settings = useGatewayStore.getState().settings;
+    const serverUrl = settings.serverUrl?.replace(/\/+$/, "");
+    const token = settings.bearerToken;
+    if (!serverUrl || !token) {
+      setLocalDiscoverError("Configure server connection first.");
+      return;
+    }
+    // The endpoint the user enters is the /v1 URL; Ollama's discovery
+    // lives one level up at /api/tags, so strip a trailing /v1.
+    const raw = endpoint.trim() || "http://127.0.0.1:11434/v1";
+    const baseUrl = raw.replace(/\/v1\/?$/, "").replace(/\/+$/, "");
+    setLocalDiscovering(true);
+    setLocalDiscoverError(null);
+    try {
+      const res = await fetch(`${serverUrl}/local-models/discover`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ baseUrl }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setLocalDiscoverError(data?.error ?? `Server returned ${res.status}`);
+        setLocalModels(null);
+      } else {
+        setLocalModels(data.models ?? []);
+        setLocalRunner(data.runner ?? null);
+        if (data.endpoint) setEndpoint(data.endpoint);
+      }
+    } catch (err: any) {
+      setLocalDiscoverError(err?.message ?? "Discovery failed");
+      setLocalModels(null);
+    } finally {
+      setLocalDiscovering(false);
+    }
+  };
+
   useEffect(() => {
     if (provider !== "openrouter") return;
     if (openRouterTopCache && openRouterTopCache.models.length > 0) {
@@ -605,11 +656,16 @@ function AddModelForm({
   const handleAdd = () => {
     if (!name.trim()) return;
     if (provider === "claude" && authMethod === "oauth" && !oauthToken) return;
+    // Local runners ignore the API key but OpenAI-compat clients insist on
+    // one being present — ship a harmless placeholder so the user never has
+    // to think about it.
+    const effectiveApiKey =
+      provider === "local" ? apiKey.trim() || "local-dev-token" : apiKey.trim();
     onAdd({
       id: makeId(),
       provider,
       name: name.trim(),
-      apiKey: apiKey.trim(),
+      apiKey: effectiveApiKey,
       enabled: true,
       // For OAuth, store both the API key and the OAuth token so the
       // backend can pass both to the claw binary (ApiKeyAndBearer auth).
@@ -1134,7 +1190,7 @@ function AddModelForm({
             </>
           )}
 
-          {/* Local provider — endpoint URL + model name */}
+          {/* Local provider — endpoint URL + discoverable model picker */}
           {provider === "local" && (
             <>
               <Field
@@ -1153,11 +1209,118 @@ function AddModelForm({
                   marginLeft: 4,
                 }}
               >
-                OpenAI-compatible URL for Ollama, LM Studio, llama.cpp, etc.
-                The backend reaches this from its own host — use your Mac's
-                LAN IP (not 127.0.0.1) when the backend runs on a different
-                machine.
+                OpenAI-compatible URL as seen from the backend host. Tap
+                Detect to list installed models and skip the typing.
               </Text>
+
+              <GlassButton
+                onPress={discoverLocalModels}
+                disabled={localDiscovering}
+                style={{
+                  borderRadius: 12,
+                  paddingVertical: 12,
+                  opacity: localDiscovering ? 0.5 : 1,
+                }}
+              >
+                <Text
+                  style={{
+                    color: palette.text,
+                    fontWeight: "600",
+                    fontSize: 14,
+                    letterSpacing: 0.2,
+                  }}
+                >
+                  {localDiscovering
+                    ? "Detecting…"
+                    : localModels
+                    ? "Re-detect models"
+                    : "Detect installed models"}
+                </Text>
+              </GlassButton>
+
+              {localDiscoverError && (
+                <Text
+                  style={{
+                    color: palette.danger ?? palette.text,
+                    fontSize: 12,
+                    marginLeft: 4,
+                  }}
+                >
+                  {localDiscoverError}
+                </Text>
+              )}
+
+              {localModels && localModels.length === 0 && (
+                <Text
+                  style={{
+                    color: palette.textSoft,
+                    fontSize: 12,
+                    marginLeft: 4,
+                  }}
+                >
+                  Runner reachable but no models installed. Run e.g.{" "}
+                  <Text style={{ color: palette.text, fontWeight: "600" }}>
+                    ollama pull gpt-oss:20b
+                  </Text>
+                  .
+                </Text>
+              )}
+
+              {localModels && localModels.length > 0 && (
+                <View style={{ gap: 6 }}>
+                  <Text
+                    style={{
+                      color: palette.textSoft,
+                      fontSize: 12,
+                      marginLeft: 4,
+                    }}
+                  >
+                    {localRunner === "ollama" ? "Ollama" : "OpenAI-compatible"}
+                    {" · "}
+                    {localModels.length} model
+                    {localModels.length === 1 ? "" : "s"} found
+                  </Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={{ gap: 8, paddingRight: 4 }}
+                  >
+                    {localModels.map((m) => {
+                      const selected = name === m.name;
+                      return (
+                        <TouchableBounce
+                          key={m.name}
+                          sensory
+                          onPress={() => setName(m.name)}
+                        >
+                          <View
+                            style={{
+                              paddingVertical: 9,
+                              paddingHorizontal: 14,
+                              borderRadius: 999,
+                              backgroundColor: selected
+                                ? palette.text
+                                : palette.surfaceAlt,
+                            }}
+                          >
+                            <Text
+                              style={{
+                                fontSize: 13,
+                                fontWeight: "600",
+                                color: selected ? palette.surface : palette.text,
+                              }}
+                            >
+                              {m.name}
+                              {m.parameterSize ? ` · ${m.parameterSize}` : ""}
+                            </Text>
+                          </View>
+                        </TouchableBounce>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              )}
+
               <Field
                 placeholder="Model name or path"
                 value={name}
