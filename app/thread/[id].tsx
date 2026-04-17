@@ -1502,7 +1502,7 @@ function MessageBubble({
                   >
                     {isErr
                       ? <IconSymbol name="xmark.circle.fill" size={12} color="#EF4444" />
-                      : <IconSymbol name={meta.icon as any} size={12} color={isActive ? meta.color : (isDark ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.4)")} />
+                      : <ToolBadgeIcon meta={meta} size={12} color={isActive ? meta.color : (isDark ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.4)")} />
                     }
                   </View>
                 </TouchableBounce>
@@ -1564,7 +1564,7 @@ function MessageBubble({
                   backgroundColor: `${meta.color}20`,
                   justifyContent: "center", alignItems: "center",
                 }}>
-                  <IconSymbol name={meta.icon as any} size={10} color={meta.color} />
+                  <ToolBadgeIcon meta={meta} size={10} color={meta.color} />
                 </View>
                 <Text style={{
                   color: isDark ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.55)",
@@ -1609,7 +1609,7 @@ function MessageBubble({
                           justifyContent: "center", alignItems: "center",
                         }}
                       >
-                        <IconSymbol name={meta.icon as any} size={10} color={meta.color} />
+                        <ToolBadgeIcon meta={meta} size={10} color={meta.color} />
                       </View>
                       <Text
                         style={{
@@ -2655,13 +2655,24 @@ const TOOL_META: Record<string, { icon: string; color: string }> = {
   delete_file:        { icon: "trash",                         color: "#EF4444" },
   mkdir:              { icon: "folder.badge.plus",             color: "#22C55E" },
   // ── Obsidian vault ────────────────────────────────────────────────────
-  vault_read:         { icon: "eye",                           color: "#7C3AED" },
-  vault_write:        { icon: "pencil.and.outline",            color: "#7C3AED" },
+  vault_read:         { icon: "__obsidian__",                   color: "#7C3AED" },
+  vault_write:        { icon: "__obsidian__",                   color: "#7C3AED" },
   // ── Thinking ─────────────────────────────────────────────────────────
   think:              { icon: "brain.head.profile",            color: "#14B8A6" },
   // ── Fallback ─────────────────────────────────────────────────────────
   unknown:            { icon: "hammer",                        color: "#6B7280" },
 };
+
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const OBSIDIAN_ICON = require("@/assets/icons/obsidian-icon.png");
+
+/** Render a tool badge icon — SF Symbol for most tools, Obsidian logo for vault ops. */
+function ToolBadgeIcon({ meta, size, color }: { meta: { icon: string; color: string }; size: number; color: string }) {
+  if (meta.icon === "__obsidian__") {
+    return <Image source={OBSIDIAN_ICON} style={{ width: size, height: size, opacity: 0.9 }} />;
+  }
+  return <IconSymbol name={meta.icon as any} size={size} color={color} />;
+}
 
 /** Resolve tool meta, detecting Obsidian vault file operations. */
 function resolveToolMeta(step: { tool: string; label?: string; detail?: string }) {
@@ -2910,7 +2921,7 @@ function ThinkingIndicator({
               >
                 {isError
                   ? <IconSymbol name="xmark.circle.fill" size={12} color="#EF4444" />
-                  : <IconSymbol name={meta.icon as any} size={12} color={meta.color} />
+                  : <ToolBadgeIcon meta={meta} size={12} color={meta.color} />
                 }
               </View>
             </TouchableBounce>
@@ -2968,7 +2979,7 @@ function ThinkingIndicator({
                   backgroundColor: `${meta.color}20`,
                   justifyContent: "center", alignItems: "center",
                 }}>
-                  <IconSymbol name={meta.icon as any} size={10} color={meta.color} />
+                  <ToolBadgeIcon meta={meta} size={10} color={meta.color} />
                 </View>
                 <Text
                   style={{
@@ -3015,7 +3026,7 @@ function ThinkingIndicator({
                   backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)",
                   justifyContent: "center", alignItems: "center",
                 }}>
-                  <IconSymbol name={meta.icon as any} size={11} color={meta.color} />
+                  <ToolBadgeIcon meta={meta} size={11} color={meta.color} />
                 </View>
                 <Text
                   style={{
@@ -3097,7 +3108,7 @@ function ThinkingIndicator({
                   justifyContent: "center", alignItems: "center",
                 }}
               >
-                <IconSymbol name={meta.icon as any} size={13} color={"#FF9500"} />
+                <ToolBadgeIcon meta={meta} size={13} color={"#FF9500"} />
               </View>
               <Text style={{ color: "#FF9500", fontSize: 13, fontWeight: "700", flex: 1 }}>
                 Permission Required
