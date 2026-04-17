@@ -43,66 +43,16 @@ export function fixupStuckHeaders(content: string): string {
  */
 export function stripMalformedCodeSpans(content: string): string {
   if (!content) return content;
-  // Split on fenced code block boundaries (``` lines) so we only
-  // process inline backticks in non-fenced regions.
-  const parts = content.split(/(^```.*$)/m);
-  let inFence = false;
-  return parts.map((part) => {
-    if (/^```/.test(part)) {
-      inFence = !inFence;
-      return part;
-    }
-    if (inFence) return part;
-    return part.replace(/`([^`\n]*)`/g, (match: string, inner: string) => {
-      if (!/\w/.test(inner)) return inner;
-      if (inner.length > 60) return inner;
-      if (/\*\*|__|#{1,6} /.test(inner)) return inner;
-      return match;
-    });
-  }).join("");
-}
-
-/** Run every safe preprocessor over an assistant message before it hits the markdown renderer. */
-/**
- * Convert YAML frontmatter code blocks into a compact readable list.
- * Strips the ```yaml and --- delimiters, formats as bold key-value pairs.
- */
-function formatYamlFrontmatter(content: string): string {
-  if (!content) return content;
-  // Match ```yaml\n---\n...\n---\n``` blocks
-  let result = content.replace(
-    /```ya?ml\s*\n---\n([\s\S]*?)\n---\s*\n```/g,
-    (_match, body: string) => {
-      const lines = body
-        .split("\n")
-        .filter((l: string) => l.trim())
-        .map((l: string) => {
-          const m = l.match(/^(\s*[\w-]+):\s*(.*)/);
-          if (m) return `- **${m[1].trim()}:** ${m[2]}`;
-          return `- ${l}`;
-        });
-      return lines.join("\n");
-    }
-  );
-  // Also match bare ---\n...\n--- frontmatter (no code fence)
-  result = result.replace(
-    /^---\n([\s\S]*?)\n---\s*$/gm,
-    (_match, body: string) => {
-      const lines = body
-        .split("\n")
-        .filter((l: string) => l.trim())
-        .map((l: string) => {
-          const m = l.match(/^(\s*[\w-]+):\s*(.*)/);
-          if (m) return `- **${m[1].trim()}:** ${m[2]}`;
-          return `- ${l}`;
-        });
-      return lines.join("\n");
-    }
-  );
-  return result;
+  return content.replace(/`([^`\n]*)`/g, (match: string, inner: string) => {
+    // Never touch backticks that are part of a fenced code block
+    if (inner === "" || inner.startsWith("`")) return match;
+    if (!/\w/.test(inner)) return inner;
+    if (inner.length > 60) return inner;
+    if (/\*\*|__|#{1,6} /.test(inner)) return inner;
+    return match;
+  });
 }
 
 export function cleanModelMarkdown(content: string): string {
-  // Format YAML first (removes fenced blocks), then fix headers, then strip bad spans
-  return stripMalformedCodeSpans(fixupStuckHeaders(formatYamlFrontmatter(content)));
+  return stripMalformedCodeSpans(fixupStuckHeaders(content));
 }
