@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigation } from "expo-router";
 import {
   ActivityIndicator,
   Alert,
@@ -205,19 +206,32 @@ export default function NoteEditor() {
   const onChangeText = useCallback((text: string) => {
     setBody(text);
     setDirty(true);
-    // Debounced auto-save
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => save(text), 1500);
-  }, [save]);
+  }, []);
 
-  // Save on unmount if dirty
+  // Save when leaving the note (unmount)
   useEffect(() => {
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
-      // Can't async in cleanup, but we can fire-and-forget
-      if (dirty) save(body);
     };
+  }, []);
+
+  // Save on blur (keyboard dismiss) or back navigation
+  const handleBlur = useCallback(() => {
+    if (dirty) save(body);
   }, [dirty, body, save]);
+
+  // Save when navigating away
+  const navigation = useNavigation();
+  const dirtyRef = useRef(false);
+  const bodyRef = useRef(body);
+  dirtyRef.current = dirty;
+  bodyRef.current = body;
+  useEffect(() => {
+    const unsub = navigation.addListener("beforeRemove", () => {
+      if (dirtyRef.current) save(bodyRef.current);
+    });
+    return unsub;
+  }, [navigation, save]);
 
   // ── Delete ──────────────────────────────────────────────────────
   const handleDelete = () => {
@@ -312,8 +326,6 @@ export default function NoteEditor() {
     }
     setBody(result.text);
     setDirty(true);
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => save(result.text), 1500);
     // Move cursor
     setTimeout(() => {
       inputRef.current?.setNativeProps({ selection: result.sel });
@@ -372,6 +384,7 @@ export default function NoteEditor() {
               ref={inputRef}
               value={body}
               onChangeText={onChangeText}
+              onBlur={handleBlur}
               onSelectionChange={(e) => setSelection(e.nativeEvent.selection)}
               multiline
               scrollEnabled={false}
