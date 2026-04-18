@@ -412,9 +412,9 @@ function SwipeableChatRow({
   return (
     <Swipeable
       ref={swipeRef}
-      friction={2}
+      friction={1.5}
       overshootRight={false}
-      rightThreshold={40}
+      rightThreshold={20}
       renderRightActions={() => (
         <RightActions
           onDelete={() => { close(); onDelete(); }}
