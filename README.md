@@ -453,4 +453,6 @@ The gateway uses `clawRuntime.ts` to spawn the Claw Rust binary per turn. The ru
 
 ## License
 
-0BSD
+Code original to this repository is licensed under **0BSD** (see [LICENSE](LICENSE)).
+
+The [`claw-code/`](claw-code/) directory is vendored from [ultraworkers/claw-code](https://github.com/ultraworkers/claw-code), which currently ships without a license file. License status of that subdirectory is pending clarification upstream — it is **not** covered by the 0BSD grant above.

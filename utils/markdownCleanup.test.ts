@@ -11,6 +11,10 @@ import { describe, it } from "node:test";
 import {
   cleanModelMarkdown,
   fixupStuckHeaders,
+  isolateTableHeader,
+  isolateTableTail,
+  splitRunOnTableRows,
+  splitStuckListItems,
   stripMalformedCodeSpans,
 } from "./markdownCleanup";
 
@@ -101,6 +105,94 @@ describe("stripMalformedCodeSpans", () => {
   });
 });
 
+describe("splitRunOnTableRows", () => {
+  it("splits adjacent pipes onto separate lines", () => {
+    const input = "| h1 | h2 ||---|---|| d1 | d2 |";
+    const out = splitRunOnTableRows(input);
+    assert.equal(out, "| h1 | h2 |\n|---|---|\n| d1 | d2 |");
+  });
+
+  it("leaves single pipes and spaced empty cells alone", () => {
+    const input = "| a | | b |\nnext line";
+    assert.equal(splitRunOnTableRows(input), input);
+  });
+
+  it("returns empty input unchanged", () => {
+    assert.equal(splitRunOnTableRows(""), "");
+  });
+});
+
+describe("splitStuckListItems", () => {
+  it("splits a bullet stuck to a colon-terminated intro", () => {
+    const input = "contains:- A thing";
+    const out = splitStuckListItems(input);
+    assert.equal(out, "contains:\n\n- A thing");
+  });
+
+  it("splits bullets stuck to a previous item's terminator", () => {
+    const input = "- One file.- Another file.- Third file.";
+    const out = splitStuckListItems(input);
+    assert.equal(out, "- One file.\n\n- Another file.\n\n- Third file.");
+  });
+
+  it("splits after a closing parenthesis", () => {
+    const input = "updates (a, b).- Next item";
+    const out = splitStuckListItems(input);
+    assert.equal(out, "updates (a, b).\n\n- Next item");
+  });
+
+  it("leaves mid-sentence dashes in prose alone", () => {
+    const input = "window hours midnight - 6 AM";
+    assert.equal(splitStuckListItems(input), input);
+  });
+
+  it("leaves well-formed lists untouched", () => {
+    const input = "intro:\n\n- one\n- two\n";
+    assert.equal(splitStuckListItems(input), input);
+  });
+
+  it("returns empty input unchanged", () => {
+    assert.equal(splitStuckListItems(""), "");
+  });
+});
+
+describe("isolateTableHeader", () => {
+  it("splits prose glued to a table header row", () => {
+    const input = "Here are the changes:| Commit | Branch | Summary |";
+    const out = isolateTableHeader(input);
+    assert.equal(
+      out,
+      "Here are the changes:\n\n| Commit | Branch | Summary |"
+    );
+  });
+
+  it("ignores a line that's already a pure table row", () => {
+    const input = "| Commit | Branch | Summary |";
+    assert.equal(isolateTableHeader(input), input);
+  });
+
+  it("ignores prose with a single incidental pipe", () => {
+    const input = "use `|` as a delimiter";
+    assert.equal(isolateTableHeader(input), input);
+  });
+});
+
+describe("isolateTableTail", () => {
+  it("splits a table row glued to a following paragraph", () => {
+    const input = "| a | b | c |Additionally, more prose here.";
+    const out = isolateTableTail(input);
+    assert.equal(
+      out,
+      "| a | b | c |\n\nAdditionally, more prose here."
+    );
+  });
+
+  it("leaves a clean trailing row alone", () => {
+    const input = "| a | b | c |";
+    assert.equal(isolateTableTail(input), input);
+  });
+});
+
 describe("cleanModelMarkdown (integration)", () => {
   it("repairs the canonical broken output from a real GLM run", () => {
     const input =
@@ -120,5 +212,16 @@ describe("cleanModelMarkdown (integration)", () => {
     const input =
       "## Summary\n\n**Architecture:** three layers.\n\n- `app/`\n- `components/`\n- `backend/`\n";
     assert.equal(cleanModelMarkdown(input), input);
+  });
+
+  it("repairs a run-on table and stuck list items together", () => {
+    const input =
+      "Recent changes:| Commit | Summary ||--------|---------|| a1 | first || b2 | second |Working tree:- First change.- Second change.";
+    const out = cleanModelMarkdown(input);
+    assert.ok(out.includes("| Commit | Summary |\n"), "header row isolated");
+    assert.ok(out.includes("|--------|---------|\n"), "separator row isolated");
+    assert.ok(out.includes("\n| a1 | first |"), "data row isolated");
+    assert.ok(out.includes("\n\n- First change."), "first bullet split");
+    assert.ok(out.includes("\n\n- Second change."), "second bullet split");
   });
 });

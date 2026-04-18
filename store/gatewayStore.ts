@@ -480,6 +480,18 @@ type Settings = {
    * of output tokens. Only runs once per user message.
    */
   autoContinueEnabled: boolean;
+  /**
+   * Planning vs. acting mode — maps to claw's `/plan on|off` slash command.
+   * In `plan` mode the model drafts a plan before touching tools; `act`
+   * lets it execute directly. Persisted globally so the user's preference
+   * sticks across threads.
+   */
+  planMode: "act" | "plan";
+  /**
+   * Reasoning effort — maps to claw's `/effort [low|medium|high]`. Controls
+   * how much the model thinks before responding. Persisted globally.
+   */
+  reasoningEffort: "low" | "medium" | "high";
   /** Last working directory selected — used as the initial path in DirectoryBrowser. */
   lastWorkDir?: string;
   /**
@@ -526,7 +538,7 @@ type GatewayState = {
   /** True once zustand-persist has finished rehydrating settings from disk */
   _hasHydrated: boolean;
   actions: {
-    setSettings: (input: Omit<Settings, "modelQueue" | "autoCompact" | "streamingEnabled" | "darkMode" | "accentTheme" | "autoCompactThreshold" | "telemetryEnabled" | "autoContinueEnabled" | "obsidianVault"> & { modelQueue?: ModelEntry[]; autoCompact?: boolean; streamingEnabled?: boolean; darkMode?: "system" | "light" | "dark"; accentTheme?: "claude" | "lavender" | "neo"; autoCompactThreshold?: number; telemetryEnabled?: boolean; autoContinueEnabled?: boolean; obsidianVault?: ObsidianVaultSettings }) => void;
+    setSettings: (input: Partial<Settings>) => void;
     loadThreads: () => Promise<void>;
     createThread: (workDir?: string) => Promise<Thread>;
     browseFsDirectory: (path?: string) => Promise<FsListing>;
@@ -540,6 +552,7 @@ type GatewayState = {
       threadId: string,
       file: { uri: string; name: string; mimeType: string }
     ) => Promise<Attachment>;
+    attachServerFile: (threadId: string, path: string) => Promise<Attachment>;
     stopRun: (threadId: string) => Promise<void>;
     openStream: (threadId: string) => void;
     closeStream: (threadId: string) => void;
@@ -672,6 +685,8 @@ export const useGatewayStore = create<GatewayState>()(
         autoCompactThreshold: 70,
         telemetryEnabled: true,
         autoContinueEnabled: true,
+        planMode: "act",
+        reasoningEffort: "medium",
         obsidianVault: {
           enabled: false,
           provider: "backend",
@@ -703,9 +718,9 @@ export const useGatewayStore = create<GatewayState>()(
           set((state) => ({
             settings: {
               ...state.settings,
-              serverUrl: input.serverUrl.trim(),
-              bearerToken: input.bearerToken.trim(),
-              model: input.model,
+              serverUrl: input.serverUrl?.trim() ?? state.settings.serverUrl,
+              bearerToken: input.bearerToken?.trim() ?? state.settings.bearerToken,
+              model: input.model ?? state.settings.model,
               modelQueue: input.modelQueue ?? state.settings.modelQueue ?? [],
               autoCompact: input.autoCompact ?? state.settings.autoCompact ?? true,
               streamingEnabled: input.streamingEnabled ?? state.settings.streamingEnabled ?? true,
@@ -723,6 +738,12 @@ export const useGatewayStore = create<GatewayState>()(
                 input.autoContinueEnabled ??
                 state.settings.autoContinueEnabled ??
                 true,
+              planMode:
+                input.planMode ?? state.settings.planMode ?? "act",
+              reasoningEffort:
+                input.reasoningEffort ??
+                state.settings.reasoningEffort ??
+                "medium",
               obsidianVault:
                 input.obsidianVault ??
                 state.settings.obsidianVault ?? {
@@ -735,6 +756,7 @@ export const useGatewayStore = create<GatewayState>()(
                   useForReference: true,
                   useMcpVault: true,
                 },
+              lastWorkDir: input.lastWorkDir ?? state.settings.lastWorkDir,
             },
           })),
 
@@ -874,6 +896,8 @@ export const useGatewayStore = create<GatewayState>()(
                 autoCompactThreshold: state.settings.autoCompactThreshold ?? 70,
                 autoContinueEnabled: state.settings.autoContinueEnabled ?? true,
                 streamingEnabled: state.settings.streamingEnabled ?? true,
+                planMode: state.settings.planMode ?? "act",
+                reasoningEffort: state.settings.reasoningEffort ?? "medium",
                 modelQueue: (() => {
                   // Only entries belonging to the active backend run — a
                   // model registered against your local Mac shouldn't fire
@@ -954,6 +978,32 @@ export const useGatewayStore = create<GatewayState>()(
             mimeType: data.mimeType,
             size: data.size,
             localUri: file.uri,
+          } satisfies Attachment;
+        },
+
+        attachServerFile: async (threadId, filePath) => {
+          const state = get();
+          const { baseUrl, headers } = getClientConfig(state);
+          const res = await fetch(
+            `${baseUrl}/threads/${threadId}/attach-server-file`,
+            {
+              method: "POST",
+              headers,
+              body: JSON.stringify({ path: filePath }),
+            }
+          );
+          if (!res.ok) {
+            const text = await res.text().catch(() => "");
+            throw new Error(`attach failed: ${res.status} ${text}`);
+          }
+          const data = await res.json();
+          return {
+            path: data.path,
+            relativePath: data.relativePath,
+            fileName: data.fileName,
+            kind: data.kind,
+            mimeType: data.mimeType,
+            size: data.size,
           } satisfies Attachment;
         },
 
@@ -1565,6 +1615,8 @@ export const useGatewayStore = create<GatewayState>()(
           if (s.autoCompactThreshold === undefined) patch.autoCompactThreshold = 70;
           if (s.accentTheme === undefined) patch.accentTheme = "lavender";
           if (s.autoContinueEnabled === undefined) patch.autoContinueEnabled = true;
+          if (s.planMode === undefined) patch.planMode = "act";
+          if (s.reasoningEffort === undefined) patch.reasoningEffort = "medium";
           // Migrate model-queue entries from before per-backend scoping
           // existed: stamp any unstamped entry with the active server URL
           // so it stays visible on this backend (and only this backend).

@@ -12,11 +12,13 @@ export function GlassButton({
   onPress,
   disabled,
   style,
+  tintColor,
   children,
 }: {
   onPress?: () => void;
   disabled?: boolean;
   style?: StyleProp<ViewStyle>;
+  tintColor?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -24,6 +26,7 @@ export function GlassButton({
       <GlassView
         glassEffectStyle="regular"
         isInteractive
+        tintColor={tintColor}
         style={[
           {
             alignItems: "center" as const,

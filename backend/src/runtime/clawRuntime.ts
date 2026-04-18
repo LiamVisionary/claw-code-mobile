@@ -36,6 +36,15 @@ const CLAUDE_CLI =
 // back via --resume on subsequent turns so the model sees history.
 const claudeCliSessions = new Map<string, string>();
 
+// Per-thread record of the last plan/effort mode actually pushed into the
+// claw session. Lets us skip redundant mode-apply spawns when the user
+// hasn't changed anything since the previous turn. Resets on process
+// restart (that's fine — we'll just re-apply once on the next turn).
+const lastAppliedMode = new Map<
+  string,
+  { plan?: "on" | "off"; effort?: "low" | "medium" | "high" }
+>();
+
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const WORKSPACES_DIR = path.resolve(__dirname, "../../data/workspaces");
 
@@ -382,9 +391,15 @@ function buildArgs(
 /**
  * Build the effective prompt text the model sees. Image attachments
  * already ride along as `--image` flags (so the model literally sees
- * the pixels via the multimodal content block); non-image files get a
- * short note prepended so the agent knows the file exists in the
- * workdir and can open it with its filesystem tools.
+ * the pixels via the multimodal content block); non-image files get
+ * an annotation appended to the user's message — absolute paths, so
+ * the agent reads the exact attached file instead of glob-searching
+ * for ambiguous names (e.g. two `PHILOSOPHY.md`s in the workspace).
+ *
+ * Annotation goes *after* the user's text so the question stays the
+ * primary instruction — prepending the note caused the model to
+ * treat "read the file" as the entire task and answer generically
+ * instead of addressing what the user actually asked.
  */
 function decoratePromptWithAttachments(
   prompt: string,
@@ -393,20 +408,22 @@ function decoratePromptWithAttachments(
   if (attachments.length === 0) return prompt;
   const images = attachments.filter((a) => a.kind === "image");
   const files = attachments.filter((a) => a.kind === "file");
-  const lines: string[] = [];
+  const notes: string[] = [];
   if (images.length > 0) {
     const names = images.map((a) => a.fileName).join(", ");
-    lines.push(
-      `(${images.length} image${images.length === 1 ? "" : "s"} attached: ${names})`
+    notes.push(
+      `${images.length} image${images.length === 1 ? "" : "s"} attached: ${names}`
     );
   }
   if (files.length > 0) {
-    for (const f of files) {
-      lines.push(`(attached file: ${f.relativePath})`);
-    }
+    const listing = files.map((f) => f.path).join(", ");
+    const noun = files.length === 1 ? "file" : "files";
+    notes.push(
+      `Attached ${noun} (read these exact paths, do not glob-search): ${listing}`
+    );
   }
-  if (lines.length === 0) return prompt;
-  return `${lines.join("\n")}\n\n${prompt}`;
+  if (notes.length === 0) return prompt;
+  return `${prompt}\n\n---\n${notes.join("\n")}`;
 }
 
 function buildCompactArgs(model?: ModelConfig): string[] {
@@ -414,6 +431,75 @@ function buildCompactArgs(model?: ModelConfig): string[] {
   if (model?.name) args.push("--model", model.name);
   args.push("--output-format", "json", "--resume", "latest", "/compact");
   return args;
+}
+
+/**
+ * Push the user's current Plan/Act and reasoning-effort selections into
+ * the thread's claw session by chaining `/plan` and `/effort` onto a
+ * `--resume latest` spawn. Slash-command mutations persist in the
+ * session's jsonl, so subsequent `prompt …` turns inherit them.
+ *
+ * No-ops when the requested mode already matches what we last applied
+ * for this thread. On the very first turn of a brand-new thread there
+ * is no "latest" session to resume — the spawn exits non-zero and we
+ * swallow the error; turn 1 runs under default mode, and turn 2+ picks
+ * up the user's choice. Only runs for the native claw binary — the
+ * Claude CLI does not share these slash commands.
+ */
+async function applyModeSettings(
+  threadId: string,
+  planMode: "act" | "plan",
+  reasoningEffort: "low" | "medium" | "high",
+  cwd: string,
+  sessionDir: string,
+  model?: ModelConfig
+): Promise<void> {
+  const binary = getBinary(model);
+  if (binary !== CLAW_BINARY) return;
+
+  const targetPlan: "on" | "off" = planMode === "plan" ? "on" : "off";
+  const targetEffort = reasoningEffort;
+  const last = lastAppliedMode.get(threadId);
+  if (last?.plan === targetPlan && last?.effort === targetEffort) return;
+
+  const args: string[] = [];
+  if (model?.name) args.push("--model", model.name);
+  args.push(
+    "--output-format",
+    "json",
+    "--resume",
+    "latest",
+    "/plan",
+    targetPlan,
+    "/effort",
+    targetEffort
+  );
+
+  const env = buildEnv(model, sessionDir);
+
+  await new Promise<void>((resolve) => {
+    try {
+      const child = spawn(binary, args, {
+        cwd,
+        env,
+        stdio: ["ignore", "ignore", "ignore"],
+      });
+      const done = (ok: boolean) => {
+        if (ok) {
+          lastAppliedMode.set(threadId, { plan: targetPlan, effort: targetEffort });
+        }
+        resolve();
+      };
+      child.once("exit", (code: number | null) => done(code === 0));
+      child.once("error", (err: Error) => {
+        logger.warn({ err, threadId }, "applyModeSettings spawn error");
+        done(false);
+      });
+    } catch (err) {
+      logger.warn({ err, threadId }, "applyModeSettings threw");
+      resolve();
+    }
+  });
 }
 
 /**
@@ -1714,7 +1800,9 @@ export const clawRuntime = {
     autoCompactThreshold = 70,
     autoContinueEnabled = true,
     attachments: Attachment[] = [],
-    obsidianVault?: VaultConfig
+    obsidianVault?: VaultConfig,
+    planMode: "act" | "plan" = "act",
+    reasoningEffort: "low" | "medium" | "high" = "medium"
   ): Promise<string> {
     const thread = threadService.get(threadId);
     if (!thread) return "";
@@ -1933,6 +2021,22 @@ export const clawRuntime = {
           );
         }
       }
+    }
+
+    // Push the user's Plan/Act + reasoning-effort selection into the
+    // thread's claw session (via `--resume latest /plan … /effort …`)
+    // so this turn inherits it. No-op when the mode is unchanged since
+    // the last turn; silently skips on the very first turn (no session
+    // yet) — that turn runs in default mode and turn 2+ picks up.
+    if (!active.stopped) {
+      await applyModeSettings(
+        threadId,
+        planMode,
+        reasoningEffort,
+        cwd,
+        sessionDir,
+        queue[0]
+      );
     }
 
     for (let i = 0; i < queue.length; i++) {

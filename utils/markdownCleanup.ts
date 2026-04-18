@@ -53,6 +53,83 @@ export function stripMalformedCodeSpans(content: string): string {
   });
 }
 
+/**
+ * Model output sometimes emits markdown tables with no newlines
+ * between rows — "| h | h ||---|---|| d | d |..." — which
+ * markdown-display renders as raw pipe text instead of a table.
+ * Real markdown never uses `||` (an empty cell is `| |` with a
+ * space), so two adjacent pipes unambiguously mark a row boundary.
+ */
+export function splitRunOnTableRows(content: string): string {
+  if (!content) return content;
+  return content.replace(/\|\|/g, "|\n|");
+}
+
+/**
+ * Model output sometimes glues a bullet list onto the tail of the
+ * preceding sentence: "contains:- A thing.- Another thing." Without
+ * the newline the dash is parsed as a hyphen and the list never
+ * forms. We split when punctuation that normally ends a clause
+ * (`.`, `:`, `)`) is followed by `- <Capital>`, which is a strong
+ * signal the dash was meant to open a new list item.
+ */
+export function splitStuckListItems(content: string): string {
+  if (!content) return content;
+  return content.replace(/([.:)])\s*-\s+([A-Z])/g, "$1\n\n- $2");
+}
+
+/**
+ * A table header row glued to the end of a prose line:
+ * "Here are the changes:| Commit | Branch | Summary |". Once the
+ * line contains three or more pipes and a pipe-delimited suffix
+ * that reaches end-of-line, the suffix is a table header and the
+ * preceding text should be pushed onto its own paragraph.
+ */
+export function isolateTableHeader(content: string): string {
+  if (!content) return content;
+  return content
+    .split("\n")
+    .map((line) => {
+      const m = /^([^|\n]+?\S)\s*(\|(?:[^|\n]+\|){2,})\s*$/.exec(line);
+      if (!m) return line;
+      return `${m[1]}\n\n${m[2]}`;
+    })
+    .join("\n");
+}
+
+/**
+ * A paragraph glued onto the tail of a table row's closing pipe:
+ * "| a | b | c |Additionally the working tree…". We split on the
+ * last `|` of a table-looking line when text follows it. A regex
+ * that tries to match cells + tail backtracks and treats the final
+ * cell as prose, so we scan explicitly instead.
+ */
+export function isolateTableTail(content: string): string {
+  if (!content) return content;
+  return content
+    .split("\n")
+    .map((line) => {
+      if (!line.startsWith("|")) return line;
+      let pipeCount = 0;
+      for (const c of line) if (c === "|") pipeCount++;
+      // Need at least 2 cells (3 pipes) to be worth treating as a
+      // table row.
+      if (pipeCount < 3) return line;
+      const lastPipe = line.lastIndexOf("|");
+      const tail = line.slice(lastPipe + 1);
+      if (!tail.trim()) return line;
+      const rowPart = line.slice(0, lastPipe + 1);
+      return `${rowPart}\n\n${tail.replace(/^\s+/, "")}`;
+    })
+    .join("\n");
+}
+
 export function cleanModelMarkdown(content: string): string {
-  return stripMalformedCodeSpans(fixupStuckHeaders(content));
+  return stripMalformedCodeSpans(
+    splitStuckListItems(
+      isolateTableTail(
+        isolateTableHeader(splitRunOnTableRows(fixupStuckHeaders(content)))
+      )
+    )
+  );
 }

@@ -35,6 +35,82 @@ const uploadBodySchema = z.object({
   dataBase64: z.string().min(1),
 });
 
+const attachServerFileSchema = z.object({
+  path: z.string().min(1),
+});
+
+const MIME_BY_EXT: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".heic": "image/heic",
+  ".heif": "image/heif",
+  ".svg": "image/svg+xml",
+  ".pdf": "application/pdf",
+  ".txt": "text/plain",
+  ".md": "text/markdown",
+  ".json": "application/json",
+  ".csv": "text/csv",
+  ".html": "text/html",
+  ".xml": "application/xml",
+};
+
+function mimeFromExt(filename: string): string {
+  const ext = path.extname(filename).toLowerCase();
+  return MIME_BY_EXT[ext] ?? "application/octet-stream";
+}
+
+uploadsRouter.post("/threads/:threadId/attach-server-file", (req, res, next) => {
+  try {
+    const thread = threadService.get(req.params.threadId);
+    if (!thread) throw new HttpError(404, "Thread not found");
+
+    const body = attachServerFileSchema.parse(req.body);
+    const fullPath = path.resolve(body.path);
+
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(fullPath);
+    } catch {
+      throw new HttpError(404, "File not found");
+    }
+    if (!stat.isFile()) throw new HttpError(400, "Not a file");
+    if (stat.size > MAX_BYTES) {
+      throw new HttpError(413, `file exceeds ${MAX_BYTES} bytes`);
+    }
+
+    const fileName = path.basename(fullPath);
+    const mime = mimeFromExt(fileName);
+    const kind = classifyKind(fileName, mime);
+
+    const cwd = resolveThreadCwd(thread.id);
+    // If the file is inside cwd, use a clean relative path; otherwise
+    // keep the absolute path so the agent's prompt note doesn't end up
+    // with ugly `../../` traversal that's harder to read.
+    const rel = path.relative(cwd, fullPath);
+    const relativePath = rel.startsWith("..") || path.isAbsolute(rel) ? fullPath : rel;
+
+    logger.info(
+      { threadId: thread.id, path: fullPath, bytes: stat.size, kind },
+      "server file attached"
+    );
+
+    res.json({
+      ok: true,
+      path: fullPath,
+      relativePath,
+      fileName,
+      mimeType: mime,
+      size: stat.size,
+      kind,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 uploadsRouter.post("/threads/:threadId/upload", (req, res, next) => {
   try {
     const thread = threadService.get(req.params.threadId);

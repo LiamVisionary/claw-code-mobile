@@ -78,6 +78,21 @@ const LAVENDER_DARK: Palette = {
   success: "#9EBB90",
 };
 
+// Matrix / CRT phosphor — always dark, neon green on near-black.
+// Both "light" and "dark" variants stay dark to preserve the aesthetic.
+const NEO_DARK: Palette = {
+  bg: "#050807",         // near-black with a green undertone
+  surface: "#0B110C",    // cards, inset surfaces
+  surfaceAlt: "#141E16", // pressed / hovered
+  text: "#39FF14",       // neon phosphor green
+  textMuted: "#2FBF10",
+  textSoft: "#1E7A0C",
+  divider: "#12301A",
+  accent: "#39FF14",
+  danger: "#FF4A4A",
+  success: "#39FF14",
+};
+
 // Legacy exports kept for anything still importing LIGHT/DARK directly.
 export const LIGHT = TERRACOTTA_LIGHT;
 export const DARK = TERRACOTTA_DARK;
@@ -87,6 +102,7 @@ export const DARK = TERRACOTTA_DARK;
 const THEMES = {
   lavender: { light: LAVENDER_LIGHT, dark: LAVENDER_DARK },
   claude: { light: TERRACOTTA_LIGHT, dark: TERRACOTTA_DARK },
+  neo: { light: NEO_DARK, dark: NEO_DARK },
 } as const;
 
 export type AccentTheme = keyof typeof THEMES;
@@ -94,11 +110,13 @@ export type AccentTheme = keyof typeof THEMES;
 export const ACCENTS = {
   claude: { light: TERRACOTTA_LIGHT.accent, dark: TERRACOTTA_DARK.accent },
   lavender: { light: LAVENDER_LIGHT.accent, dark: LAVENDER_DARK.accent },
+  neo: { light: NEO_DARK.accent, dark: NEO_DARK.accent },
 } as const;
 
 export const ACCENT_OPTIONS: { key: AccentTheme; label: string }[] = [
   { key: "lavender", label: "Lavender" },
   { key: "claude", label: "Terracotta" },
+  { key: "neo", label: "Neo" },
 ];
 
 /**

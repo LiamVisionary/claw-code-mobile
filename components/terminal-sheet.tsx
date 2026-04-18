@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Animated,
   Keyboard,
   Modal,
-  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -15,7 +13,6 @@ import {
 import * as Haptics from "expo-haptics";
 import * as Clipboard from "expo-clipboard";
 import { useGatewayStore } from "@/store/gatewayStore";
-import { usePalette } from "@/hooks/usePalette";
 import TouchableBounce from "@/components/ui/TouchableBounce";
 import { SPACING, TYPOGRAPHY } from "@/constants/theme";
 import { parseAnsi } from "./ansi";
@@ -49,7 +46,6 @@ export default function TerminalSheet({ threadId, visible, onClose, onSendToClaw
   const lines = useGatewayStore((s) => s.terminal[threadId] ?? EMPTY_LINES);
   const cwd = useGatewayStore((s) => s.terminalCwd[threadId] ?? "");
   const busy = useGatewayStore((s) => s.terminalBusy[threadId] ?? false);
-  const palette = usePalette();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
 
@@ -59,7 +55,6 @@ export default function TerminalSheet({ threadId, visible, onClose, onSendToClaw
   // Only one can be armed at a time for predictability.
   const [ctrlArmed, setCtrlArmed] = useState(false);
   const [cmdArmed, setCmdArmed] = useState(false);
-  const slideAnim = useRef(new Animated.Value(1000)).current;
   const scrollRef = useRef<ScrollView>(null);
   const inputRef = useRef<TextInput>(null);
   // Command history (local to this sheet instance — not persisted).
@@ -69,23 +64,13 @@ export default function TerminalSheet({ threadId, visible, onClose, onSendToClaw
   const historyIdxRef = useRef<number>(0);
   const draftRef = useRef<string>("");
 
-  // ── Slide in / out ─────────────────────────────────────────────
   useEffect(() => {
-    if (visible) {
-      actions.loadTerminal(threadId).catch(() => {});
-      Animated.spring(slideAnim, {
-        toValue: 0,
-        useNativeDriver: true,
-        tension: 65,
-        friction: 12,
-      }).start();
-      // Delay so the modal has mounted before trying to focus.
-      const t = setTimeout(() => inputRef.current?.focus(), 250);
-      return () => clearTimeout(t);
-    } else {
-      slideAnim.setValue(1000);
-    }
-  }, [visible, threadId, actions, slideAnim]);
+    if (!visible) return;
+    actions.loadTerminal(threadId).catch(() => {});
+    // Delay so the modal has mounted before trying to focus.
+    const t = setTimeout(() => inputRef.current?.focus(), 250);
+    return () => clearTimeout(t);
+  }, [visible, threadId, actions]);
 
   useEffect(() => {
     if (!visible) return;
@@ -109,44 +94,10 @@ export default function TerminalSheet({ threadId, visible, onClose, onSendToClaw
     requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
   }, [lines.length, visible]);
 
-  // ── Drag-to-dismiss on the grabber area ────────────────────────
-  const dragY = useRef(new Animated.Value(0)).current;
   const dismiss = useCallback(() => {
     Keyboard.dismiss();
-    Animated.timing(slideAnim, {
-      toValue: 1000,
-      duration: 180,
-      useNativeDriver: true,
-    }).start(() => onClose());
-  }, [slideAnim, onClose]);
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dy) > 5 && g.dy > 0,
-      onPanResponderMove: (_e, g) => {
-        if (g.dy > 0) dragY.setValue(g.dy);
-      },
-      onPanResponderRelease: (_e, g) => {
-        if (g.dy > 120 || g.vy > 0.8) {
-          Animated.timing(dragY, {
-            toValue: 1000,
-            duration: 150,
-            useNativeDriver: true,
-          }).start(() => {
-            dragY.setValue(0);
-            onClose();
-          });
-        } else {
-          Animated.spring(dragY, {
-            toValue: 0,
-            useNativeDriver: true,
-            tension: 80,
-            friction: 10,
-          }).start();
-        }
-      },
-    })
-  ).current;
+    onClose();
+  }, [onClose]);
 
   // ── Actions ─────────────────────────────────────────────────────
   const send = useCallback(() => {
@@ -312,51 +263,29 @@ export default function TerminalSheet({ threadId, visible, onClose, onSendToClaw
   // ── Render ─────────────────────────────────────────────────────
   return (
     <Modal
-      transparent
-      animationType="none"
+      presentationStyle="pageSheet"
+      animationType="slide"
       visible={visible}
       onRequestClose={dismiss}
+      onDismiss={onClose}
     >
-      <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}>
-        <Pressable
-          style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
-          onPress={dismiss}
-        />
-        <Animated.View
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: TERMINAL_BG,
+        }}
+      >
+        {/* Tiny status strip — cwd only, no buttons */}
+        <View
           style={{
-            backgroundColor: TERMINAL_BG,
-            borderTopLeftRadius: 18,
-            borderTopRightRadius: 18,
-            height: "88%",
-            transform: [{ translateY: Animated.add(slideAnim, dragY) }],
-            overflow: "hidden",
+            flexDirection: "row",
+            alignItems: "center",
+            paddingHorizontal: SPACING.lg,
+            paddingTop: SPACING.sm,
+            paddingBottom: 4,
+            gap: SPACING.sm,
           }}
         >
-          {/* Drag handle (whole top strip is pan-responsive) */}
-          <View
-            {...panResponder.panHandlers}
-            style={{ alignItems: "center", paddingTop: 10, paddingBottom: 8 }}
-          >
-            <View
-              style={{
-                width: 40,
-                height: 4,
-                borderRadius: 2,
-                backgroundColor: "rgba(255,255,255,0.25)",
-              }}
-            />
-          </View>
-
-          {/* Tiny status strip — cwd only, no buttons */}
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              paddingHorizontal: SPACING.lg,
-              paddingBottom: 4,
-              gap: SPACING.sm,
-            }}
-          >
             <Text
               numberOfLines={1}
               style={{
@@ -476,8 +405,7 @@ export default function TerminalSheet({ threadId, visible, onClose, onSendToClaw
 
           {/* Bottom spacer that tracks the keyboard so the prompt doesn't
               hide under it. */}
-          <View style={{ height: keyboardHeight > 0 ? keyboardHeight : Platform.OS === "ios" ? 28 : 8 }} />
-        </Animated.View>
+        <View style={{ height: keyboardHeight > 0 ? keyboardHeight : Platform.OS === "ios" ? 28 : 8 }} />
       </View>
     </Modal>
   );

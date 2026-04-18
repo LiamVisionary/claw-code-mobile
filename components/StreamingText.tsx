@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef } from "react";
+import { Fragment, memo, useEffect, useMemo, useRef } from "react";
 import { Text } from "react-native";
 import Markdown from "react-native-markdown-display";
 import Animated, {
@@ -10,12 +10,19 @@ import Animated, {
   interpolate,
 } from "react-native-reanimated";
 
+import { StreamingTable } from "@/components/StreamingTable";
+import type { Palette } from "@/constants/palette";
+import { parseTableBlocks } from "@/utils/parseTableBlocks";
+
 type Props = {
   content: string;
   /** Markdown styles (same as you'd pass to <Markdown style={...}>) */
   mdStyles?: Record<string, any>;
   /** Whether the message is still streaming. */
   streaming?: boolean;
+  /** Palette for theming the live table renderer. Required when the
+   * content contains markdown tables; ignored otherwise. */
+  palette?: Palette;
 };
 
 // ── Animated letter ─────────────────────────────────────────────────
@@ -58,11 +65,12 @@ const AnimatedLetter = memo(function AnimatedLetter({
  * their characters in with a staggered rise+fade. Already-seen characters
  * render instantly; only newly arrived ones animate.
  *
- * Uses a global character counter across all text nodes to compute
- * consistent stagger delays — characters from a single SSE chunk
- * cascade smoothly regardless of which markdown node they belong to.
+ * When the streamed content contains a markdown table we switch to a
+ * segmented renderer: non-table runs go through the per-letter markdown
+ * path, table runs go through `StreamingTable` which grows row-by-row
+ * as cells arrive.
  */
-function StreamingTextBase({ content, mdStyles, streaming }: Props) {
+function StreamingTextBase({ content, mdStyles, streaming, palette }: Props) {
   const prevLenRef = useRef(0);
   // Global character position tracker — shared across text rule calls
   // within a single render. Reset on each render via ref.
@@ -77,8 +85,11 @@ function StreamingTextBase({ content, mdStyles, streaming }: Props) {
   // Reset the global counter at the start of each render
   globalCharIdx.current = 0;
 
+  const segments = useMemo(() => parseTableBlocks(content), [content]);
+  const hasTables = segments.some((s) => s.type === "table");
+
   const rules = useMemo(() => {
-    if (!streaming) return undefined;
+    if (!streaming || hasTables) return undefined;
 
     return {
       text: (
@@ -128,15 +139,36 @@ function StreamingTextBase({ content, mdStyles, streaming }: Props) {
         );
       },
     };
-  }, [streaming, prevLen]);
+  }, [streaming, prevLen, hasTables]);
 
+  if (!hasTables) {
+    return (
+      <Markdown style={mdStyles} rules={rules}>
+        {content}
+      </Markdown>
+    );
+  }
+
+  // Mixed text + table rendering. Per-letter animation is disabled in
+  // this path; table rows carry their own fade-in via StreamingTable.
   return (
-    <Markdown
-      style={mdStyles}
-      rules={rules}
-    >
-      {content}
-    </Markdown>
+    <>
+      {segments.map((seg, i) => (
+        <Fragment key={i}>
+          {seg.type === "table" ? (
+            palette ? (
+              <StreamingTable
+                segment={seg}
+                palette={palette}
+                streaming={streaming}
+              />
+            ) : null
+          ) : (
+            <Markdown style={mdStyles}>{seg.content}</Markdown>
+          )}
+        </Fragment>
+      ))}
+    </>
   );
 }
 

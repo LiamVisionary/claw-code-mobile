@@ -1,11 +1,37 @@
+import DirectoryBrowser from "@/components/DirectoryBrowser";
+import FileBrowser from "@/components/FileBrowser";
+import SlashCommandPicker from "@/components/SlashCommandPicker";
+import { StreamingText } from "@/components/StreamingText";
+import TerminalSheet from "@/components/terminal-sheet";
+import { GlassButton } from "@/components/ui/GlassButton";
+import { IconSymbol } from "@/components/ui/IconSymbol";
+import { ThinkingSprite } from "@/components/ui/ThinkingSprite";
+import TouchableBounce from "@/components/ui/TouchableBounce";
+import type { Palette } from "@/constants/palette";
+import { BORDER_RADIUS, SHADOW, SPACING, TYPOGRAPHY } from "@/constants/theme";
+import { useModelCapabilities } from "@/hooks/useModelCapabilities";
+import { usePalette } from "@/hooks/usePalette";
+import type { Attachment, Message, ModelEntry, PermissionRequest, ThreadStatus, ToolStep } from "@/store/gatewayStore";
+import { useGatewayStore } from "@/store/gatewayStore";
+import { nanoid } from "@/util/nanoid";
+import { cleanModelMarkdown } from "@/utils/markdownCleanup";
+import MaskedView from "@react-native-masked-view/masked-view";
+import { BlurView } from "expo-blur";
+import * as Clipboard from "expo-clipboard";
+import * as DocumentPicker from "expo-document-picker";
+import * as Haptics from "expo-haptics";
+import { GlassView } from "expo-glass-effect";
+import * as ImagePicker from "expo-image-picker";
+import { LinearGradient } from "expo-linear-gradient";
+import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useFocusEffect } from "expo-router";
 import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import {
   ActivityIndicator,
   Alert,
   Animated,
   AppState,
+  Easing,
   FlatList,
   Image,
   Keyboard,
@@ -19,31 +45,7 @@ import {
   View,
   useColorScheme,
 } from "react-native";
-import { BlurView } from "expo-blur";
-import { GlassView } from "expo-glass-effect";
-import { GlassButton } from "@/components/ui/GlassButton";
-import { LinearGradient } from "expo-linear-gradient";
-import MaskedView from "@react-native-masked-view/masked-view";
-import Markdown from "react-native-markdown-display";
-import * as Clipboard from "expo-clipboard";
-import { Stack, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
-import TouchableBounce from "@/components/ui/TouchableBounce";
-import { IconSymbol } from "@/components/ui/IconSymbol";
-import { ThinkingSprite } from "@/components/ui/ThinkingSprite";
-import { usePalette } from "@/hooks/usePalette";
-import { useModelCapabilities } from "@/hooks/useModelCapabilities";
-import type { Palette } from "@/constants/palette";
-import { cleanModelMarkdown } from "@/utils/markdownCleanup";
-import { StreamingText } from "@/components/StreamingText";
-import * as ImagePicker from "expo-image-picker";
-import * as DocumentPicker from "expo-document-picker";
-import SlashCommandPicker from "@/components/SlashCommandPicker";
-import DirectoryBrowser from "@/components/DirectoryBrowser";
-import TerminalSheet from "@/components/terminal-sheet";
-import { useGatewayStore } from "@/store/gatewayStore";
-import type { Attachment, Message, ToolStep, PermissionRequest, ThreadStatus, ModelEntry } from "@/store/gatewayStore";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { BORDER_RADIUS, SPACING, SHADOW, TYPOGRAPHY } from "@/constants/theme";
 
 // Stable empty arrays — prevents Zustand `?? []` from returning a new reference
 // on every store update and causing infinite re-renders.
@@ -52,6 +54,18 @@ const EMPTY_REQS: PermissionRequest[] = [];
 const EMPTY_MESSAGES: Message[] = [];
 
 const TOP_BAR_HEIGHT = 52;
+
+type QueuedItem = {
+  id: string;
+  text: string;
+  attachments: Attachment[];
+};
+
+const EFFORT_LABEL: Record<"low" | "medium" | "high", string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+};
 
 // Module-level bridge so HeaderTitle (inside native header) can open
 // ModelPickerBar without any React state flowing through Stack.Screen.
@@ -79,10 +93,17 @@ export default function ThreadScreen() {
   const [slashPickerVisible, setSlashPickerVisible] = useState(false);
   const [copiedConvo, setCopiedConvo] = useState(false);
   const [showDirBrowser, setShowDirBrowser] = useState(false);
+  const [showFileBrowser, setShowFileBrowser] = useState(false);
   const [showTerminal, setShowTerminal] = useState(false);
-  const [queuedMessage, setQueuedMessage] = useState<string | null>(null);
+  const [queue, setQueue] = useState<QueuedItem[]>([]);
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
+  const [modePopover, setModePopover] = useState<null | "plan" | "effort">(null);
+  /**
+   * Horizontal offsets (relative to the composer row) of each mode pill.
+   * Captured on layout so the popovers can anchor above the correct pill.
+   */
+  const [pillX, setPillX] = useState<{ plan?: number; effort?: number }>({});
   /**
    * In-flight uploads keyed by a client id. We track these separately
    * from `pendingAttachments` so the chat can show an instant thumbnail
@@ -184,69 +205,113 @@ export default function ThreadScreen() {
   //  - By default, pinned to bottom. New content auto-scrolls.
   //  - When the user drags up, we un-pin and show a simple "↓" FAB.
   //  - When the user scrolls back to the bottom (or taps the FAB), re-pin.
-  //  - No "+N unread" counter — it's confusing for streaming AI where
-  //    content grows continuously in a single message.
+  //  - When the user sends a message, force-pin so they see it land.
+  //
+  // Pin/unpin invariant: only USER-initiated scrolls (drag + momentum)
+  // can unpin. Programmatic scrollToEnd and content-growth scroll events
+  // can re-pin but never unpin. Without this, scrollToEnd's momentum-end
+  // race against streaming content growth silently unpins the user.
 
   const isAtBottomRef = useRef(true);
-  const userDraggingRef = useRef(false);
+  const isDraggingRef = useRef(false);
+  // True only while a user-initiated fling is in progress (drag → momentum).
+  // Programmatic scrollToEnd({animated:true}) also fires onMomentumScrollBegin
+  // on iOS — we must NOT treat those as user scrolling, otherwise they unpin
+  // the user mid-animation and block streaming follow-scrolls.
+  const userMomentumRef = useRef(false);
+  // Short-lived latch set on drag end. Promotes to userMomentumRef if a
+  // momentum phase begins. Decays after 50ms if no momentum follows.
+  const justDraggedRef = useRef(false);
+  const justDraggedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showGoToLatest, setShowGoToLatest] = useState(false);
-  // Suppress FAB after programmatic scroll-to-end, cleared on next drag.
+  // Suppress FAB + pin-updates while a programmatic scroll animation is in
+  // flight. Without this, onMomentumScroll* events from the programmatic
+  // animation race against streaming content growth and unpin the user.
   const suppressFabRef = useRef(false);
-  const lastScrollYRef = useRef(0);
   const [headerVisible, setHeaderVisible] = useState(true);
+
+  // Generous threshold — feels sticky and tolerates the small position
+  // drift between a streaming chunk arriving and the follow-up scroll landing.
+  const AT_BOTTOM_THRESHOLD = 140;
 
   const handleScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
       const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
       const distanceFromBottom =
         contentSize.height - (contentOffset.y + layoutMeasurement.height);
-      const atBottom = distanceFromBottom < 80;
+      const atBottom = distanceFromBottom < AT_BOTTOM_THRESHOLD;
 
       if (suppressFabRef.current) {
         if (showGoToLatest) setShowGoToLatest(false);
-        lastScrollYRef.current = contentOffset.y;
         return;
       }
 
-      // Non-dragging scroll events come from programmatic scrollToEnd or
-      // content growth. Only allow re-pinning, never un-pinning — prevents
-      // the content-grows-faster-than-scroll race from showing the FAB.
-      if (!userDraggingRef.current) {
-        if (atBottom) {
+      const userScrolling = isDraggingRef.current || userMomentumRef.current;
+
+      if (!userScrolling) {
+        // Programmatic scroll or content-growth event — only allow re-pin.
+        if (atBottom && !isAtBottomRef.current) {
           isAtBottomRef.current = true;
           if (showGoToLatest) setShowGoToLatest(false);
         }
-        lastScrollYRef.current = contentOffset.y;
         return;
       }
 
-      // User is actively dragging — allow both pin and un-pin.
+      // User is scrolling — single source of truth for pin state.
       isAtBottomRef.current = atBottom;
       if (atBottom) {
         if (showGoToLatest) setShowGoToLatest(false);
       } else {
         if (!showGoToLatest) setShowGoToLatest(true);
       }
-      lastScrollYRef.current = contentOffset.y;
     },
     [showGoToLatest]
   );
 
-  // Auto-scroll when new messages arrive (new message count changes).
+  // Internal helper used by the follow-scroll effects. Always instant —
+  // animated scrolls race with content growth and land at a stale offset.
+  // Two rAFs: first lets React commit the render, second lets the native
+  // FlatList finish its layout pass so contentSize is up-to-date.
+  const followScrollToEnd = useCallback(() => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        listRef.current?.scrollToEnd({ animated: false });
+      });
+    });
+  }, []);
+
+  // Length of the LAST message's content. Changes on every streaming chunk
+  // (message count stays constant during a stream, only content grows).
+  const lastMsgLen = messages[messages.length - 1]?.content?.length ?? 0;
+
+  // Single follow-scroll effect: fires on new messages AND streaming chunks.
+  // Both reduce to "content changed; if pinned, stay at bottom."
   useEffect(() => {
-    if (isAtBottomRef.current) {
-      requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
-    }
-  }, [messages.length]);
+    if (!isAtBottomRef.current) return;
+    if (isDraggingRef.current || userMomentumRef.current) return;
+    followScrollToEnd();
+  }, [messages.length, lastMsgLen, followScrollToEnd]);
 
   const jumpToLatest = useCallback(() => {
     suppressFabRef.current = true;
-    setShowGoToLatest(false);
     isAtBottomRef.current = true;
+    setShowGoToLatest(false);
+    // Animated for the satisfying smooth jump from far up; followed by an
+    // instant correction in case content grew during the animation.
     listRef.current?.scrollToEnd({ animated: true });
     setTimeout(() => {
       listRef.current?.scrollToEnd({ animated: false });
-    }, 400);
+      suppressFabRef.current = false;
+    }, 450);
+  }, []);
+
+  // Force-pin on user send. The follow-scroll effect lands the actual scroll
+  // once the new user message is committed and the bubble has laid out.
+  const pinToBottom = useCallback(() => {
+    suppressFabRef.current = true;
+    isAtBottomRef.current = true;
+    setShowGoToLatest(false);
+    setTimeout(() => { suppressFabRef.current = false; }, 600);
   }, []);
 
   const handleInputChange = (text: string) => {
@@ -261,6 +326,7 @@ export default function ThreadScreen() {
       if (!id) return;
       if (!msg.trim() && attachments.length === 0) return;
       setSending(true);
+      pinToBottom();
       try {
         await actions.sendMessage(id, msg.trim(), attachments);
       } catch {
@@ -269,7 +335,7 @@ export default function ThreadScreen() {
         setSending(false);
       }
     },
-    [id, actions]
+    [id, actions, pinToBottom]
   );
 
   const send = async () => {
@@ -280,33 +346,35 @@ export default function ThreadScreen() {
     setInput("");
     setSlashPickerVisible(false);
     setPendingAttachments([]);
-    // If AI is busy, park the message in the queue instead of sending.
-    // (Attachments fire immediately even when queued — they're already
-    // uploaded and referenced by path, so sendNow can batch them with
-    // the text once the AI is idle.)
+    // If AI is busy, park the message (with attachments) on the queue
+    // instead of sending. Attachments are already uploaded and referenced
+    // by path, so they travel with the text to the next idle transition.
     if (threadStatus === "running" || threadStatus === "waiting") {
-      setQueuedMessage(msg);
-      // NOTE: queued-message auto-send currently doesn't carry
-      // attachments — those land in this run. Good enough for now.
+      setQueue((q) => [
+        ...q,
+        { id: nanoid(), text: msg, attachments: attachmentsSnapshot },
+      ]);
       return;
     }
     await sendNow(msg, attachmentsSnapshot);
   };
 
-  // Auto-send queued message when the AI becomes idle
-  const queuedRef = useRef<string | null>(null);
-  queuedRef.current = queuedMessage;
+  // Auto-drain queue when the AI becomes idle. Each drain kicks off a new
+  // run (status → running), which flips us back to busy; the effect fires
+  // again when that run finishes, sending the next queued item.
+  const queueRef = useRef<QueuedItem[]>([]);
+  queueRef.current = queue;
   useEffect(() => {
     const prev = prevStatusRef.current;
     prevStatusRef.current = threadStatus;
     if (
       (prev === "running" || prev === "waiting") &&
       threadStatus === "idle" &&
-      queuedRef.current
+      queueRef.current.length > 0
     ) {
-      const msg = queuedRef.current;
-      setQueuedMessage(null);
-      sendNow(msg);
+      const [next, ...rest] = queueRef.current;
+      setQueue(rest);
+      sendNow(next.text, next.attachments);
     }
   }, [threadStatus, sendNow]);
 
@@ -314,6 +382,14 @@ export default function ThreadScreen() {
     if (id) {
       actions.stopRun(id);
     }
+  }, [id, actions]);
+
+  // Long-press on Stop: halt the current run *and* discard every queued turn.
+  // A heavier haptic distinguishes the destructive action from the tap.
+  const onStopAll = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    setQueue([]);
+    if (id) actions.stopRun(id);
   }, [id, actions]);
 
   const copyConversation = useCallback(async () => {
@@ -433,6 +509,35 @@ export default function ThreadScreen() {
     }
   }, [uploadPicked]);
 
+  const pickServerFile = useCallback(
+    async (serverPath: string) => {
+      setShowFileBrowser(false);
+      if (!id) return;
+      const previewId = `srv-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const fileName = serverPath.split("/").pop() || serverPath;
+      const isImage = /\.(png|jpe?g|gif|webp|heic|heif|svg)$/i.test(fileName);
+      setUploadingPreviews((prev) => [
+        ...prev,
+        {
+          id: previewId,
+          localUri: "",
+          name: fileName,
+          kind: isImage ? "image" : "file",
+        },
+      ]);
+      try {
+        const attachment = await actions.attachServerFile(id, serverPath);
+        setPendingAttachments((prev) => [...prev, attachment]);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        Alert.alert("Attach failed", message);
+      } finally {
+        setUploadingPreviews((prev) => prev.filter((p) => p.id !== previewId));
+      }
+    },
+    [id, actions]
+  );
+
   const removeAttachment = useCallback((index: number) => {
     setPendingAttachments((prev) => prev.filter((_, i) => i !== index));
   }, []);
@@ -526,7 +631,10 @@ export default function ThreadScreen() {
     ) : null;
   }, [threadStatus, messages, liveCycleSteps, permissionReqs, actions, id, isDark, isCompacting, runPhase, liveThinking]);
 
-  const listFooterComponent = useCallback(() => listFooterElem, [listFooterElem]);
+  // Pass the element directly — wrapping in `() => listFooterElem` would give
+  // FlatList a new component *type* on every messages tick, causing React to
+  // unmount/remount the whole footer subtree (sprite frame resets → flicker,
+  // dot Animated.Values reset → animations restart from initial state).
 
   // While the thread is loading (e.g. after app resumes from background
   // and the Zustand store is briefly empty), show a loading screen with
@@ -664,40 +772,44 @@ export default function ThreadScreen() {
             gap: 18,
           }}
           onScroll={handleScroll}
-          scrollEventThrottle={32}
+          scrollEventThrottle={16}
           onContentSizeChange={() => {
-            // Stay pinned to bottom as content grows (streaming).
-            if (isAtBottomRef.current && !userDraggingRef.current) {
+            // Layout-only growth (e.g. ListFooter expanding, attachments
+            // measuring late). The content-length effect handles streaming.
+            if (
+              isAtBottomRef.current &&
+              !isDraggingRef.current &&
+              !userMomentumRef.current
+            ) {
               listRef.current?.scrollToEnd({ animated: false });
             }
           }}
           onScrollBeginDrag={() => {
             suppressFabRef.current = false;
-            userDraggingRef.current = true;
+            isDraggingRef.current = true;
           }}
-          onScrollEndDrag={(e) => {
-            userDraggingRef.current = false;
-            const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
-            const dist = contentSize.height - (contentOffset.y + layoutMeasurement.height);
-            const atBottom = dist < 80;
-            isAtBottomRef.current = atBottom;
-            if (atBottom) {
-              if (showGoToLatest) setShowGoToLatest(false);
-            } else {
-              if (!showGoToLatest) setShowGoToLatest(true);
+          onScrollEndDrag={() => {
+            isDraggingRef.current = false;
+            // Arm the "just-dragged" latch. If momentum follows, it will
+            // promote to userMomentumRef. Otherwise it decays.
+            justDraggedRef.current = true;
+            if (justDraggedTimerRef.current) {
+              clearTimeout(justDraggedTimerRef.current);
+            }
+            justDraggedTimerRef.current = setTimeout(() => {
+              justDraggedRef.current = false;
+            }, 50);
+          }}
+          onMomentumScrollBegin={() => {
+            // Only treat momentum as user-driven if it directly followed
+            // a drag. Programmatic scrollToEnd also fires this event but
+            // with justDraggedRef=false.
+            if (justDraggedRef.current) {
+              userMomentumRef.current = true;
             }
           }}
-          onMomentumScrollEnd={(e) => {
-            userDraggingRef.current = false;
-            const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
-            const dist = contentSize.height - (contentOffset.y + layoutMeasurement.height);
-            const atBottom = dist < 80;
-            isAtBottomRef.current = atBottom;
-            if (atBottom) {
-              if (showGoToLatest) setShowGoToLatest(false);
-            } else {
-              if (!showGoToLatest) setShowGoToLatest(true);
-            }
+          onMomentumScrollEnd={() => {
+            userMomentumRef.current = false;
           }}
           renderItem={({ item, index }) => item.role === "system"
             ? <SystemLine message={item} isDark={isDark} />
@@ -749,7 +861,7 @@ export default function ThreadScreen() {
               }
             }, 120);
           }}
-          ListFooterComponent={listFooterComponent}
+          ListFooterComponent={listFooterElem}
           ListEmptyComponent={() => (
             <View
               style={{
@@ -760,22 +872,13 @@ export default function ThreadScreen() {
                 paddingVertical: 48,
               }}
             >
-              <View style={{
-                width: 48,
-                height: 48,
-                borderRadius: 24,
-                backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
-                justifyContent: "center",
-                alignItems: "center",
-              }}>
-                <IconSymbol
-                  name="ellipsis.bubble"
-                  color={palette.textSoft}
-                  size={22}
-                />
-              </View>
+              <Image
+                source={require("@/assets/icons/claude-sprite-icon.png")}
+                style={{ width: 72, height: 72 }}
+                resizeMode="contain"
+              />
               <Text style={{ color: palette.textMuted, fontSize: 14 }}>
-                Start a conversation
+                Build something wild
               </Text>
             </View>
           )}
@@ -791,25 +894,208 @@ export default function ThreadScreen() {
           }}
         />
 
-        {/* Queued message panel — shown when a message is waiting to be sent */}
-        {queuedMessage !== null && (
+        {/* Queue — one panel per queued turn, sent FIFO when idle */}
+        {queue.map((item) => (
           <QueuedMessagePanel
-            message={queuedMessage}
+            key={item.id}
+            message={item.text}
+            attachmentCount={item.attachments.length}
             isDark={isDark}
             onEdit={() => {
-              setInput(queuedMessage);
-              setQueuedMessage(null);
+              setInput(item.text);
+              setPendingAttachments((prev) => [...prev, ...item.attachments]);
+              setQueue((q) => q.filter((x) => x.id !== item.id));
             }}
             onSendNow={() => {
-              const msg = queuedMessage;
-              setQueuedMessage(null);
-              sendNow(msg);
+              setQueue((q) => q.filter((x) => x.id !== item.id));
+              sendNow(item.text, item.attachments);
             }}
-            onDelete={() => setQueuedMessage(null)}
+            onDelete={() =>
+              setQueue((q) => q.filter((x) => x.id !== item.id))
+            }
           />
-        )}
+        ))}
 
       </MaskedView>
+
+      {/* Attachment menu popup — rendered at the top level so no parent
+          clips or constrains it. Liquid-glass styled to match the composer. */}
+      {attachmentMenuOpen && (
+        <>
+          <Pressable
+            onPress={() => setAttachmentMenuOpen(false)}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 35,
+            }}
+          />
+          <GlassView
+            glassEffectStyle="regular"
+            style={{
+              position: "absolute",
+              left: SPACING.lg + SPACING.md,
+              bottom:
+                (keyboardUp ? keyboardHeight + SPACING.sm : SPACING.sm + bottom) +
+                56,
+              borderRadius: 16,
+              overflow: "hidden",
+              paddingVertical: 6,
+              minWidth: 220,
+              zIndex: 40,
+            }}
+          >
+            <AttachmentMenuItem
+              icon="photo"
+              label="Photo library"
+              onPress={pickFromLibrary}
+              palette={palette}
+              disabled={!supportsImage}
+              hint={
+                !supportsImage && activeModel
+                  ? `${activeModel.name} has no vision`
+                  : undefined
+              }
+            />
+            <View style={{ height: 1, backgroundColor: palette.divider, marginLeft: 44, opacity: 0.5 }} />
+            <AttachmentMenuItem
+              icon="camera"
+              label="Camera"
+              onPress={pickFromCamera}
+              palette={palette}
+              disabled={!supportsImage}
+              hint={
+                !supportsImage && activeModel
+                  ? `${activeModel.name} has no vision`
+                  : undefined
+              }
+            />
+            <View style={{ height: 1, backgroundColor: palette.divider, marginLeft: 44, opacity: 0.5 }} />
+            <AttachmentMenuItem
+              icon="doc"
+              label="File"
+              onPress={pickDocument}
+              palette={palette}
+            />
+            <View style={{ height: 1, backgroundColor: palette.divider, marginLeft: 44, opacity: 0.5 }} />
+            <AttachmentMenuItem
+              icon="server.rack"
+              label="From server"
+              onPress={() => {
+                setAttachmentMenuOpen(false);
+                setShowFileBrowser(true);
+              }}
+              palette={palette}
+            />
+          </GlassView>
+        </>
+      )}
+
+      {/* Plan/Act mode popover */}
+      {modePopover === "plan" && (
+        <>
+          <Pressable
+            onPress={() => setModePopover(null)}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 35,
+            }}
+          />
+          <GlassView
+            glassEffectStyle="regular"
+            style={{
+              position: "absolute",
+              left: SPACING.lg + SPACING.md + (pillX.plan ?? 0),
+              bottom:
+                (keyboardUp ? keyboardHeight + SPACING.sm : SPACING.sm + bottom) +
+                56,
+              borderRadius: 16,
+              overflow: "hidden",
+              paddingVertical: 6,
+              minWidth: 180,
+              zIndex: 40,
+            }}
+          >
+            <ModeOption
+              label="Act"
+              hint="Execute directly"
+              selected={(settings.planMode ?? "act") === "act"}
+              palette={palette}
+              onPress={() => {
+                actions.setSettings({ planMode: "act" });
+                setModePopover(null);
+              }}
+            />
+            <View style={{ height: 1, backgroundColor: palette.divider, marginLeft: 16, opacity: 0.5 }} />
+            <ModeOption
+              label="Plan"
+              hint="Draft before acting"
+              selected={settings.planMode === "plan"}
+              palette={palette}
+              onPress={() => {
+                actions.setSettings({ planMode: "plan" });
+                setModePopover(null);
+              }}
+            />
+          </GlassView>
+        </>
+      )}
+
+      {/* Reasoning effort popover */}
+      {modePopover === "effort" && (
+        <>
+          <Pressable
+            onPress={() => setModePopover(null)}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 35,
+            }}
+          />
+          <GlassView
+            glassEffectStyle="regular"
+            style={{
+              position: "absolute",
+              left: SPACING.lg + SPACING.md + (pillX.effort ?? 0),
+              bottom:
+                (keyboardUp ? keyboardHeight + SPACING.sm : SPACING.sm + bottom) +
+                56,
+              borderRadius: 16,
+              overflow: "hidden",
+              paddingVertical: 6,
+              minWidth: 180,
+              zIndex: 40,
+            }}
+          >
+            {(["low", "medium", "high"] as const).map((level, i) => (
+              <View key={level}>
+                {i > 0 && (
+                  <View style={{ height: 1, backgroundColor: palette.divider, marginLeft: 16, opacity: 0.5 }} />
+                )}
+                <ModeOption
+                  label={EFFORT_LABEL[level]}
+                  selected={(settings.reasoningEffort ?? "medium") === level}
+                  palette={palette}
+                  onPress={() => {
+                    actions.setSettings({ reasoningEffort: level });
+                    setModePopover(null);
+                  }}
+                />
+              </View>
+            ))}
+          </GlassView>
+        </>
+      )}
 
       {/* ── Input — absolutely positioned, keyboard-aware ─── */}
       <View
@@ -868,21 +1154,46 @@ export default function ThreadScreen() {
           glassEffectStyle="regular"
           isInteractive
           style={{
-            flexDirection: "row",
-            alignItems: "flex-end",
-            gap: SPACING.sm,
+            flexDirection: "column",
             borderRadius: 22,
             overflow: "hidden",
             paddingHorizontal: SPACING.md,
-            paddingVertical: SPACING.xs,
+            paddingTop: SPACING.xs,
+            paddingBottom: SPACING.xs,
+            gap: SPACING.xs,
           }}
         >
-          {/* Attachment + button */}
-          <View style={{ position: "relative" }}>
+            <TextInput
+              placeholder="Message…"
+              placeholderTextColor={palette.textSoft}
+              value={input}
+              onChangeText={handleInputChange}
+              multiline
+              keyboardAppearance={isDark ? "dark" : "light"}
+              style={{
+                minHeight: 44,
+                maxHeight: 140,
+                color: palette.text,
+                fontSize: TYPOGRAPHY.fontSizes.md,
+                lineHeight: TYPOGRAPHY.lineHeights.md,
+                paddingTop: SPACING.sm,
+                paddingBottom: SPACING.xs,
+              }}
+            />
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: SPACING.xs,
+            }}
+          >
+            {/* Attachment + button */}
             <TouchableBounce
               sensory
-              onPress={() => setAttachmentMenuOpen((v) => !v)}
-              style={{ marginBottom: SPACING.xs }}
+              onPress={() => {
+                setModePopover(null);
+                setAttachmentMenuOpen((v) => !v);
+              }}
             >
               <View
                 style={{
@@ -900,110 +1211,96 @@ export default function ThreadScreen() {
                 />
               </View>
             </TouchableBounce>
-              {attachmentMenuOpen && (
-                <View
-                  style={{
-                    position: "absolute",
-                    bottom: 44,
-                    left: 0,
-                    backgroundColor: palette.surface,
-                    borderRadius: 14,
-                    borderWidth: 1,
-                    borderColor: palette.divider,
-                    paddingVertical: 6,
-                    minWidth: 180,
-                    zIndex: 40,
-                  }}
-                >
-                  <AttachmentMenuItem
-                    icon="photo"
-                    label="Photo library"
-                    onPress={pickFromLibrary}
-                    palette={palette}
-                    disabled={!supportsImage}
-                    hint={
-                      !supportsImage && activeModel
-                        ? `${activeModel.name} has no vision`
-                        : undefined
-                    }
-                  />
-                  <View style={{ height: 1, backgroundColor: palette.divider, marginLeft: 44 }} />
-                  <AttachmentMenuItem
-                    icon="camera"
-                    label="Camera"
-                    onPress={pickFromCamera}
-                    palette={palette}
-                    disabled={!supportsImage}
-                    hint={
-                      !supportsImage && activeModel
-                        ? `${activeModel.name} has no vision`
-                        : undefined
-                    }
-                  />
-                  <View style={{ height: 1, backgroundColor: palette.divider, marginLeft: 44 }} />
-                  <AttachmentMenuItem
-                    icon="doc"
-                    label="File"
-                    onPress={pickDocument}
-                    palette={palette}
-                  />
-                </View>
-              )}
-            </View>
 
-            <TextInput
-              placeholder="Message…"
-              placeholderTextColor={palette.textSoft}
-              value={input}
-              onChangeText={handleInputChange}
-              multiline
-              keyboardAppearance={isDark ? "dark" : "light"}
-              style={{
-                minHeight: 40,
-                maxHeight: 120,
-                color: palette.text,
-                fontSize: TYPOGRAPHY.fontSizes.md,
-                lineHeight: TYPOGRAPHY.lineHeights.md,
-                paddingVertical: SPACING.sm,
-                flex: 1,
+            <ModePill
+              label={settings.planMode === "plan" ? "Plan" : "Act"}
+              active={modePopover === "plan"}
+              palette={palette}
+              onLayout={(x) => setPillX((p) => ({ ...p, plan: x }))}
+              onPress={() => {
+                setAttachmentMenuOpen(false);
+                setModePopover((v) => (v === "plan" ? null : "plan"));
               }}
             />
-            <TouchableBounce
-              sensory
-              disabled={!input.trim() && pendingAttachments.length === 0}
-              onPress={send}
-              style={{
-                opacity:
-                  input.trim() || pendingAttachments.length > 0 ? 1 : 0.3,
-                marginBottom: SPACING.xs,
+
+            <ModePill
+              label={EFFORT_LABEL[settings.reasoningEffort ?? "medium"]}
+              active={modePopover === "effort"}
+              palette={palette}
+              onLayout={(x) => setPillX((p) => ({ ...p, effort: x }))}
+              onPress={() => {
+                setAttachmentMenuOpen(false);
+                setModePopover((v) => (v === "effort" ? null : "effort"));
               }}
-            >
-              <View
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 16,
-                  backgroundColor:
-                    input.trim() || pendingAttachments.length > 0
-                      ? palette.text
-                      : isDark
-                      ? "rgba(255,255,255,0.12)"
-                      : "rgba(0,0,0,0.06)",
-                  justifyContent: "center",
-                  alignItems: "center",
-                }}
-              >
-                <IconSymbol
-                  name="arrow.up"
-                  size={14}
-                  color={
-                    input.trim() || pendingAttachments.length > 0
-                      ? palette.bg
-                      : palette.textSoft
-                  }
-                />
-              </View>
-            </TouchableBounce>
+            />
+
+            <View style={{ flex: 1 }} />
+
+            {(() => {
+              const hasContent =
+                !!input.trim() || pendingAttachments.length > 0;
+              const isBusy =
+                threadStatus === "running" || threadStatus === "waiting";
+              // Stop takes over only when the composer is empty *and* a run
+              // is in flight. With text/attachments present, Send stays —
+              // the user can queue another turn even mid-run. Separate
+              // branches (with distinct keys) so RN's legacy TouchableBounce
+              // remounts between modes rather than diffing props in place.
+              if (!hasContent && isBusy) {
+                return (
+                  <TouchableBounce
+                    key="composer-stop"
+                    sensory
+                    onPress={onStop}
+                    onLongPress={queue.length > 0 ? onStopAll : undefined}
+                  >
+                    <View
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: 16,
+                        backgroundColor: palette.danger,
+                        justifyContent: "center",
+                        alignItems: "center",
+                      }}
+                    >
+                      <IconSymbol name="stop.fill" size={12} color="#fff" />
+                    </View>
+                  </TouchableBounce>
+                );
+              }
+              return (
+                <TouchableBounce
+                  key="composer-send"
+                  sensory
+                  disabled={!hasContent}
+                  onPress={send}
+                  style={{ opacity: hasContent ? 1 : 0.3 }}
+                >
+                  <View
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: 16,
+                      backgroundColor: hasContent
+                        ? palette.text
+                        : isDark
+                        ? "rgba(255,255,255,0.12)"
+                        : "rgba(0,0,0,0.06)",
+                      justifyContent: "center",
+                      alignItems: "center",
+                    }}
+                  >
+                    <IconSymbol
+                      name="arrow.up"
+                      size={14}
+                      color={hasContent ? palette.bg : palette.textSoft}
+                    />
+                  </View>
+                </TouchableBounce>
+              );
+            })()}
+          </View>
           </GlassView>
       </View>
 
@@ -1016,6 +1313,14 @@ export default function ThreadScreen() {
           if (id) actions.updateThreadWorkDir(id, path).catch(() => {});
         }}
         onCancel={() => setShowDirBrowser(false)}
+      />
+
+      {/* Server file browser — pick an existing file on the backend */}
+      <FileBrowser
+        visible={showFileBrowser}
+        initialPath={thread?.workDir || settings.lastWorkDir}
+        onSelect={pickServerFile}
+        onCancel={() => setShowFileBrowser(false)}
       />
 
       {id && (
@@ -1712,7 +2017,7 @@ function MessageBubble({
           <View
             style={{
               maxWidth: isUser ? "82%" : "100%",
-              alignSelf: isUser ? "flex-end" : "flex-start",
+              alignSelf: isUser ? "flex-end" : "stretch",
               gap: 6,
             }}
           >
@@ -1803,6 +2108,7 @@ function MessageBubble({
                     content={cleanModelMarkdown(message.content)}
                     mdStyles={mdStyles}
                     streaming={isStreaming}
+                    palette={palette}
                   />
                 )}
               </View>
@@ -1872,12 +2178,14 @@ function formatMsgTime(dateStr: string): string {
 
 function QueuedMessagePanel({
   message,
+  attachmentCount = 0,
   isDark,
   onEdit,
   onSendNow,
   onDelete,
 }: {
   message: string;
+  attachmentCount?: number;
   isDark: boolean;
   onEdit: () => void;
   onSendNow: () => void;
@@ -1916,6 +2224,14 @@ function QueuedMessagePanel({
         <Text style={{ color: amber, fontSize: 11, fontWeight: "600", flex: 1 }}>
           Queued — will send when ready
         </Text>
+        {attachmentCount > 0 && (
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+            <IconSymbol name="paperclip" size={10} color={amber} />
+            <Text style={{ color: amber, fontSize: 11, fontWeight: "600" }}>
+              {attachmentCount}
+            </Text>
+          </View>
+        )}
       </View>
 
       {/* Message preview */}
@@ -2193,6 +2509,105 @@ function AttachmentThumb({
         </Pressable>
       )}
     </View>
+  );
+}
+
+// ─── Composer mode controls ──────────────────────────────────────
+
+/**
+ * Pill button in the composer's bottom row — shows the current value of
+ * a mode (Plan/Act, Reasoning effort) with a chevron that signals the
+ * pill expands into a popover of options. Captures its own x-position
+ * via onLayout so the popover can anchor directly above it.
+ */
+function ModePill({
+  label,
+  active,
+  palette,
+  onPress,
+  onLayout,
+}: {
+  label: string;
+  active: boolean;
+  palette: Palette;
+  onPress: () => void;
+  onLayout: (x: number) => void;
+}) {
+  return (
+    <TouchableBounce
+      sensory
+      onPress={onPress}
+      onLayout={(e) => onLayout(e.nativeEvent.layout.x)}
+    >
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 4,
+          height: 32,
+          paddingHorizontal: 10,
+          borderRadius: 16,
+          backgroundColor: active ? palette.surfaceAlt : "transparent",
+        }}
+      >
+        <Text
+          style={{
+            color: palette.textMuted,
+            fontSize: 13,
+            fontWeight: "500",
+          }}
+        >
+          {label}
+        </Text>
+        <IconSymbol
+          name="chevron.down"
+          size={10}
+          color={palette.textSoft}
+        />
+      </View>
+    </TouchableBounce>
+  );
+}
+
+function ModeOption({
+  label,
+  hint,
+  selected,
+  onPress,
+  palette,
+}: {
+  label: string;
+  hint?: string;
+  selected: boolean;
+  onPress: () => void;
+  palette: Palette;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 10,
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+        backgroundColor: pressed ? palette.surfaceAlt : "transparent",
+      })}
+    >
+      <View style={{ width: 14, alignItems: "center" }}>
+        {selected && (
+          <IconSymbol name="checkmark" size={12} color={palette.text} />
+        )}
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={{ color: palette.text, fontSize: 14 }}>{label}</Text>
+        {hint && (
+          <Text style={{ color: palette.textSoft, fontSize: 11, marginTop: 2 }}>
+            {hint}
+          </Text>
+        )}
+      </View>
+    </Pressable>
   );
 }
 
@@ -2726,17 +3141,68 @@ const THINKING_PHRASES = [
   "cooking",
   "whipping that cream",
   "making magic",
-  "galloping that horse",
-  "cleaning the kitchen",
-  "sweeping the floors",
+  "scouring the ocean floor",
   "big braining",
   "connecting the pieces",
 ];
 
-/** Cycling text label with three pulsing period dots at text baseline */
-function CyclingLabel({ color }: { color: string }) {
-  const [phraseIdx, setPhraseIdx] = useState(0);
-  const op1 = useRef(new Animated.Value(1)).current;
+/** Per-letter staggered Y bounce. Each character is its own Animated.Text so we can
+ *  apply transform (nested-inside-Text transforms are ignored on RN). */
+function BouncingPhrase({ text, color }: { text: string; color: string }) {
+  const letters = useMemo(() => Array.from(text), [text]);
+  const animsRef = useRef<Animated.Value[]>([]);
+  while (animsRef.current.length < letters.length) {
+    animsRef.current.push(new Animated.Value(0));
+  }
+
+  useEffect(() => {
+    const STAGGER = 55;
+    const UP = 220;
+    const DOWN = 260;
+    const TAIL = 700;
+    const cycleMs = letters.length * STAGGER + UP + DOWN + TAIL;
+
+    const anims = letters.map((_, i) => {
+      const v = animsRef.current[i];
+      v.setValue(0);
+      const restAfter = Math.max(0, cycleMs - (i * STAGGER + UP + DOWN));
+      return Animated.loop(
+        Animated.sequence([
+          Animated.delay(i * STAGGER),
+          Animated.timing(v, { toValue: -2.5, duration: UP, useNativeDriver: true, easing: Easing.out(Easing.quad) }),
+          Animated.timing(v, { toValue: 0,    duration: DOWN, useNativeDriver: true, easing: Easing.in(Easing.quad) }),
+          Animated.delay(restAfter),
+        ])
+      );
+    });
+    anims.forEach((a) => a.start());
+    return () => anims.forEach((a) => a.stop());
+  }, [letters]);
+
+  return (
+    <View style={{ flexDirection: "row", alignItems: "flex-end" }}>
+      {letters.map((ch, i) => (
+        <Animated.Text
+          key={`${text}-${i}`}
+          style={{
+            color,
+            fontSize: 13,
+            fontWeight: "500",
+            transform: [{ translateY: animsRef.current[i] }],
+          }}
+        >
+          {ch === " " ? "\u00A0" : ch}
+        </Animated.Text>
+      ))}
+    </View>
+  );
+}
+
+/** Three pulsing period dots — must be top-level Animated.Text (not nested
+ *  inside another <Text>), otherwise native-driver opacity updates have no
+ *  native view to land on and the dots appear frozen. */
+function PulsingDots({ color }: { color: string }) {
+  const op1 = useRef(new Animated.Value(0.2)).current;
   const op2 = useRef(new Animated.Value(0.2)).current;
   const op3 = useRef(new Animated.Value(0.2)).current;
 
@@ -2755,99 +3221,57 @@ function CyclingLabel({ color }: { color: string }) {
     const t1 = setTimeout(() => { const a = makePulse(op2); a.start(); animRefs.push(a); }, 213);
     const t2 = setTimeout(() => { const a = makePulse(op3); a.start(); animRefs.push(a); }, 426);
 
-    const phraseTimer = setInterval(() => {
-      setPhraseIdx((i) => (i + 1) % THINKING_PHRASES.length);
-    }, 2800);
-
     return () => {
       animRefs.forEach((a) => a.stop());
       clearTimeout(t1);
       clearTimeout(t2);
-      clearInterval(phraseTimer);
     };
+  }, [op1, op2, op3]);
+
+  const dotStyle = { color, fontSize: 13, fontWeight: "500" as const };
+  return (
+    <>
+      <Animated.Text style={[dotStyle, { opacity: op1 }]}>.</Animated.Text>
+      <Animated.Text style={[dotStyle, { opacity: op2 }]}>.</Animated.Text>
+      <Animated.Text style={[dotStyle, { opacity: op3 }]}>.</Animated.Text>
+    </>
+  );
+}
+
+/** Cycling text label with three pulsing period dots at text baseline. */
+function CyclingLabel({ color }: { color: string }) {
+  const [phraseIdx, setPhraseIdx] = useState(0);
+
+  useEffect(() => {
+    const phraseTimer = setInterval(() => {
+      setPhraseIdx((i) => (i + 1) % THINKING_PHRASES.length);
+    }, 2800);
+    return () => clearInterval(phraseTimer);
   }, []);
 
   return (
-    <Text style={{ color, fontSize: 13, fontWeight: "500" }}>
-      {THINKING_PHRASES[phraseIdx]}
-      <Animated.Text style={{ opacity: op1 }}>.</Animated.Text>
-      <Animated.Text style={{ opacity: op2 }}>.</Animated.Text>
-      <Animated.Text style={{ opacity: op3 }}>.</Animated.Text>
-    </Text>
+    <View style={{ flexDirection: "row", alignItems: "flex-end" }}>
+      <BouncingPhrase text={THINKING_PHRASES[phraseIdx]} color={color} />
+      <PulsingDots color={color} />
+    </View>
   );
 }
 
 function CompactingLabel({ color }: { color: string }) {
-  const op1 = useRef(new Animated.Value(1)).current;
-  const op2 = useRef(new Animated.Value(0.2)).current;
-  const op3 = useRef(new Animated.Value(0.2)).current;
-
-  useEffect(() => {
-    const makePulse = (val: Animated.Value) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(val, { toValue: 1,   duration: 320, useNativeDriver: true }),
-          Animated.timing(val, { toValue: 0.2, duration: 320, useNativeDriver: true }),
-        ])
-      );
-
-    const a1 = makePulse(op1);
-    a1.start();
-    const animRefs: Animated.CompositeAnimation[] = [a1];
-    const t1 = setTimeout(() => { const a = makePulse(op2); a.start(); animRefs.push(a); }, 213);
-    const t2 = setTimeout(() => { const a = makePulse(op3); a.start(); animRefs.push(a); }, 426);
-
-    return () => {
-      animRefs.forEach((a) => a.stop());
-      clearTimeout(t1);
-      clearTimeout(t2);
-    };
-  }, []);
-
   return (
-    <Text style={{ color, fontSize: 13, fontWeight: "500" }}>
-      compacting
-      <Animated.Text style={{ opacity: op1 }}>.</Animated.Text>
-      <Animated.Text style={{ opacity: op2 }}>.</Animated.Text>
-      <Animated.Text style={{ opacity: op3 }}>.</Animated.Text>
-    </Text>
+    <View style={{ flexDirection: "row", alignItems: "flex-end" }}>
+      <Text style={{ color, fontSize: 13, fontWeight: "500" }}>compacting</Text>
+      <PulsingDots color={color} />
+    </View>
   );
 }
 
 function RespondingLabel({ color }: { color: string }) {
-  const op1 = useRef(new Animated.Value(1)).current;
-  const op2 = useRef(new Animated.Value(0.2)).current;
-  const op3 = useRef(new Animated.Value(0.2)).current;
-
-  useEffect(() => {
-    const makePulse = (val: Animated.Value) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(val, { toValue: 1,   duration: 320, useNativeDriver: true }),
-          Animated.timing(val, { toValue: 0.2, duration: 320, useNativeDriver: true }),
-        ])
-      );
-
-    const a1 = makePulse(op1);
-    a1.start();
-    const animRefs: Animated.CompositeAnimation[] = [a1];
-    const t1 = setTimeout(() => { const a = makePulse(op2); a.start(); animRefs.push(a); }, 213);
-    const t2 = setTimeout(() => { const a = makePulse(op3); a.start(); animRefs.push(a); }, 426);
-
-    return () => {
-      animRefs.forEach((a) => a.stop());
-      clearTimeout(t1);
-      clearTimeout(t2);
-    };
-  }, []);
-
   return (
-    <Text style={{ color, fontSize: 13, fontWeight: "500" }}>
-      responding
-      <Animated.Text style={{ opacity: op1 }}>.</Animated.Text>
-      <Animated.Text style={{ opacity: op2 }}>.</Animated.Text>
-      <Animated.Text style={{ opacity: op3 }}>.</Animated.Text>
-    </Text>
+    <View style={{ flexDirection: "row", alignItems: "flex-end" }}>
+      <Text style={{ color, fontSize: 13, fontWeight: "500" }}>responding</Text>
+      <PulsingDots color={color} />
+    </View>
   );
 }
 
