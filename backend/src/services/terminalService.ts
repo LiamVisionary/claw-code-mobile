@@ -13,7 +13,15 @@ export const terminalService = {
         stmt.run({ threadId, line, createdAt });
       }
     });
-    insertMany(lines);
+    try {
+      insertMany(lines);
+    } catch (err) {
+      // Thread was deleted while its shell was still draining (SIGTERM is
+      // async, so the exit handler can fire after the parent row is gone).
+      // Silently drop — there's no row to attach these lines to.
+      if ((err as { code?: string })?.code === "SQLITE_CONSTRAINT_FOREIGNKEY") return;
+      throw err;
+    }
   },
 
   getHistory(threadId: string): string[] {

@@ -22,6 +22,7 @@ import { GlassButton } from "@/components/ui/GlassButton";
 import { useGatewayStore } from "@/store/gatewayStore";
 import type { Thread } from "@/store/gatewayStore";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useHeaderHeight } from "@react-navigation/elements";
 import { Stack } from "expo-router";
 import { IconSymbol } from "@/components/ui/IconSymbol";
 import DirectoryBrowser from "@/components/DirectoryBrowser";
@@ -121,6 +122,7 @@ export default function ChatListScreen() {
   const [showBrowser, setShowBrowser] = useState(false);
   const [view, setView] = useState<"chats" | "notes">("chats");
   const { top, bottom } = useSafeAreaInsets();
+  const headerHeight = useHeaderHeight();
   const palette = usePalette();
 
   // Only show the Chats/Notes toggle when the user has actually connected
@@ -140,13 +142,19 @@ export default function ChatListScreen() {
 
   useEffect(() => {
     if (!_hasHydrated) return;
-    actions.loadThreads().catch((err) => setError(err.message));
+    actions
+      .loadThreads()
+      .then(() => setError(null))
+      .catch((err) => setError(err.message));
   }, [_hasHydrated, actions]);
 
   useFocusEffect(
     useCallback(() => {
       if (_hasHydrated) {
-        actions.loadThreads().catch(() => {});
+        actions
+          .loadThreads()
+          .then(() => setError(null))
+          .catch(() => {});
       }
     }, [_hasHydrated, actions])
   );
@@ -154,7 +162,10 @@ export default function ChatListScreen() {
   useEffect(() => {
     const sub = AppState.addEventListener("change", (nextState) => {
       if (nextState === "active" && _hasHydrated) {
-        actions.loadThreads().catch(() => {});
+        actions
+          .loadThreads()
+          .then(() => setError(null))
+          .catch(() => {});
       }
     });
     return () => sub.remove();
@@ -303,10 +314,13 @@ export default function ChatListScreen() {
         {error && (
           <Text
             style={{
+              position: "absolute",
+              top: headerHeight + 8,
+              left: 0,
+              right: 0,
+              zIndex: 10,
               color: palette.danger,
               fontSize: 13,
-              marginTop: 12,
-              marginBottom: 4,
               paddingHorizontal: 24,
             }}
           >

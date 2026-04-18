@@ -13,6 +13,7 @@ import {
   useColorScheme,
 } from "react-native";
 import * as Haptics from "expo-haptics";
+import * as Clipboard from "expo-clipboard";
 import { useGatewayStore } from "@/store/gatewayStore";
 import { usePalette } from "@/hooks/usePalette";
 import TouchableBounce from "@/components/ui/TouchableBounce";
@@ -54,6 +55,10 @@ export default function TerminalSheet({ threadId, visible, onClose, onSendToClaw
 
   const [command, setCommand] = useState("");
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  // Sticky modifiers — tap to arm, next keystroke consumes and un-arms.
+  // Only one can be armed at a time for predictability.
+  const [ctrlArmed, setCtrlArmed] = useState(false);
+  const [cmdArmed, setCmdArmed] = useState(false);
   const slideAnim = useRef(new Animated.Value(1000)).current;
   const scrollRef = useRef<ScrollView>(null);
   const inputRef = useRef<TextInput>(null);
@@ -185,14 +190,101 @@ export default function TerminalSheet({ threadId, visible, onClose, onSendToClaw
     }
   }, []);
 
+  const clearLocalTerminal = useCallback(() => {
+    useGatewayStore.setState((s) => ({
+      terminal: { ...s.terminal, [threadId]: [] },
+    }));
+  }, [threadId]);
+
+  const handleCtrlCombo = useCallback((rawChar: string) => {
+    const c = rawChar.toLowerCase();
+    if (c === "c") {
+      actions.interruptTerminal(threadId).catch(() => {});
+    } else if (c === "d") {
+      // Non-PTY bash won't treat a 0x04 byte as EOF (stdin is a pipe, not
+      // a terminal), so approximate Ctrl-D by running `exit` — closes the
+      // shell the same way a user would.
+      actions.sendTerminalCommand(threadId, "exit").catch(() => {});
+    } else if (c === "l") {
+      clearLocalTerminal();
+    } else if (c >= "a" && c <= "z") {
+      // Send the corresponding control byte (0x01..0x1A) raw to stdin.
+      // Useful inside some interactive programs, mostly a no-op in bash.
+      const byte = String.fromCharCode(c.charCodeAt(0) - 96);
+      actions.sendTerminalStdin(threadId, byte).catch(() => {});
+    }
+    // Any other char: silently un-arm.
+    setCtrlArmed(false);
+  }, [threadId, actions, clearLocalTerminal]);
+
+  const handleCmdCombo = useCallback(async (rawChar: string) => {
+    const c = rawChar.toLowerCase();
+    if (c === "k") {
+      clearLocalTerminal();
+    } else if (c === "c") {
+      const snap = await actions.snapshotTerminal(threadId).catch(() => [] as string[]);
+      const lines =
+        snap.length > 0
+          ? snap
+          : (useGatewayStore.getState().terminal[threadId] ?? []).slice(-200);
+      if (lines.length > 0) {
+        Clipboard.setStringAsync(lines.join("\n")).catch(() => {});
+        if (Platform.OS === "ios") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      }
+    } else if (c === "v") {
+      const text = await Clipboard.getStringAsync().catch(() => "");
+      if (text) setCommand((prev) => prev + text);
+    }
+    setCmdArmed(false);
+  }, [threadId, actions, clearLocalTerminal]);
+
+  // Single entry-point for any char produced by the accessory bar.
+  // If a modifier is armed, consume the char as a combo; otherwise append.
   const insertAtEnd = useCallback((s: string) => {
+    if (ctrlArmed) {
+      handleCtrlCombo(s[0] ?? "");
+      return;
+    }
+    if (cmdArmed) {
+      void handleCmdCombo(s[0] ?? "");
+      return;
+    }
     setCommand((prev) => prev + s);
-  }, []);
+  }, [ctrlArmed, cmdArmed, handleCtrlCombo, handleCmdCombo]);
+
+  // Intercepts characters from the system keyboard. If a modifier is
+  // armed and the user typed a char, we consume it as a combo and revert
+  // the TextInput (via setNativeProps) so the typed char doesn't stay
+  // visible in the prompt.
+  const handleTextChange = useCallback((next: string) => {
+    if ((ctrlArmed || cmdArmed) && next.length > command.length) {
+      const inserted = next.slice(command.length, command.length + 1);
+      // Roll the native view back to the previous value — state stays the
+      // same so React and the native view end up aligned.
+      inputRef.current?.setNativeProps({ text: command });
+      if (ctrlArmed) handleCtrlCombo(inserted);
+      else void handleCmdCombo(inserted);
+      return;
+    }
+    setCommand(next);
+  }, [ctrlArmed, cmdArmed, command, handleCtrlCombo, handleCmdCombo]);
 
   const clearInput = useCallback(() => {
     setCommand("");
     historyIdxRef.current = historyRef.current.length;
     draftRef.current = "";
+  }, []);
+
+  const armCtrl = useCallback(() => {
+    setCtrlArmed((v) => !v);
+    setCmdArmed(false);
+    inputRef.current?.focus();
+  }, []);
+
+  const armCmd = useCallback(() => {
+    setCmdArmed((v) => !v);
+    setCtrlArmed(false);
+    inputRef.current?.focus();
   }, []);
 
   const sendToClaw = useCallback(async () => {
@@ -357,10 +449,11 @@ export default function TerminalSheet({ threadId, visible, onClose, onSendToClaw
                 cwd={cwdLabel}
                 busy={busy}
                 value={command}
-                onChangeText={setCommand}
+                onChangeText={handleTextChange}
                 onSubmit={send}
                 inputRef={inputRef}
                 isDark={isDark}
+                modifier={ctrlArmed ? "ctrl" : cmdArmed ? "cmd" : null}
               />
             </ScrollView>
           </Pressable>
@@ -373,8 +466,11 @@ export default function TerminalSheet({ threadId, visible, onClose, onSendToClaw
               onUp={historyUp}
               onDown={historyDown}
               onClear={clearInput}
-              onCtrlC={stop}
               onDismissKeyboard={() => Keyboard.dismiss()}
+              ctrlArmed={ctrlArmed}
+              cmdArmed={cmdArmed}
+              onArmCtrl={armCtrl}
+              onArmCmd={armCmd}
             />
           )}
 
@@ -395,6 +491,7 @@ function PromptLine({
   onSubmit,
   inputRef,
   isDark,
+  modifier,
 }: {
   cwd: string;
   busy: boolean;
@@ -403,6 +500,7 @@ function PromptLine({
   onSubmit: () => void;
   inputRef: React.RefObject<TextInput | null>;
   isDark: boolean;
+  modifier: "ctrl" | "cmd" | null;
 }) {
   return (
     <View
@@ -416,6 +514,12 @@ function PromptLine({
       <Text style={{ fontFamily: MONO, fontSize: TYPOGRAPHY.fontSizes.xs }}>
         <Text style={{ color: CWD_COLOR }}>{cwd || "~"}</Text>
         <Text style={{ color: PROMPT_COLOR }}>{busy ? " … " : " $ "}</Text>
+        {modifier && (
+          <Text style={{ color: "#FFD166", fontWeight: "700" }}>
+            {modifier === "ctrl" ? "^" : "⌘"}
+            {" "}
+          </Text>
+        )}
       </Text>
       <TextInput
         ref={inputRef}
@@ -450,15 +554,21 @@ function AccessoryBar({
   onUp,
   onDown,
   onClear,
-  onCtrlC,
   onDismissKeyboard,
+  ctrlArmed,
+  cmdArmed,
+  onArmCtrl,
+  onArmCmd,
 }: {
   onInsert: (s: string) => void;
   onUp: () => void;
   onDown: () => void;
   onClear: () => void;
-  onCtrlC: () => void;
   onDismissKeyboard: () => void;
+  ctrlArmed: boolean;
+  cmdArmed: boolean;
+  onArmCtrl: () => void;
+  onArmCmd: () => void;
 }) {
   const tap = (fn: () => void) => () => {
     if (Platform.OS === "ios") {
@@ -485,7 +595,10 @@ function AccessoryBar({
           gap: 6,
         }}
       >
-        <AccKey label="⌃C" onPress={tap(onCtrlC)} danger />
+        {/* Sticky modifiers — tap to arm, next key consumes and un-arms */}
+        <AccKey label="ctrl" onPress={tap(onArmCtrl)} active={ctrlArmed} />
+        <AccKey label="⌘" onPress={tap(onArmCmd)} active={cmdArmed} />
+        <AccSep />
         <AccKey label="⎋" onPress={tap(onClear)} />
         <AccKey label="⇥" onPress={tap(() => onInsert("\t"))} />
         <AccSep />
@@ -514,11 +627,11 @@ function AccessoryBar({
 function AccKey({
   label,
   onPress,
-  danger,
+  active,
 }: {
   label: string;
   onPress: () => void;
-  danger?: boolean;
+  active?: boolean;
 }) {
   return (
     <Pressable
@@ -531,16 +644,16 @@ function AccKey({
         paddingHorizontal: 10,
         alignItems: "center",
         justifyContent: "center",
-        backgroundColor: pressed
+        backgroundColor: active
+          ? "#FFD166"
+          : pressed
           ? "rgba(255,255,255,0.18)"
-          : danger
-          ? "rgba(255,59,48,0.18)"
           : "rgba(255,255,255,0.08)",
       })}
     >
       <Text
         style={{
-          color: danger ? "#FF6B5E" : TERMINAL_FG,
+          color: active ? "#17191C" : TERMINAL_FG,
           fontFamily: MONO,
           fontSize: 14,
           fontWeight: "600",
