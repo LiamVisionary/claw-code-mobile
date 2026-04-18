@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigation } from "expo-router";
 import {
   ActivityIndicator,
   Alert,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -10,7 +10,14 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { Stack, useLocalSearchParams, useRouter } from "expo-router";
+import { Stack, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
+import Markdown from "react-native-markdown-display";
+import Animated, {
+  useAnimatedKeyboard,
+  useAnimatedStyle,
+} from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { GlassView } from "expo-glass-effect";
 import { useGatewayStore } from "@/store/gatewayStore";
 import { usePalette } from "@/hooks/usePalette";
 import { readLocalNoteContent } from "@/util/vault/localVault";
@@ -21,14 +28,8 @@ import { IconSymbol } from "@/components/ui/IconSymbol";
 
 type Selection = { start: number; end: number };
 
-function wrapSelection(
-  text: string,
-  sel: Selection,
-  before: string,
-  after: string
-): { text: string; sel: Selection } {
+function wrapSelection(text: string, sel: Selection, before: string, after: string) {
   const selected = text.slice(sel.start, sel.end);
-  // If already wrapped, unwrap
   const prefix = text.slice(Math.max(0, sel.start - before.length), sel.start);
   const suffix = text.slice(sel.end, sel.end + after.length);
   if (prefix === before && suffix === after) {
@@ -43,27 +44,17 @@ function wrapSelection(
   };
 }
 
-function insertAtCursor(
-  text: string,
-  sel: Selection,
-  insert: string
-): { text: string; sel: Selection } {
+function insertAtCursor(text: string, sel: Selection, insert: string, cursorOffset = 0) {
   return {
     text: text.slice(0, sel.end) + insert + text.slice(sel.end),
-    sel: { start: sel.end + insert.length, end: sel.end + insert.length },
+    sel: { start: sel.end + insert.length + cursorOffset, end: sel.end + insert.length + cursorOffset },
   };
 }
 
-function prefixLine(
-  text: string,
-  sel: Selection,
-  prefix: string
-): { text: string; sel: Selection } {
-  // Find the start of the current line
+function prefixLine(text: string, sel: Selection, prefix: string) {
   const lineStart = text.lastIndexOf("\n", sel.start - 1) + 1;
   const lineEnd = text.indexOf("\n", sel.start);
   const line = text.slice(lineStart, lineEnd === -1 ? text.length : lineEnd);
-  // Toggle: if line already starts with prefix, remove it
   if (line.startsWith(prefix)) {
     const newText = text.slice(0, lineStart) + line.slice(prefix.length) + text.slice(lineEnd === -1 ? text.length : lineEnd);
     return { text: newText, sel: { start: sel.start - prefix.length, end: sel.end - prefix.length } };
@@ -74,30 +65,15 @@ function prefixLine(
 
 // ── Toolbar button ──────────────────────────────────────────────────
 
-function ToolbarBtn({
-  icon,
-  label,
-  onPress,
-  palette,
-}: {
-  icon: string;
-  label: string;
-  onPress: () => void;
-  palette: any;
-}) {
+function TBtn({ icon, onPress, palette, label }: { icon: string; onPress: () => void; palette: any; label?: string }) {
   return (
     <TouchableBounce sensory onPress={onPress}>
-      <View
-        style={{
-          width: 38,
-          height: 38,
-          alignItems: "center",
-          justifyContent: "center",
-          borderRadius: 8,
-          backgroundColor: palette.surfaceAlt,
-        }}
-      >
-        <IconSymbol name={icon as any} size={16} color={palette.text} />
+      <View style={{ alignItems: "center", justifyContent: "center", paddingHorizontal: 10, paddingVertical: 8 }}>
+        {label ? (
+          <Text style={{ color: palette.text, fontSize: 13, fontWeight: "700" }}>{label}</Text>
+        ) : (
+          <IconSymbol name={icon as any} size={17} color={palette.text} />
+        )}
       </View>
     </TouchableBounce>
   );
@@ -108,13 +84,15 @@ function ToolbarBtn({
 export default function NoteEditor() {
   const palette = usePalette();
   const router = useRouter();
+  const navigation = useNavigation();
+  const { bottom } = useSafeAreaInsets();
+  const keyboard = useAnimatedKeyboard();
   const params = useLocalSearchParams<{
     provider?: string;
     vault?: string;
     note?: string;
     uri?: string;
     title?: string;
-    path?: string;
   }>();
   const { serverUrl, bearerToken } = useGatewayStore((s) => s.settings);
 
@@ -125,10 +103,15 @@ export default function NoteEditor() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [selection, setSelection] = useState<Selection>({ start: 0, end: 0 });
   const inputRef = useRef<TextInput>(null);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isBackend = params.provider === "backend" || params.provider === "sync";
+
+  // Animated keyboard offset for the floating toolbar
+  const toolbarStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: -keyboard.height.value }],
+  }));
 
   // ── Load note ───────────────────────────────────────────────────
   useEffect(() => {
@@ -141,10 +124,9 @@ export default function NoteEditor() {
         if (params.provider === "local" && params.uri) {
           text = await readLocalNoteContent(params.uri);
         } else if (isBackend && params.vault && params.note) {
-          if (!serverUrl || !bearerToken) throw new Error("Server URL or token missing.");
-          const base = serverUrl.replace(/\/+$/, "");
+          if (!serverUrl || !bearerToken) throw new Error("Server not configured.");
           const res = await fetch(
-            `${base}/obsidian/notes/read?path=${encodeURIComponent(params.vault)}&note=${encodeURIComponent(params.note)}`,
+            `${serverUrl.replace(/\/+$/, "")}/obsidian/notes/read?path=${encodeURIComponent(params.vault)}&note=${encodeURIComponent(params.note)}`,
             { headers: { Authorization: `Bearer ${bearerToken}` } }
           );
           if (!res.ok) throw new Error(`Server returned ${res.status}`);
@@ -154,16 +136,9 @@ export default function NoteEditor() {
           throw new Error("Missing note identifier.");
         }
         if (cancelled) return;
-        setRawContent(text);
-        // Split frontmatter from body
         const fmMatch = text.match(/^(---\n[\s\S]*?\n---\n?)/);
-        if (fmMatch) {
-          setFrontmatter(fmMatch[1]);
-          setBody(text.slice(fmMatch[1].length));
-        } else {
-          setFrontmatter("");
-          setBody(text);
-        }
+        setFrontmatter(fmMatch ? fmMatch[1] : "");
+        setBody(fmMatch ? text.slice(fmMatch[1].length) : text);
       } catch (err: any) {
         if (!cancelled) setError(err?.message ?? "Failed to load note");
       } finally {
@@ -174,25 +149,15 @@ export default function NoteEditor() {
     return () => { cancelled = true; };
   }, [params.provider, params.vault, params.note, params.uri, serverUrl, bearerToken]);
 
-  // ── Auto-save (debounced 1.5s after last edit) ──────────────────
-  const save = useCallback(async (newBody: string) => {
-    if (!isBackend || !params.vault || !params.note) return;
-    if (!serverUrl || !bearerToken) return;
+  // ── Save ────────────────────────────────────────────────────────
+  const save = useCallback(async (text: string) => {
+    if (!isBackend || !params.vault || !params.note || !serverUrl || !bearerToken) return;
     setSaving(true);
     try {
-      const fullContent = frontmatter + newBody;
-      const base = serverUrl.replace(/\/+$/, "");
-      const res = await fetch(`${base}/obsidian/notes/write`, {
+      const res = await fetch(`${serverUrl.replace(/\/+$/, "")}/obsidian/notes/write`, {
         method: "PUT",
-        headers: {
-          Authorization: `Bearer ${bearerToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          path: params.vault,
-          note: params.note,
-          content: fullContent,
-        }),
+        headers: { Authorization: `Bearer ${bearerToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ path: params.vault, note: params.note, content: frontmatter + text }),
       });
       if (!res.ok) throw new Error(`Save failed: ${res.status}`);
       setDirty(false);
@@ -208,20 +173,16 @@ export default function NoteEditor() {
     setDirty(true);
   }, []);
 
-  // Save when leaving the note (unmount)
+  // Save + switch to preview when keyboard closes
   useEffect(() => {
-    return () => {
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-    };
-  }, []);
-
-  // Save on blur (keyboard dismiss) or back navigation
-  const handleBlur = useCallback(() => {
-    if (dirty) save(body);
+    const sub = Keyboard.addListener("keyboardDidHide", () => {
+      if (dirty) save(body);
+      setEditing(false);
+    });
+    return () => sub.remove();
   }, [dirty, body, save]);
 
   // Save when navigating away
-  const navigation = useNavigation();
   const dirtyRef = useRef(false);
   const bodyRef = useRef(body);
   dirtyRef.current = dirty;
@@ -235,101 +196,73 @@ export default function NoteEditor() {
 
   // ── Delete ──────────────────────────────────────────────────────
   const handleDelete = () => {
-    Alert.alert(
-      "Delete note",
-      `Are you sure you want to delete "${params.title ?? params.note}"?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            if (!isBackend || !params.vault || !params.note) return;
-            try {
-              const base = serverUrl.replace(/\/+$/, "");
-              await fetch(`${base}/obsidian/notes/delete`, {
-                method: "DELETE",
-                headers: {
-                  Authorization: `Bearer ${bearerToken}`,
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ path: params.vault, note: params.note }),
-              });
-              router.back();
-            } catch {
-              Alert.alert("Error", "Failed to delete note.");
-            }
-          },
+    Alert.alert("Delete note", `Delete "${params.title ?? params.note}"?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete", style: "destructive",
+        onPress: async () => {
+          try {
+            await fetch(`${serverUrl!.replace(/\/+$/, "")}/obsidian/notes/delete`, {
+              method: "DELETE",
+              headers: { Authorization: `Bearer ${bearerToken}`, "Content-Type": "application/json" },
+              body: JSON.stringify({ path: params.vault, note: params.note }),
+            });
+            router.back();
+          } catch { Alert.alert("Error", "Failed to delete note."); }
         },
-      ]
-    );
+      },
+    ]);
   };
 
-  // ── Formatting actions ──────────────────────────────────────────
+  // ── Formatting ──────────────────────────────────────────────────
   const applyFormat = (action: string) => {
     let result: { text: string; sel: Selection };
     switch (action) {
-      case "bold":
-        result = wrapSelection(body, selection, "**", "**");
-        break;
-      case "italic":
-        result = wrapSelection(body, selection, "*", "*");
-        break;
-      case "code":
-        result = wrapSelection(body, selection, "`", "`");
-        break;
-      case "strikethrough":
-        result = wrapSelection(body, selection, "~~", "~~");
-        break;
-      case "highlight":
-        result = wrapSelection(body, selection, "==", "==");
-        break;
-      case "h1":
-        result = prefixLine(body, selection, "# ");
-        break;
-      case "h2":
-        result = prefixLine(body, selection, "## ");
-        break;
-      case "h3":
-        result = prefixLine(body, selection, "### ");
-        break;
-      case "bullet":
-        result = prefixLine(body, selection, "- ");
-        break;
-      case "checkbox":
-        result = prefixLine(body, selection, "- [ ] ");
-        break;
-      case "quote":
-        result = prefixLine(body, selection, "> ");
-        break;
+      case "bold": result = wrapSelection(body, selection, "**", "**"); break;
+      case "italic": result = wrapSelection(body, selection, "*", "*"); break;
+      case "code": result = wrapSelection(body, selection, "`", "`"); break;
+      case "strike": result = wrapSelection(body, selection, "~~", "~~"); break;
+      case "highlight": result = wrapSelection(body, selection, "==", "=="); break;
+      case "h1": result = prefixLine(body, selection, "# "); break;
+      case "h2": result = prefixLine(body, selection, "## "); break;
+      case "h3": result = prefixLine(body, selection, "### "); break;
+      case "bullet": result = prefixLine(body, selection, "- "); break;
+      case "checkbox": result = prefixLine(body, selection, "- [ ] "); break;
+      case "quote": result = prefixLine(body, selection, "> "); break;
       case "link": {
-        const selected = body.slice(selection.start, selection.end);
-        const linkText = selected || "link text";
+        const sel = body.slice(selection.start, selection.end) || "note";
         result = {
-          text: body.slice(0, selection.start) + `[[${linkText}]]` + body.slice(selection.end),
-          sel: { start: selection.start + 2, end: selection.start + 2 + linkText.length },
+          text: body.slice(0, selection.start) + `[[${sel}]]` + body.slice(selection.end),
+          sel: { start: selection.start + 2, end: selection.start + 2 + sel.length },
         };
         break;
       }
-      case "tag":
-        result = insertAtCursor(body, selection, "#");
-        break;
-      case "divider":
-        result = insertAtCursor(body, selection, "\n---\n");
-        break;
+      case "tag": result = insertAtCursor(body, selection, "#"); break;
+      case "divider": result = insertAtCursor(body, selection, "\n---\n"); break;
       case "codeblock":
-        result = insertAtCursor(body, selection, "\n```\n\n```\n");
-        result.sel = { start: result.sel.start - 5, end: result.sel.start - 5 };
+        // Insert code block and place cursor inside
+        result = insertAtCursor(body, selection, "\n```\n\n```\n", -5);
         break;
-      default:
-        return;
+      default: return;
     }
     setBody(result.text);
     setDirty(true);
-    // Move cursor
-    setTimeout(() => {
-      inputRef.current?.setNativeProps({ selection: result.sel });
-    }, 50);
+    setTimeout(() => inputRef.current?.setNativeProps({ selection: result.sel }), 50);
+  };
+
+  // ── Markdown styles ─────────────────────────────────────────────
+  const mdStyles = {
+    body: { color: palette.text, fontSize: 16, lineHeight: 24 },
+    heading1: { color: palette.text, fontSize: 24, fontWeight: "700" as const, marginTop: 8, marginBottom: 12 },
+    heading2: { color: palette.text, fontSize: 20, fontWeight: "600" as const, marginTop: 12, marginBottom: 8 },
+    heading3: { color: palette.text, fontSize: 17, fontWeight: "600" as const, marginTop: 10, marginBottom: 6 },
+    paragraph: { color: palette.text, marginBottom: 10 },
+    code_inline: { backgroundColor: palette.surfaceAlt, color: palette.text, paddingHorizontal: 4, borderRadius: 4 },
+    fence: { backgroundColor: palette.surfaceAlt, borderRadius: 8, padding: 12, color: palette.text },
+    blockquote: { backgroundColor: palette.surfaceAlt, borderLeftColor: palette.accent, borderLeftWidth: 3, paddingHorizontal: 12, paddingVertical: 4 },
+    link: { color: palette.accent },
+    bullet_list_icon: { color: palette.text },
+    ordered_list_icon: { color: palette.text },
   };
 
   // ── Render ──────────────────────────────────────────────────────
@@ -343,10 +276,17 @@ export default function NoteEditor() {
           headerTintColor: palette.accent,
           contentStyle: { backgroundColor: palette.bg },
           headerRight: () => (
-            <View style={{ flexDirection: "row", gap: 6, alignItems: "center" }}>
+            <View style={{ flexDirection: "row", gap: 4, alignItems: "center" }}>
               {saving && <ActivityIndicator color={palette.textMuted} size="small" />}
               {dirty && !saving && (
                 <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: palette.accent }} />
+              )}
+              {isBackend && !editing && (
+                <TouchableBounce sensory onPress={() => { setEditing(true); setTimeout(() => inputRef.current?.focus(), 100); }}>
+                  <View style={{ width: 34, height: 34, alignItems: "center", justifyContent: "center" }}>
+                    <IconSymbol name="pencil" size={18} color={palette.accent} />
+                  </View>
+                </TouchableBounce>
               )}
               {isBackend && (
                 <TouchableBounce sensory onPress={handleDelete}>
@@ -368,81 +308,101 @@ export default function NoteEditor() {
           <Text style={{ color: palette.danger, fontSize: 15, textAlign: "center" }}>{error}</Text>
         </View>
       ) : (
-        <KeyboardAvoidingView
-          style={{ flex: 1, backgroundColor: palette.bg }}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          keyboardVerticalOffset={Platform.OS === "ios" ? 95 : 0}
-        >
+        <View style={{ flex: 1, backgroundColor: palette.bg }}>
           <ScrollView
             style={{ flex: 1 }}
-            contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 80 }}
+            contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: editing ? 120 : 40 }}
             contentInsetAdjustmentBehavior="automatic"
             keyboardDismissMode="interactive"
             keyboardShouldPersistTaps="handled"
           >
-            <TextInput
-              ref={inputRef}
-              value={body}
-              onChangeText={onChangeText}
-              onBlur={handleBlur}
-              onSelectionChange={(e) => setSelection(e.nativeEvent.selection)}
-              multiline
-              scrollEnabled={false}
-              autoCapitalize="sentences"
-              autoCorrect
-              textAlignVertical="top"
-              style={{
-                color: palette.text,
-                fontSize: 16,
-                lineHeight: 24,
-                minHeight: 300,
-              }}
-              placeholderTextColor={palette.textMuted}
-              placeholder="Start writing..."
-              editable={isBackend}
-            />
+            {editing ? (
+              <TextInput
+                ref={inputRef}
+                value={body}
+                onChangeText={onChangeText}
+                onSelectionChange={(e) => setSelection(e.nativeEvent.selection)}
+                multiline
+                scrollEnabled={false}
+                autoFocus
+                autoCapitalize="sentences"
+                autoCorrect
+                textAlignVertical="top"
+                keyboardAppearance={palette.bg === "#000" || palette.bg === "#000000" ? "dark" : "light"}
+                style={{ color: palette.text, fontSize: 16, lineHeight: 24, minHeight: 300 }}
+                placeholderTextColor={palette.textMuted}
+                placeholder="Start writing..."
+              />
+            ) : (
+              <TouchableBounce
+                sensory
+                onPress={() => {
+                  if (isBackend) {
+                    setEditing(true);
+                    setTimeout(() => inputRef.current?.focus(), 100);
+                  }
+                }}
+              >
+                <Markdown style={mdStyles}>
+                  {body || "*Empty note — tap to edit*"}
+                </Markdown>
+              </TouchableBounce>
+            )}
           </ScrollView>
 
-          {/* ── Formatting toolbar ── */}
-          {isBackend && (
-            <View
-              style={{
-                flexDirection: "row",
-                gap: 6,
-                paddingHorizontal: 12,
-                paddingVertical: 8,
-                backgroundColor: palette.surface,
-                borderTopWidth: 0.5,
-                borderTopColor: palette.surfaceAlt,
-              }}
+          {/* ── Floating glass formatting toolbar ── */}
+          {editing && isBackend && (
+            <Animated.View
+              style={[
+                {
+                  position: "absolute",
+                  bottom: bottom + 8,
+                  left: 12,
+                  right: 12,
+                },
+                toolbarStyle,
+              ]}
             >
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ gap: 6, alignItems: "center" }}
-                keyboardShouldPersistTaps="always"
+              <GlassView
+                glassEffectStyle="regular"
+                isInteractive
+                style={{
+                  borderRadius: 16,
+                  overflow: "hidden",
+                  paddingVertical: 2,
+                }}
               >
-                <ToolbarBtn icon="bold" label="Bold" onPress={() => applyFormat("bold")} palette={palette} />
-                <ToolbarBtn icon="italic" label="Italic" onPress={() => applyFormat("italic")} palette={palette} />
-                <ToolbarBtn icon="strikethrough" label="Strikethrough" onPress={() => applyFormat("strikethrough")} palette={palette} />
-                <ToolbarBtn icon="highlighter" label="Highlight" onPress={() => applyFormat("highlight")} palette={palette} />
-                <ToolbarBtn icon="chevron.left.forwardslash.chevron.right" label="Code" onPress={() => applyFormat("code")} palette={palette} />
-                <View style={{ width: 1, height: 20, backgroundColor: palette.surfaceAlt }} />
-                <ToolbarBtn icon="textformat.size" label="H1" onPress={() => applyFormat("h1")} palette={palette} />
-                <ToolbarBtn icon="textformat.size.smaller" label="H2" onPress={() => applyFormat("h2")} palette={palette} />
-                <View style={{ width: 1, height: 20, backgroundColor: palette.surfaceAlt }} />
-                <ToolbarBtn icon="list.bullet" label="Bullet" onPress={() => applyFormat("bullet")} palette={palette} />
-                <ToolbarBtn icon="checkmark.square" label="Checkbox" onPress={() => applyFormat("checkbox")} palette={palette} />
-                <ToolbarBtn icon="text.quote" label="Quote" onPress={() => applyFormat("quote")} palette={palette} />
-                <View style={{ width: 1, height: 20, backgroundColor: palette.surfaceAlt }} />
-                <ToolbarBtn icon="link" label="Link" onPress={() => applyFormat("link")} palette={palette} />
-                <ToolbarBtn icon="number" label="Tag" onPress={() => applyFormat("tag")} palette={palette} />
-                <ToolbarBtn icon="minus" label="Divider" onPress={() => applyFormat("divider")} palette={palette} />
-                <ToolbarBtn icon="curlybraces" label="Code Block" onPress={() => applyFormat("codeblock")} palette={palette} />
-              </ScrollView>
-            </View>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ alignItems: "center", paddingHorizontal: 4 }}
+                  keyboardShouldPersistTaps="always"
+                >
+                  <TBtn label="B" icon="" onPress={() => applyFormat("bold")} palette={palette} />
+                  <TBtn label="I" icon="" onPress={() => applyFormat("italic")} palette={palette} />
+                  <TBtn label="S" icon="" onPress={() => applyFormat("strike")} palette={palette} />
+                  <TBtn icon="highlighter" onPress={() => applyFormat("highlight")} palette={palette} />
+                  <TBtn icon="chevron.left.forwardslash.chevron.right" onPress={() => applyFormat("code")} palette={palette} />
+                  <View style={{ width: 1, height: 18, backgroundColor: "rgba(128,128,128,0.3)", marginHorizontal: 2 }} />
+                  <TBtn label="H1" icon="" onPress={() => applyFormat("h1")} palette={palette} />
+                  <TBtn label="H2" icon="" onPress={() => applyFormat("h2")} palette={palette} />
+                  <TBtn label="H3" icon="" onPress={() => applyFormat("h3")} palette={palette} />
+                  <View style={{ width: 1, height: 18, backgroundColor: "rgba(128,128,128,0.3)", marginHorizontal: 2 }} />
+                  <TBtn icon="list.bullet" onPress={() => applyFormat("bullet")} palette={palette} />
+                  <TBtn icon="checkmark.square" onPress={() => applyFormat("checkbox")} palette={palette} />
+                  <TBtn icon="text.quote" onPress={() => applyFormat("quote")} palette={palette} />
+                  <View style={{ width: 1, height: 18, backgroundColor: "rgba(128,128,128,0.3)", marginHorizontal: 2 }} />
+                  <TBtn icon="link" onPress={() => applyFormat("link")} palette={palette} />
+                  <TBtn icon="number" onPress={() => applyFormat("tag")} palette={palette} />
+                  <TBtn icon="minus" onPress={() => applyFormat("divider")} palette={palette} />
+                  <TBtn icon="curlybraces" onPress={() => applyFormat("codeblock")} palette={palette} />
+                  <View style={{ width: 1, height: 18, backgroundColor: "rgba(128,128,128,0.3)", marginHorizontal: 2 }} />
+                  <TBtn icon="keyboard.chevron.compact.down" onPress={() => Keyboard.dismiss()} palette={palette} />
+                </ScrollView>
+              </GlassView>
+            </Animated.View>
           )}
-        </KeyboardAvoidingView>
+        </View>
       )}
     </>
   );
