@@ -334,11 +334,11 @@ export default function ChatListScreen() {
         <Modal
           transparent
           visible={showProjectPicker}
-          animationType="fade"
+          animationType="none"
           onRequestClose={() => setShowProjectPicker(false)}
         >
           <Pressable style={{ flex: 1 }} onPress={() => setShowProjectPicker(false)}>
-            <View style={{ paddingTop: headerHeight + 4, alignItems: "center" }}>
+            <View style={{ paddingTop: headerHeight - 8, alignItems: "center" }}>
               <Pressable>
                 <View
                   style={{
