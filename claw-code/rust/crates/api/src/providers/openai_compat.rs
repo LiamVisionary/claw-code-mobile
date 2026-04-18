@@ -1586,15 +1586,100 @@ mod tests {
     use super::{
         build_chat_completion_request, chat_completions_endpoint, is_reasoning_model,
         normalize_finish_reason, openai_tool_choice, parse_tool_arguments, OpenAiCompatClient,
-        OpenAiCompatConfig,
+        OpenAiCompatConfig, OpenAiSseParser, StreamState,
     };
     use crate::error::ApiError;
     use crate::types::{
-        InputContentBlock, InputMessage, MessageRequest, ToolChoice, ToolDefinition,
-        ToolResultContentBlock,
+        ContentBlockDelta, InputContentBlock, InputMessage, MessageRequest, OutputContentBlock,
+        StreamEvent, ToolChoice, ToolDefinition, ToolResultContentBlock,
     };
     use serde_json::json;
     use std::sync::{Mutex, OnceLock};
+
+    /// Run a list of pre-serialized SSE chunks (just the JSON payload of
+    /// each `data:` frame) through the parser + state machine, returning
+    /// every StreamEvent that came out. Used by the format-integration
+    /// tests below to verify that each model dialect — Anthropic-style
+    /// `tool_calls`, gpt-oss Harmony channels, and Hermes-XML
+    /// `<tool_call>` blocks in the text channel — all collapse into the
+    /// same Anthropic-shape event stream the rest of the runtime expects.
+    fn run_sse_pipeline(model: &str, chunk_payloads: &[&str]) -> Vec<StreamEvent> {
+        let mut parser = OpenAiSseParser::with_context("test", model.to_string());
+        let mut state = StreamState::new(model.to_string());
+        let mut events = Vec::new();
+        // Each chunk_payload gets framed as a complete `data: …\n\n`
+        // line so the SSE parser sees a clean boundary. We push them
+        // one at a time so a single payload split mid-marker (the
+        // demuxer's stress case) gets exercised through ingest_chunk
+        // exactly the way it would on a real connection.
+        for payload in chunk_payloads {
+            let frame = format!("data: {payload}\n\n");
+            for chunk in parser.push(frame.as_bytes()).expect("sse parse") {
+                events.extend(state.ingest_chunk(chunk).expect("ingest"));
+            }
+        }
+        // Flush the final-frame state so any tail-buffered content
+        // shows up in the output.
+        events.extend(state.finish().expect("finish"));
+        events
+    }
+
+    fn tool_uses(events: &[StreamEvent]) -> Vec<(String, String)> {
+        let mut found_names: Vec<(u32, String)> = Vec::new();
+        let mut found_args: Vec<(u32, String)> = Vec::new();
+        for event in events {
+            match event {
+                StreamEvent::ContentBlockStart(start) => {
+                    if let OutputContentBlock::ToolUse { name, .. } = &start.content_block {
+                        found_names.push((start.index, name.clone()));
+                    }
+                }
+                StreamEvent::ContentBlockDelta(delta) => {
+                    if let ContentBlockDelta::InputJsonDelta { partial_json } = &delta.delta {
+                        found_args.push((delta.index, partial_json.clone()));
+                    }
+                }
+                _ => {}
+            }
+        }
+        found_names
+            .into_iter()
+            .map(|(idx, name)| {
+                let args: String = found_args
+                    .iter()
+                    .filter(|(i, _)| *i == idx)
+                    .map(|(_, s)| s.clone())
+                    .collect();
+                (name, args)
+            })
+            .collect()
+    }
+
+    fn collected_text(events: &[StreamEvent]) -> String {
+        events
+            .iter()
+            .filter_map(|e| match e {
+                StreamEvent::ContentBlockDelta(d) => match &d.delta {
+                    ContentBlockDelta::TextDelta { text } => Some(text.clone()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn collected_thinking(events: &[StreamEvent]) -> String {
+        events
+            .iter()
+            .filter_map(|e| match e {
+                StreamEvent::ContentBlockDelta(d) => match &d.delta {
+                    ContentBlockDelta::ThinkingDelta { thinking } => Some(thinking.clone()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect()
+    }
 
     #[test]
     fn request_translation_uses_openai_compatible_shape() {
@@ -2378,5 +2463,197 @@ mod tests {
         assert_eq!(super::strip_routing_prefix("kimi/kimi-k2.5"), "kimi-k2.5");
         assert_eq!(super::strip_routing_prefix("kimi-k2.5"), "kimi-k2.5"); // no prefix, unchanged
         assert_eq!(super::strip_routing_prefix("kimi/kimi-k1.5"), "kimi-k1.5");
+    }
+
+    // ───────────────────────────────────────────────────────────────────
+    // Format integration tests — verify that every supported model
+    // dialect produces clean Anthropic-shape ToolUse events through the
+    // full SSE → parser → StreamState pipeline. Regression coverage for
+    // the original "only Anthropic models worked" bug.
+    // ───────────────────────────────────────────────────────────────────
+
+    /// Anthropic / GPT-4 / Claude over OpenRouter / xAI: the model uses
+    /// the structured `tool_calls` field, so the demuxer is a no-op and
+    /// the existing OpenAI-native path drives the events.
+    #[test]
+    fn pipeline_openai_native_tool_calls_emit_tooluse() {
+        let events = run_sse_pipeline(
+            "claude-sonnet-4-6",
+            &[
+                r#"{"id":"chat-1","model":"claude-sonnet-4-6","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_abc","function":{"name":"create_file","arguments":""}}]},"finish_reason":null}]}"#,
+                r#"{"id":"chat-1","model":"claude-sonnet-4-6","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":\"foo.txt\""}}]},"finish_reason":null}]}"#,
+                r#"{"id":"chat-1","model":"claude-sonnet-4-6","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"}"}}]},"finish_reason":null}]}"#,
+                r#"{"id":"chat-1","model":"claude-sonnet-4-6","choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#,
+            ],
+        );
+        let tools = tool_uses(&events);
+        assert_eq!(tools.len(), 1, "expected exactly one tool_use");
+        assert_eq!(tools[0].0, "create_file");
+        assert_eq!(tools[0].1, "{\"path\":\"foo.txt\"}");
+    }
+
+    /// gpt-oss (Harmony format): tool calls arrive embedded in the text
+    /// channel via `<|channel|>commentary to=functions.NAME<|message|>…<|call|>`.
+    /// Demuxer must convert that into a synthetic ToolUse block — without
+    /// it, the markup leaked into the chat bubble (the original bug).
+    #[test]
+    fn pipeline_harmony_commentary_emits_tooluse() {
+        let events = run_sse_pipeline(
+            "gpt-oss:20b",
+            &[
+                r#"{"id":"chat-1","model":"gpt-oss:20b","choices":[{"delta":{"content":"<|channel|>commentary to=functions.create_file<|message|>"},"finish_reason":null}]}"#,
+                r#"{"id":"chat-1","model":"gpt-oss:20b","choices":[{"delta":{"content":"{\"path\":\"foo.txt\"}<|call|>"},"finish_reason":null}]}"#,
+                r#"{"id":"chat-1","model":"gpt-oss:20b","choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+            ],
+        );
+        let tools = tool_uses(&events);
+        assert_eq!(tools.len(), 1, "expected one synthetic tool_use from Harmony");
+        assert_eq!(tools[0].0, "create_file");
+        assert_eq!(tools[0].1, "{\"path\":\"foo.txt\"}");
+        // No raw Harmony markers leaked into the text channel.
+        assert!(
+            !collected_text(&events).contains("<|channel|>"),
+            "Harmony markers must not appear in TextDelta output"
+        );
+    }
+
+    /// gpt-oss `analysis` channel must route to ThinkingDelta, not
+    /// TextDelta — otherwise reasoning trace ends up rendered in the
+    /// chat bubble alongside the answer.
+    #[test]
+    fn pipeline_harmony_analysis_emits_thinking_only() {
+        let events = run_sse_pipeline(
+            "gpt-oss:20b",
+            &[
+                r#"{"id":"chat-1","model":"gpt-oss:20b","choices":[{"delta":{"content":"<|channel|>analysis<|message|>thinking out loud<|end|>"},"finish_reason":null}]}"#,
+                r#"{"id":"chat-1","model":"gpt-oss:20b","choices":[{"delta":{"content":"<|channel|>final<|message|>here is the answer<|end|>"},"finish_reason":null}]}"#,
+            ],
+        );
+        assert_eq!(collected_thinking(&events).trim(), "thinking out loud");
+        assert_eq!(collected_text(&events).trim(), "here is the answer");
+        assert!(tool_uses(&events).is_empty());
+    }
+
+    /// gpt-oss splitting a marker across two SSE chunks (e.g. `<|cha`
+    /// in chunk N, `nnel|>...` in chunk N+1) must still parse cleanly.
+    /// Without buffering across deltas the marker would leak as text.
+    #[test]
+    fn pipeline_harmony_split_marker_across_chunks() {
+        let events = run_sse_pipeline(
+            "gpt-oss:20b",
+            &[
+                r#"{"id":"chat-1","model":"gpt-oss:20b","choices":[{"delta":{"content":"<|chann"},"finish_reason":null}]}"#,
+                r#"{"id":"chat-1","model":"gpt-oss:20b","choices":[{"delta":{"content":"el|>final<|message|>ok<|end|>"},"finish_reason":null}]}"#,
+            ],
+        );
+        assert_eq!(collected_text(&events).trim(), "ok");
+        assert!(
+            !collected_text(&events).contains("<|"),
+            "split marker must not leak any prefix bytes"
+        );
+    }
+
+    /// qwen-coder / nous-hermes / qwen3 family use `<tool_call>{...JSON...}</tool_call>`
+    /// inside the text channel. Demuxer must extract the JSON, emit a
+    /// ToolUse, and keep any prose around the tool call as plain text.
+    #[test]
+    fn pipeline_hermes_xml_qwen_coder_emits_tooluse() {
+        let events = run_sse_pipeline(
+            "qwen3-coder:30b",
+            &[
+                r#"{"id":"chat-1","model":"qwen3-coder:30b","choices":[{"delta":{"content":"I'll create that file.\n<tool_call>"},"finish_reason":null}]}"#,
+                r#"{"id":"chat-1","model":"qwen3-coder:30b","choices":[{"delta":{"content":"{\"name\":\"create_file\",\"arguments\":{\"path\":\"foo.txt\"}}"},"finish_reason":null}]}"#,
+                r#"{"id":"chat-1","model":"qwen3-coder:30b","choices":[{"delta":{"content":"</tool_call>"},"finish_reason":null}]}"#,
+                r#"{"id":"chat-1","model":"qwen3-coder:30b","choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+            ],
+        );
+        let tools = tool_uses(&events);
+        assert_eq!(tools.len(), 1, "expected one synthetic tool_use from Hermes XML");
+        assert_eq!(tools[0].0, "create_file");
+        // Arguments are normalized to a JSON string, identical regardless
+        // of which Hermes-shaped envelope the model used.
+        assert_eq!(tools[0].1, "{\"path\":\"foo.txt\"}");
+        // Prose preceding the tool tag is preserved as plain text — the
+        // tag itself must be stripped.
+        let text = collected_text(&events);
+        assert!(text.contains("I'll create that file"));
+        assert!(!text.contains("<tool_call>"));
+        assert!(!text.contains("</tool_call>"));
+    }
+
+    /// nous-hermes / hermes-3 family use the same XML shape as Qwen.
+    /// Verify detection picks them up so the demuxer fires.
+    #[test]
+    fn pipeline_hermes_xml_nous_hermes_emits_tooluse() {
+        let events = run_sse_pipeline(
+            "nous-hermes-2",
+            &[
+                r#"{"id":"c1","model":"nous-hermes-2","choices":[{"delta":{"content":"<tool_call>{\"name\":\"run_shell\",\"arguments\":{\"cmd\":\"ls -la\"}}</tool_call>"},"finish_reason":null}]}"#,
+                r#"{"id":"c1","model":"nous-hermes-2","choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+            ],
+        );
+        let tools = tool_uses(&events);
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].0, "run_shell");
+        assert_eq!(tools[0].1, "{\"cmd\":\"ls -la\"}");
+    }
+
+    /// Hermes XML splitting the opening tag across SSE chunks: the
+    /// demuxer must wait for the full `<tool_call>` rather than emit
+    /// a partial `<tool_` as text.
+    #[test]
+    fn pipeline_hermes_xml_split_tag_across_chunks() {
+        let events = run_sse_pipeline(
+            "qwen3-coder:30b",
+            &[
+                r#"{"id":"c1","model":"qwen3-coder:30b","choices":[{"delta":{"content":"Ok "},"finish_reason":null}]}"#,
+                r#"{"id":"c1","model":"qwen3-coder:30b","choices":[{"delta":{"content":"<tool_"},"finish_reason":null}]}"#,
+                r#"{"id":"c1","model":"qwen3-coder:30b","choices":[{"delta":{"content":"call>{\"name\":\"x\",\"arguments\":{}}</tool_call>"},"finish_reason":null}]}"#,
+            ],
+        );
+        let tools = tool_uses(&events);
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].0, "x");
+        let text = collected_text(&events);
+        assert_eq!(text.trim(), "Ok");
+        assert!(!text.contains("<tool_"));
+    }
+
+    /// gpt-oss can interleave analysis, commentary, and final channels
+    /// in a single response. All three must collapse into the right
+    /// stream of events: thinking → tool_use → text.
+    #[test]
+    fn pipeline_harmony_full_three_channel_response() {
+        let events = run_sse_pipeline(
+            "gpt-oss:20b",
+            &[
+                r#"{"id":"c1","model":"gpt-oss:20b","choices":[{"delta":{"content":"<|channel|>analysis<|message|>need to write a file<|end|>"},"finish_reason":null}]}"#,
+                r#"{"id":"c1","model":"gpt-oss:20b","choices":[{"delta":{"content":"<|channel|>commentary to=functions.create_file<|message|>{\"path\":\"a.js\"}<|call|>"},"finish_reason":null}]}"#,
+                r#"{"id":"c1","model":"gpt-oss:20b","choices":[{"delta":{"content":"<|channel|>final<|message|>done.<|end|>"},"finish_reason":null}]}"#,
+            ],
+        );
+        assert_eq!(collected_thinking(&events).trim(), "need to write a file");
+        let tools = tool_uses(&events);
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].0, "create_file");
+        assert_eq!(tools[0].1, "{\"path\":\"a.js\"}");
+        assert_eq!(collected_text(&events).trim(), "done.");
+    }
+
+    /// A model that doesn't trigger any demuxer (e.g. plain Claude with
+    /// no tool calls) should pass text through unchanged.
+    #[test]
+    fn pipeline_default_format_text_passthrough() {
+        let events = run_sse_pipeline(
+            "claude-sonnet-4-6",
+            &[
+                r#"{"id":"c1","model":"claude-sonnet-4-6","choices":[{"delta":{"content":"hello "},"finish_reason":null}]}"#,
+                r#"{"id":"c1","model":"claude-sonnet-4-6","choices":[{"delta":{"content":"world"},"finish_reason":null}]}"#,
+                r#"{"id":"c1","model":"claude-sonnet-4-6","choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+            ],
+        );
+        assert_eq!(collected_text(&events), "hello world");
+        assert!(tool_uses(&events).is_empty());
+        assert!(collected_thinking(&events).is_empty());
     }
 }
