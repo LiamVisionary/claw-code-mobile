@@ -109,6 +109,7 @@ type ActiveRun = {
   turnTokensOut?: number;
   turnCostUsd?: number;
   turnModel?: string;
+  turnProvider?: ModelConfig["provider"];
 };
 
 type SpawnResult = {
@@ -242,23 +243,35 @@ function getBinary(model?: ModelConfig): string {
  * Returns the path to the standalone config for --mcp-config.
  */
 /**
- * Check if the `mcpvault` CLI is installed and resolvable on PATH. Result
- * is cached per process — a missing binary won't appear without a restart
- * since most installers (npm -g, brew) require it.
+ * Path to the bundled mcpvault binary. We ship `@bitbonsai/mcpvault` as a
+ * backend dependency so a normal `npm install` is enough — no global
+ * install or PATH lookup needed. Falls back to PATH lookup if the bundled
+ * copy is somehow missing (e.g. someone deleted node_modules manually),
+ * so we still work for users who installed mcpvault globally themselves.
  */
-let mcpVaultInstalledCache: boolean | null = null;
-function isMcpVaultInstalled(): boolean {
-  if (mcpVaultInstalledCache !== null) return mcpVaultInstalledCache;
-  try {
-    // `command -v` is portable across Linux/macOS shells and exits
-    // non-zero when the binary isn't found. Run via the shell so the
-    // builtin resolves correctly.
-    execSync("command -v mcpvault", { stdio: "ignore", shell: "/bin/sh" });
-    mcpVaultInstalledCache = true;
-  } catch {
-    mcpVaultInstalledCache = false;
+const BUNDLED_MCPVAULT_BIN = path.join(
+  __dirname,
+  "../../node_modules/.bin/mcpvault"
+);
+
+let resolvedMcpVaultBin: string | null | undefined;
+function resolveMcpVault(): string | null {
+  if (resolvedMcpVaultBin !== undefined) return resolvedMcpVaultBin;
+  if (fs.existsSync(BUNDLED_MCPVAULT_BIN)) {
+    resolvedMcpVaultBin = BUNDLED_MCPVAULT_BIN;
+    return resolvedMcpVaultBin;
   }
-  return mcpVaultInstalledCache;
+  try {
+    // `command -v` prints the resolved path on success and exits
+    // non-zero when the binary isn't found.
+    const found = execSync("command -v mcpvault", { shell: "/bin/sh" })
+      .toString()
+      .trim();
+    resolvedMcpVaultBin = found || null;
+  } catch {
+    resolvedMcpVaultBin = null;
+  }
+  return resolvedMcpVaultBin;
 }
 
 function cleanupMcpVaultConfig(cwd: string) {
@@ -283,16 +296,17 @@ function cleanupMcpVaultConfig(cwd: string) {
   }
 }
 
-function writeMcpVaultConfig(cwd: string, vaultPath: string): string {
+function writeMcpVaultConfig(cwd: string, vaultPath: string, mcpvaultBin: string): string {
   // The claw binary uses Content-Length framed MCP (LSP-style) but the
   // MCP JS SDK (used by mcpvault) uses newline-delimited JSON. The
-  // framing adapter translates between them.
+  // framing adapter translates between them. We pass the absolute path
+  // to mcpvault so spawn doesn't depend on PATH lookups.
   const adapterPath = path.join(__dirname, "../../scripts/mcp-framing-adapter.mjs");
   const mcpConfig = {
     mcpServers: {
       obsidian: {
         command: "node",
-        args: [adapterPath, "mcpvault", vaultPath],
+        args: [adapterPath, mcpvaultBin, vaultPath],
       },
     },
   };
@@ -1230,24 +1244,35 @@ async function processSuccess(
     active.turnTokensOut = result.usage.output_tokens;
   }
 
-  // Calculate cost from real OpenRouter pricing instead of claw's
-  // hardcoded Anthropic rates — claw can be 40-50x off for non-Anthropic
-  // models.
-  const realCost = calculateRealCost(active.turnModel, inTok, outTok);
-  const costDisplay = realCost ?? result.estimated_cost;
-  const savingsLine = buildSavingsLine(active.turnModel, inTok, outTok);
-  if (costDisplay) {
+  // Local runners don't bill anyone — show a friendly note instead of
+  // claw's hardcoded Anthropic-rate guess (which would be off by orders
+  // of magnitude and misleading).
+  if (active.turnProvider === "local") {
     emitTerminal(
       threadId,
-      `Cost: ${costDisplay} | in: ${inTok} out: ${outTok}${savingsLine}`
+      `Cost: just your electric bill ;) | in: ${inTok} out: ${outTok}`
     );
-  }
-  if (realCost) {
-    const n = parseFloat(realCost.replace(/[^0-9.]/g, ""));
-    if (Number.isFinite(n)) active.turnCostUsd = n;
-  } else if (result.estimated_cost) {
-    const n = parseFloat(String(result.estimated_cost).replace(/[^0-9.]/g, ""));
-    if (Number.isFinite(n)) active.turnCostUsd = n;
+    active.turnCostUsd = 0;
+  } else {
+    // Calculate cost from real OpenRouter pricing instead of claw's
+    // hardcoded Anthropic rates — claw can be 40-50x off for non-Anthropic
+    // models.
+    const realCost = calculateRealCost(active.turnModel, inTok, outTok);
+    const costDisplay = realCost ?? result.estimated_cost;
+    const savingsLine = buildSavingsLine(active.turnModel, inTok, outTok);
+    if (costDisplay) {
+      emitTerminal(
+        threadId,
+        `Cost: ${costDisplay} | in: ${inTok} out: ${outTok}${savingsLine}`
+      );
+    }
+    if (realCost) {
+      const n = parseFloat(realCost.replace(/[^0-9.]/g, ""));
+      if (Number.isFinite(n)) active.turnCostUsd = n;
+    } else if (result.estimated_cost) {
+      const n = parseFloat(String(result.estimated_cost).replace(/[^0-9.]/g, ""));
+      if (Number.isFinite(n)) active.turnCostUsd = n;
+    }
   }
 
   // Parse <thinking>...</thinking> blocks from the model's text response.
@@ -1868,23 +1893,26 @@ export const clawRuntime = {
       // Config is written before spawn and cleaned up after so it
       // doesn't persist and slow down non-vault threads.
       if (obsidianVault.useMcpVault !== false) {
-        if (isMcpVaultInstalled()) {
+        const mcpvaultBin = resolveMcpVault();
+        if (mcpvaultBin) {
           try {
-            mcpConfigPath = writeMcpVaultConfig(cwd, obsidianVault.path);
-            logger.info({ threadId, vaultPath: obsidianVault.path }, "mcpvault MCP config written");
+            mcpConfigPath = writeMcpVaultConfig(cwd, obsidianVault.path, mcpvaultBin);
+            logger.info({ threadId, vaultPath: obsidianVault.path, mcpvaultBin }, "mcpvault MCP config written");
           } catch (err) {
             logger.warn({ err, threadId }, "Failed to write mcpvault config");
           }
         } else {
-          // Don't crash claw with ENOENT later — surface a clear message
-          // and continue without MCP tools so the run still works.
+          // Bundled copy and PATH lookup both failed — extremely rare since
+          // @bitbonsai/mcpvault is a backend dep. Most likely cause: the
+          // backend was deployed without running `npm install`. Surface
+          // a clear message and continue without MCP tools.
           logger.warn(
             { threadId },
-            "mcpvault not installed on PATH — skipping MCP config. Install with `npm i -g mcpvault` or disable Obsidian → Use MCP vault tools in settings."
+            "mcpvault binary not found at backend/node_modules/.bin/mcpvault or on PATH — did the backend deploy run `npm install`?"
           );
           emitTerminal(
             threadId,
-            "⚠ mcpvault not installed on backend host — skipping vault MCP tools. Install with `npm i -g mcpvault` or turn off Use MCP vault tools in Settings → Obsidian."
+            "⚠ mcpvault binary not found — vault MCP tools disabled for this run. Run `npm install` in the backend dir to fix."
           );
         }
       }
@@ -1927,6 +1955,7 @@ export const clawRuntime = {
       // finalize step can persist it as the turn's model of record.
       if (succeeded && model?.name) {
         active.turnModel = model.name;
+        active.turnProvider = model.provider;
       }
 
       // Read tokens from the session immediately after the spawn so we
@@ -2012,7 +2041,10 @@ export const clawRuntime = {
                 try {
                   setRunPhase(threadId, "responding");
                   await processSuccess(threadId, messageId, retry.stdoutBuf, active, streamingEnabled);
-                  if (model?.name) active.turnModel = model.name;
+                  if (model?.name) {
+                    active.turnModel = model.name;
+                    active.turnProvider = model.provider;
+                  }
                   finalSuccess = true;
                   retryOk = true;
                 } catch (innerErr: any) {
@@ -2092,7 +2124,10 @@ export const clawRuntime = {
           );
           if (retry.stopped) break;
           if (retry.succeeded) {
-            if (model?.name) active.turnModel = model.name;
+            if (model?.name) {
+                    active.turnModel = model.name;
+                    active.turnProvider = model.provider;
+                  }
             try {
               setRunPhase(threadId, "responding");
               await processSuccess(threadId, messageId, retry.stdoutBuf, active, streamingEnabled);

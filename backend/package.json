@@ -13,6 +13,7 @@
     "test:live": "node --test --import tsx --test-reporter=spec src/runtime/openrouter.integration.test.ts"
   },
   "dependencies": {
+    "@bitbonsai/mcpvault": "^0.11.0",
     "better-sqlite3": "^12.9.0",
     "busboy": "^1.6.0",
     "cors": "^2.8.6",
