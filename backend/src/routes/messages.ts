@@ -58,6 +58,7 @@ messagesRouter.post("/threads/:threadId/messages", async (req, res, next) => {
         autoCompactThreshold: z.number().min(0).max(100).optional(),
         streamingEnabled: z.boolean().optional(),
         autoContinueEnabled: z.boolean().optional(),
+        autoGenerateTitle: z.boolean().optional(),
         planMode: z.enum(["act", "plan"]).optional(),
         reasoningEffort: z.enum(["low", "medium", "high"]).optional(),
         attachments: z
@@ -111,7 +112,8 @@ messagesRouter.post("/threads/:threadId/messages", async (req, res, next) => {
         body.attachments ?? [],
         body.obsidianVault,
         body.planMode ?? "act",
-        body.reasoningEffort ?? "medium"
+        body.reasoningEffort ?? "medium",
+        body.autoGenerateTitle ?? false
       )
       .catch((err: unknown) => {
         logger.error({ err }, "clawRuntime.sendMessage failed");

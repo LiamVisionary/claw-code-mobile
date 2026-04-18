@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Keyboard,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -10,6 +9,14 @@ import {
   View,
   useColorScheme,
 } from "react-native";
+import {
+  BottomSheetBackdrop,
+  BottomSheetModal,
+  BottomSheetScrollView,
+  BottomSheetTextInput,
+  BottomSheetView,
+} from "@gorhom/bottom-sheet";
+import type { BottomSheetBackdropProps } from "@gorhom/bottom-sheet";
 import * as Haptics from "expo-haptics";
 import * as Clipboard from "expo-clipboard";
 import { useGatewayStore } from "@/store/gatewayStore";
@@ -55,6 +62,7 @@ export default function TerminalSheet({ threadId, visible, onClose, onSendToClaw
   // Only one can be armed at a time for predictability.
   const [ctrlArmed, setCtrlArmed] = useState(false);
   const [cmdArmed, setCmdArmed] = useState(false);
+  const sheetRef = useRef<BottomSheetModal>(null);
   const scrollRef = useRef<ScrollView>(null);
   const inputRef = useRef<TextInput>(null);
   // Command history (local to this sheet instance — not persisted).
@@ -64,12 +72,18 @@ export default function TerminalSheet({ threadId, visible, onClose, onSendToClaw
   const historyIdxRef = useRef<number>(0);
   const draftRef = useRef<string>("");
 
+  const snapPoints = useMemo(() => ["50%"], []);
+
   useEffect(() => {
-    if (!visible) return;
-    actions.loadTerminal(threadId).catch(() => {});
-    // Delay so the modal has mounted before trying to focus.
-    const t = setTimeout(() => inputRef.current?.focus(), 250);
-    return () => clearTimeout(t);
+    if (visible) {
+      actions.loadTerminal(threadId).catch(() => {});
+      sheetRef.current?.present();
+      // Delay so the sheet has animated in before trying to focus.
+      const t = setTimeout(() => inputRef.current?.focus(), 250);
+      return () => clearTimeout(t);
+    } else {
+      sheetRef.current?.dismiss();
+    }
   }, [visible, threadId, actions]);
 
   useEffect(() => {
@@ -96,8 +110,21 @@ export default function TerminalSheet({ threadId, visible, onClose, onSendToClaw
 
   const dismiss = useCallback(() => {
     Keyboard.dismiss();
-    onClose();
-  }, [onClose]);
+    sheetRef.current?.dismiss();
+  }, []);
+
+  const renderBackdrop = useCallback(
+    (props: BottomSheetBackdropProps) => (
+      <BottomSheetBackdrop
+        {...props}
+        appearsOnIndex={0}
+        disappearsOnIndex={-1}
+        opacity={0.5}
+        pressBehavior="close"
+      />
+    ),
+    []
+  );
 
   // ── Actions ─────────────────────────────────────────────────────
   const send = useCallback(() => {
@@ -262,27 +289,30 @@ export default function TerminalSheet({ threadId, visible, onClose, onSendToClaw
 
   // ── Render ─────────────────────────────────────────────────────
   return (
-    <Modal
-      presentationStyle="pageSheet"
-      animationType="slide"
-      visible={visible}
-      onRequestClose={dismiss}
+    <BottomSheetModal
+      ref={sheetRef}
+      snapPoints={snapPoints}
+      enableDynamicSizing={false}
+      enablePanDownToClose
+      // Only the handle (grabber) closes the sheet via drag. Dragging on
+      // the content itself scrolls the buffer instead of dismissing.
+      enableContentPanningGesture={false}
+      enableHandlePanningGesture
       onDismiss={onClose}
+      backgroundStyle={{ backgroundColor: TERMINAL_BG }}
+      handleIndicatorStyle={{ backgroundColor: "rgba(255,255,255,0.25)" }}
+      backdropComponent={renderBackdrop}
+      keyboardBehavior="interactive"
+      keyboardBlurBehavior="restore"
     >
-      <View
-        style={{
-          flex: 1,
-          backgroundColor: TERMINAL_BG,
-        }}
-      >
+      <BottomSheetView style={{ flex: 1 }}>
         {/* Tiny status strip — cwd only, no buttons */}
         <View
           style={{
             flexDirection: "row",
             alignItems: "center",
             paddingHorizontal: SPACING.lg,
-            paddingTop: SPACING.sm,
-            paddingBottom: 4,
+            paddingBottom: SPACING.sm,
             gap: SPACING.sm,
           }}
         >
@@ -340,74 +370,76 @@ export default function TerminalSheet({ threadId, visible, onClose, onSendToClaw
                 </Text>
               </View>
             </TouchableBounce>
-          </View>
+        </View>
 
-          {/* Output + prompt — tap anywhere to focus */}
-          <Pressable
-            onPress={() => inputRef.current?.focus()}
-            style={{ flex: 1 }}
-          >
-            <ScrollView
-              ref={scrollRef}
-              style={{ flex: 1 }}
-              contentContainerStyle={{
-                paddingHorizontal: SPACING.md,
-                paddingTop: SPACING.xs,
-                paddingBottom: SPACING.md,
-              }}
-              keyboardShouldPersistTaps="handled"
-              onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}
-            >
-              {lines.length === 0 && (
-                <Text
-                  style={{
-                    color: DIM_COLOR,
-                    fontFamily: MONO,
-                    fontSize: TYPOGRAPHY.fontSizes.xs,
-                    lineHeight: 17,
-                  }}
-                >
-                  {`Interactive shell at ${cwdLabel || "~"}.\nType a command and hit return.`}
-                </Text>
-              )}
-              {lines.map((line, i) => (
-                <AnsiLine key={i} line={line} />
-              ))}
-              {/* Live prompt line — continuous with the output */}
-              <PromptLine
-                cwd={cwdLabel}
-                busy={busy}
-                value={command}
-                onChangeText={handleTextChange}
-                onSubmit={send}
-                inputRef={inputRef}
-                isDark={isDark}
-                modifier={ctrlArmed ? "ctrl" : cmdArmed ? "cmd" : null}
-              />
-            </ScrollView>
-          </Pressable>
-
-          {/* Accessory key row — only while the keyboard is visible,
-              otherwise it'd take screen space with no function. */}
-          {keyboardHeight > 0 && (
-            <AccessoryBar
-              onInsert={insertAtEnd}
-              onUp={historyUp}
-              onDown={historyDown}
-              onClear={clearInput}
-              onDismissKeyboard={() => Keyboard.dismiss()}
-              ctrlArmed={ctrlArmed}
-              cmdArmed={cmdArmed}
-              onArmCtrl={armCtrl}
-              onArmCmd={armCmd}
+        <BottomSheetScrollView
+          ref={scrollRef as never}
+          style={{ flex: 1 }}
+          contentContainerStyle={{
+            paddingHorizontal: SPACING.md,
+            paddingTop: SPACING.md,
+            paddingBottom: SPACING.md,
+          }}
+          keyboardShouldPersistTaps="handled"
+          onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}
+        >
+          {/* Tap-to-focus lives INSIDE the scroll view so it catches taps
+              without blocking the pan handoff between the sheet's drag
+              gesture and the scroll view's own scroll. A Pressable outside
+              the scroll view would swallow the gesture before gorhom's
+              scroll coordinator sees it. */}
+          <Pressable onPress={() => inputRef.current?.focus()}>
+            {lines.length === 0 && (
+              <Text
+                style={{
+                  color: DIM_COLOR,
+                  fontFamily: MONO,
+                  fontSize: TYPOGRAPHY.fontSizes.xs,
+                  lineHeight: 17,
+                }}
+              >
+                {`Interactive shell at ${cwdLabel || "~"}.\nType a command and hit return.`}
+              </Text>
+            )}
+            {lines.map((line, i) => (
+              <AnsiLine key={i} line={line} />
+            ))}
+            {/* Live prompt line — continuous with the output */}
+            <PromptLine
+              cwd={cwdLabel}
+              busy={busy}
+              value={command}
+              onChangeText={handleTextChange}
+              onSubmit={send}
+              inputRef={inputRef}
+              isDark={isDark}
+              modifier={ctrlArmed ? "ctrl" : cmdArmed ? "cmd" : null}
             />
-          )}
+          </Pressable>
+        </BottomSheetScrollView>
 
-          {/* Bottom spacer that tracks the keyboard so the prompt doesn't
-              hide under it. */}
-        <View style={{ height: keyboardHeight > 0 ? keyboardHeight : Platform.OS === "ios" ? 28 : 8 }} />
-      </View>
-    </Modal>
+        {/* Accessory key row — only while the keyboard is visible,
+            otherwise it'd take screen space with no function. */}
+        {keyboardHeight > 0 && (
+          <AccessoryBar
+            onInsert={insertAtEnd}
+            onUp={historyUp}
+            onDown={historyDown}
+            onClear={clearInput}
+            onDismissKeyboard={() => Keyboard.dismiss()}
+            ctrlArmed={ctrlArmed}
+            cmdArmed={cmdArmed}
+            onArmCtrl={armCtrl}
+            onArmCmd={armCmd}
+          />
+        )}
+
+        {/* Bottom spacer that tracks the keyboard so the prompt doesn't
+            hide under it. The sheet's own keyboardBehavior also lifts the
+            sheet, so this is mostly belt-and-braces. */}
+        <View style={{ height: keyboardHeight > 0 ? 0 : Platform.OS === "ios" ? 8 : 8 }} />
+      </BottomSheetView>
+    </BottomSheetModal>
   );
 }
 
@@ -449,8 +481,8 @@ function PromptLine({
           </Text>
         )}
       </Text>
-      <TextInput
-        ref={inputRef}
+      <BottomSheetTextInput
+        ref={inputRef as never}
         value={value}
         onChangeText={onChangeText}
         onSubmitEditing={onSubmit}
@@ -461,7 +493,7 @@ function PromptLine({
         spellCheck={false}
         keyboardAppearance={isDark ? "dark" : "light"}
         returnKeyType="send"
-        blurOnSubmit={false}
+        submitBehavior="submit"
         selectionColor={CWD_COLOR}
         style={{
           flex: 1,

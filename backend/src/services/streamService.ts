@@ -39,6 +39,7 @@ const REPLAYABLE_TYPES = new Set<StreamEvent["type"]>([
   "done",
   "error",
   "message_error",
+  "title_updated",
 ] as StreamEvent["type"][]);
 
 function addToReplayBuffer(threadId: string, event: StreamEvent) {
@@ -88,8 +89,26 @@ function truncateEventForLog(ev: StreamEvent): Record<string, unknown> {
 // gets its own frame, no waiting for batch-fill. SSE comments (lines
 // starting with `:`) are ignored by a spec-compliant parser.
 const SSE_PAD = ": " + " ".repeat(16384) + "\n";
+
+/**
+ * JSON.stringify but with every non-ASCII code unit emitted as a `\uXXXX`
+ * escape. Keeps the wire payload pure ASCII, which sidesteps a
+ * React-Native / iOS XHR bug where UTF-8 multi-byte sequences (e.g. emoji)
+ * split across TCP chunks are decoded to U+FFFD replacement characters
+ * that persist in the client's message store and render as "?".
+ *
+ * Surrogate pairs (supplementary-plane codepoints like 🔒 U+1F512) are
+ * represented as two escaped UTF-16 code units (\uD83D\uDD12); any JSON
+ * parser reassembles them correctly.
+ */
+function jsonStringifyAscii(data: unknown): string {
+  return JSON.stringify(data).replace(/[\u0080-\uffff]/g, (c) =>
+    "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0")
+  );
+}
+
 const format = (event: string, data: unknown) =>
-  `event: ${event}\ndata: ${JSON.stringify(data)}\n${SSE_PAD}\n`;
+  `event: ${event}\ndata: ${jsonStringifyAscii(data)}\n${SSE_PAD}\n`;
 
 export const streamService = {
   subscribe(threadId: string, res: Response) {

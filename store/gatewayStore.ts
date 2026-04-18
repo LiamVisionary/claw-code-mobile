@@ -183,9 +183,33 @@ function openNativeSSE(
       }
 
       const responseText = xhr.responseText ?? "";
-      if (responseText.length <= offset) return;
-      const newText = responseText.slice(offset);
-      offset = responseText.length;
+      // XHR responseText is re-decoded from the accumulated UTF-8 bytes on
+      // every progress event. If a multi-byte sequence (e.g. 🔒 = F0 9F 94
+      // 92) lands split across TCP chunks, the first decode emits U+FFFD
+      // for the incomplete tail; the NEXT decode replaces the FFFD with the
+      // real code point. We must not advance `offset` past those transient
+      // tail characters or we'll consume only the second surrogate half and
+      // the message is permanently corrupted with "?" glyphs.
+      //
+      // Heuristic: withhold any trailing lone high surrogate or U+FFFD
+      // until a later chunk resolves them, unless the connection is done
+      // (readyState 4) in which case there's no further data coming.
+      let safeEnd = responseText.length;
+      if (xhr.readyState !== 4) {
+        while (safeEnd > 0) {
+          const ch = responseText.charCodeAt(safeEnd - 1);
+          // Unpaired high surrogate (0xD800–0xDBFF) → waiting for low half.
+          // U+FFFD at the very end → likely from an incomplete UTF-8 seq.
+          if ((ch >= 0xd800 && ch <= 0xdbff) || ch === 0xfffd) {
+            safeEnd -= 1;
+          } else {
+            break;
+          }
+        }
+      }
+      if (safeEnd <= offset) return;
+      const newText = responseText.slice(offset, safeEnd);
+      offset = safeEnd;
 
       const raw = partialLine + newText;
       const endsWithNewline = raw.endsWith("\n");
@@ -481,6 +505,19 @@ type Settings = {
    */
   autoContinueEnabled: boolean;
   /**
+   * When true, the "thinking…" indicator's playful phrase cycle is replaced
+   * with a meditative breath cycle ("Breathe in…" / "Breathe out…" paired
+   * with calming reflections). Purely cosmetic.
+   */
+  zenMode: boolean;
+  /**
+   * When true, the backend fires one extra LLM call after the first
+   * assistant turn finishes on a fresh thread, asking the model for a
+   * short title based on the opening exchange. Off by default — it's a
+   * paid API call the user opts into.
+   */
+  autoGenerateThreadTitles: boolean;
+  /**
    * Planning vs. acting mode — maps to claw's `/plan on|off` slash command.
    * In `plan` mode the model drafts a plan before touching tools; `act`
    * lets it execute directly. Persisted globally so the user's preference
@@ -696,6 +733,8 @@ export const useGatewayStore = create<GatewayState>()(
         autoCompactThreshold: 70,
         telemetryEnabled: true,
         autoContinueEnabled: true,
+        zenMode: false,
+        autoGenerateThreadTitles: false,
         planMode: "act",
         reasoningEffort: "medium",
         obsidianVault: {
@@ -752,6 +791,12 @@ export const useGatewayStore = create<GatewayState>()(
                 input.autoContinueEnabled ??
                 state.settings.autoContinueEnabled ??
                 true,
+              zenMode:
+                input.zenMode ?? state.settings.zenMode ?? false,
+              autoGenerateThreadTitles:
+                input.autoGenerateThreadTitles ??
+                state.settings.autoGenerateThreadTitles ??
+                false,
               planMode:
                 input.planMode ?? state.settings.planMode ?? "act",
               reasoningEffort:
@@ -915,6 +960,7 @@ export const useGatewayStore = create<GatewayState>()(
                 autoCompactThreshold: state.settings.autoCompactThreshold ?? 70,
                 autoContinueEnabled: state.settings.autoContinueEnabled ?? true,
                 streamingEnabled: state.settings.streamingEnabled ?? true,
+                autoGenerateTitle: state.settings.autoGenerateThreadTitles ?? false,
                 planMode: state.settings.planMode ?? "act",
                 reasoningEffort: state.settings.reasoningEffort ?? "medium",
                 modelQueue: (() => {
@@ -1109,6 +1155,15 @@ export const useGatewayStore = create<GatewayState>()(
                     }),
                   };
                 });
+                break;
+              case "title_updated":
+                if (typeof payload.title === "string" && payload.title.trim()) {
+                  set((current) => ({
+                    threads: current.threads.map((t) =>
+                      t.id === threadId ? { ...t, title: payload.title } : t
+                    ),
+                  }));
+                }
                 break;
               case "message_error":
                 set((current) => {
@@ -1663,6 +1718,8 @@ export const useGatewayStore = create<GatewayState>()(
           if (s.autoCompactThreshold === undefined) patch.autoCompactThreshold = 70;
           if (s.accentTheme === undefined) patch.accentTheme = "lavender";
           if (s.autoContinueEnabled === undefined) patch.autoContinueEnabled = true;
+          if (s.zenMode === undefined) patch.zenMode = false;
+          if (s.autoGenerateThreadTitles === undefined) patch.autoGenerateThreadTitles = false;
           if (s.planMode === undefined) patch.planMode = "act";
           if (s.reasoningEffort === undefined) patch.reasoningEffort = "medium";
           // Migrate model-queue entries from before per-backend scoping

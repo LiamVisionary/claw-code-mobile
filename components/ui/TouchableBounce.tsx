@@ -58,6 +58,7 @@ export default function TouchableBounce({
   return (
     <RNTouchableBounce
       {...props}
+      style={style}
       onPressIn={(ev: any) => {
         onSensory();
         onPressIn?.(ev);

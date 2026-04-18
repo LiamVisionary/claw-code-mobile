@@ -36,14 +36,15 @@ const CLAUDE_CLI =
 // back via --resume on subsequent turns so the model sees history.
 const claudeCliSessions = new Map<string, string>();
 
-// Per-thread record of the last plan/effort mode actually pushed into the
-// claw session. Lets us skip redundant mode-apply spawns when the user
-// hasn't changed anything since the previous turn. Resets on process
-// restart (that's fine — we'll just re-apply once on the next turn).
-const lastAppliedMode = new Map<
-  string,
-  { plan?: "on" | "off"; effort?: "low" | "medium" | "high" }
->();
+/**
+ * Preamble prepended to the first user turn when the user has Plan mode
+ * on in the composer. Claw's `/plan` slash command is currently a stub
+ * in the bundled binary, so instead we nudge the model via prompt. Kept
+ * short so it doesn't dominate short prompts — the intent is clear
+ * enough for any capable model to comply.
+ */
+const PLAN_MODE_PREAMBLE =
+  "(Plan mode — before calling any tools or editing any files, output a concise numbered plan of your approach and wait for my reply before executing it.)\n\n";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const WORKSPACES_DIR = path.resolve(__dirname, "../../data/workspaces");
@@ -119,6 +120,9 @@ type ActiveRun = {
   turnCostUsd?: number;
   turnModel?: string;
   turnProvider?: ModelConfig["provider"];
+  /** Composer-mode selections snapshotted at run start for telemetry. */
+  turnPlanMode?: "act" | "plan";
+  turnReasoningEffort?: "low" | "medium" | "high";
 };
 
 type SpawnResult = {
@@ -350,7 +354,8 @@ function buildArgs(
   model?: ModelConfig,
   attachments: Attachment[] = [],
   threadId?: string,
-  mcpConfigPath?: string
+  mcpConfigPath?: string,
+  reasoningEffort?: "low" | "medium" | "high"
 ): string[] {
   const useClaudeCli = isOAuthModel(model) && fs.existsSync(CLAUDE_CLI);
   const args: string[] = ["--output-format", "json"];
@@ -369,6 +374,14 @@ function buildArgs(
     }
   } else {
     args.push("--permission-mode", "danger-full-access");
+    // Forward the user's reasoning-effort selection to claw's
+    // undocumented `--reasoning-effort` flag. Claw serializes it as
+    // OpenAI-compatible `reasoning_effort` in the request payload —
+    // reasoning-capable models (OpenAI o-series, QwQ, DeepSeek-R1,
+    // etc.) act on it; others silently ignore it.
+    if (reasoningEffort) {
+      args.push("--reasoning-effort", reasoningEffort);
+    }
   }
 
   // `--image` flags are positional-agnostic but conventionally placed
@@ -433,74 +446,6 @@ function buildCompactArgs(model?: ModelConfig): string[] {
   return args;
 }
 
-/**
- * Push the user's current Plan/Act and reasoning-effort selections into
- * the thread's claw session by chaining `/plan` and `/effort` onto a
- * `--resume latest` spawn. Slash-command mutations persist in the
- * session's jsonl, so subsequent `prompt …` turns inherit them.
- *
- * No-ops when the requested mode already matches what we last applied
- * for this thread. On the very first turn of a brand-new thread there
- * is no "latest" session to resume — the spawn exits non-zero and we
- * swallow the error; turn 1 runs under default mode, and turn 2+ picks
- * up the user's choice. Only runs for the native claw binary — the
- * Claude CLI does not share these slash commands.
- */
-async function applyModeSettings(
-  threadId: string,
-  planMode: "act" | "plan",
-  reasoningEffort: "low" | "medium" | "high",
-  cwd: string,
-  sessionDir: string,
-  model?: ModelConfig
-): Promise<void> {
-  const binary = getBinary(model);
-  if (binary !== CLAW_BINARY) return;
-
-  const targetPlan: "on" | "off" = planMode === "plan" ? "on" : "off";
-  const targetEffort = reasoningEffort;
-  const last = lastAppliedMode.get(threadId);
-  if (last?.plan === targetPlan && last?.effort === targetEffort) return;
-
-  const args: string[] = [];
-  if (model?.name) args.push("--model", model.name);
-  args.push(
-    "--output-format",
-    "json",
-    "--resume",
-    "latest",
-    "/plan",
-    targetPlan,
-    "/effort",
-    targetEffort
-  );
-
-  const env = buildEnv(model, sessionDir);
-
-  await new Promise<void>((resolve) => {
-    try {
-      const child = spawn(binary, args, {
-        cwd,
-        env,
-        stdio: ["ignore", "ignore", "ignore"],
-      });
-      const done = (ok: boolean) => {
-        if (ok) {
-          lastAppliedMode.set(threadId, { plan: targetPlan, effort: targetEffort });
-        }
-        resolve();
-      };
-      child.once("exit", (code: number | null) => done(code === 0));
-      child.once("error", (err: Error) => {
-        logger.warn({ err, threadId }, "applyModeSettings spawn error");
-        done(false);
-      });
-    } catch (err) {
-      logger.warn({ err, threadId }, "applyModeSettings threw");
-      resolve();
-    }
-  });
-}
 
 /**
  * Deliver the completed response text to the client.
@@ -565,13 +510,14 @@ function spawnOnce(
   isCompact = false,
   messageId?: string,
   attachments: Attachment[] = [],
-  mcpConfigPath?: string
+  mcpConfigPath?: string,
+  reasoningEffort?: "low" | "medium" | "high"
 ): Promise<SpawnResult> {
   return new Promise((resolve) => {
     // For the Claude CLI, check if there's an existing session to resume
       const args = isCompact
       ? buildCompactArgs(model)
-      : buildArgs(content, model, attachments, threadId, mcpConfigPath);
+      : buildArgs(content, model, attachments, threadId, mcpConfigPath, reasoningEffort);
     const env = buildEnv(model, sessionDir);
     const binary = getBinary(model);
     const isClaudeCli = binary === CLAUDE_CLI;
@@ -617,8 +563,17 @@ function spawnOnce(
     // Map from tool name to the most recent stepId that was started but not yet ended.
     const openSteps = new Map<string, string>();
 
-    child.stdout.on("data", (chunk: Buffer) => {
-      stdoutBuf += chunk.toString();
+    // Stream-aware UTF-8 decoding. Without setEncoding, 'data' events
+    // deliver raw Buffers and `Buffer.toString()` decodes each chunk in
+    // isolation — when a multi-byte sequence (e.g. emoji 🔒 = F0 9F 94 92)
+    // splits across chunks, each half decodes to U+FFFD ("?"). setEncoding
+    // hooks Node's StringDecoder which holds back incomplete tails across
+    // chunks and stitches them correctly.
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+
+    child.stdout.on("data", (chunk: string) => {
+      stdoutBuf += chunk;
     });
 
     // Line-aware buffering for stderr — see utils/lineBuffer.ts for why.
@@ -645,10 +600,9 @@ function spawnOnce(
       }
     });
 
-    child.stderr.on("data", (chunk: Buffer) => {
-      const text = chunk.toString();
-      stderrBuf += text;
-      stderrLines.push(text);
+    child.stderr.on("data", (chunk: string) => {
+      stderrBuf += chunk;
+      stderrLines.push(chunk);
     });
 
     child.on("close", (code) => {
@@ -1789,6 +1743,100 @@ function isEmptyResponse(text: string): boolean {
   );
 }
 
+function cleanGeneratedTitle(raw: string): string {
+  return raw
+    .split(/\r?\n/)[0]
+    .trim()
+    .replace(/^["'`\s]+|["'`\s.!,?:;]+$/g, "")
+    .slice(0, 60)
+    .trim();
+}
+
+async function callAnthropicForTitle(
+  model: ModelConfig,
+  prompt: string
+): Promise<string> {
+  const isOauth = model.authMethod === "oauth" && model.oauthToken?.accessToken;
+  const authHeader: Record<string, string> = isOauth
+    ? { Authorization: `Bearer ${model.oauthToken!.accessToken}` }
+    : { "x-api-key": model.apiKey ?? "" };
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "anthropic-version": "2023-06-01",
+      ...authHeader,
+    },
+    body: JSON.stringify({
+      model: "claude-haiku-4-5",
+      max_tokens: 32,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  if (!res.ok) throw new Error(`anthropic ${res.status}`);
+  const data = (await res.json()) as { content?: Array<{ text?: string }> };
+  return data.content?.[0]?.text ?? "";
+}
+
+async function callOpenAICompatForTitle(
+  model: ModelConfig,
+  prompt: string
+): Promise<string> {
+  const baseUrl =
+    model.endpoint ??
+    (model.provider === "openrouter" ? "https://openrouter.ai/api/v1" : null);
+  if (!baseUrl) throw new Error("no endpoint for provider");
+  if (!model.name) throw new Error("no model name");
+  const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${model.apiKey ?? ""}`,
+    },
+    body: JSON.stringify({
+      model: model.name,
+      max_tokens: 32,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  if (!res.ok) throw new Error(`openai-compat ${res.status}`);
+  const data = (await res.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+  return data.choices?.[0]?.message?.content ?? "";
+}
+
+async function generateThreadTitle(
+  threadId: string,
+  userMsg: string,
+  assistantMsg: string,
+  models: ModelConfig[]
+): Promise<void> {
+  const model = models.find(
+    (m) => m.apiKey || m.oauthToken?.accessToken
+  );
+  if (!model) return;
+
+  const prompt =
+    `Generate a concise 2-5 word title for a conversation that opens like this:\n\n` +
+    `User: ${userMsg.slice(0, 600)}\n` +
+    `Assistant: ${assistantMsg.slice(0, 600)}\n\n` +
+    `Respond with ONLY the title. No quotes, no trailing punctuation.`;
+
+  try {
+    const raw =
+      model.provider === "claude"
+        ? await callAnthropicForTitle(model, prompt)
+        : await callOpenAICompatForTitle(model, prompt);
+    const title = cleanGeneratedTitle(raw);
+    if (!title) return;
+    threadService.update(threadId, { title });
+    streamService.publish(threadId, { type: "title_updated", title });
+  } catch (err) {
+    logger.warn({ err, threadId }, "auto-title generation failed");
+  }
+}
+
 export const clawRuntime = {
   async sendMessage(
     threadId: string,
@@ -1802,7 +1850,8 @@ export const clawRuntime = {
     attachments: Attachment[] = [],
     obsidianVault?: VaultConfig,
     planMode: "act" | "plan" = "act",
-    reasoningEffort: "low" | "medium" | "high" = "medium"
+    reasoningEffort: "low" | "medium" | "high" = "medium",
+    autoGenerateTitle = false
   ): Promise<string> {
     const thread = threadService.get(threadId);
     if (!thread) return "";
@@ -1868,6 +1917,8 @@ export const clawRuntime = {
       startedAt: Date.now(),
       turnLog: [],
       turnToolSteps: [],
+      turnPlanMode: planMode,
+      turnReasoningEffort: reasoningEffort,
     };
     activeRuns.set(threadId, active);
     setRunPhase(threadId, "thinking");
@@ -1986,6 +2037,15 @@ export const clawRuntime = {
     // user-visible message. Preamble build is best-effort; on failure we
     // log and proceed with the raw prompt.
     let effectivePrompt = decoratedPrompt;
+    // Plan-mode preamble — claw's `/plan` slash command is currently a
+    // stub in the bundled binary, so the user's Plan toggle is surfaced
+    // via a short prompt-level directive instead. Baked into
+    // `effectivePrompt`, which the primary spawn and both retry paths
+    // use — compact and auto-continue spawns have their own prompts
+    // and intentionally skip it.
+    if (planMode === "plan") {
+      effectivePrompt = PLAN_MODE_PREAMBLE + effectivePrompt;
+    }
     let mcpConfigPath: string | undefined;
     if (obsidianVault && obsidianVault.enabled && obsidianVault.path) {
       try {
@@ -2023,22 +2083,6 @@ export const clawRuntime = {
       }
     }
 
-    // Push the user's Plan/Act + reasoning-effort selection into the
-    // thread's claw session (via `--resume latest /plan … /effort …`)
-    // so this turn inherits it. No-op when the mode is unchanged since
-    // the last turn; silently skips on the very first turn (no session
-    // yet) — that turn runs in default mode and turn 2+ picks up.
-    if (!active.stopped) {
-      await applyModeSettings(
-        threadId,
-        planMode,
-        reasoningEffort,
-        cwd,
-        sessionDir,
-        queue[0]
-      );
-    }
-
     for (let i = 0; i < queue.length; i++) {
       if (active.stopped) break;
 
@@ -2069,7 +2113,7 @@ export const clawRuntime = {
       });
 
       const { succeeded, stdoutBuf, stderrBuf, stopped } = await spawnOnce(
-        threadId, effectivePrompt, cwd, sessionDir, model, active, false, messageId, attachments, mcpConfigPath
+        threadId, effectivePrompt, cwd, sessionDir, model, active, false, messageId, attachments, mcpConfigPath, reasoningEffort
       );
 
       // Capture whichever model was actually used on this attempt so the
@@ -2155,7 +2199,7 @@ export const clawRuntime = {
               if (active.stopped) break;
               setRunPhase(threadId, "thinking");
               const retry = await spawnOnce(
-                threadId, decoratedPrompt, cwd, sessionDir, model, active, false, messageId, attachments
+                threadId, effectivePrompt, cwd, sessionDir, model, active, false, messageId, attachments, undefined, reasoningEffort
               );
               if (retry.stopped) break;
               if (retry.succeeded) {
@@ -2241,7 +2285,7 @@ export const clawRuntime = {
           if (active.stopped) break;
           setRunPhase(threadId, "thinking");
           const retry = await spawnOnce(
-            threadId, decoratedPrompt, cwd, sessionDir, model, active, false, messageId, attachments
+            threadId, effectivePrompt, cwd, sessionDir, model, active, false, messageId, attachments, undefined, reasoningEffort
           );
           if (retry.stopped) break;
           if (retry.succeeded) {
@@ -2403,7 +2447,10 @@ export const clawRuntime = {
             primary,
             active,
             false,
-            active.currentMessageId
+            active.currentMessageId,
+            [],
+            undefined,
+            reasoningEffort
           );
           if (!contStopped && contOk) {
             try {
@@ -2457,6 +2504,8 @@ export const clawRuntime = {
         tokensOut: active.turnTokensOut,
         costUsd: active.turnCostUsd,
         turnDurationMs: durationMs,
+        planMode: active.turnPlanMode,
+        reasoningEffort: active.turnReasoningEffort,
         metadata: {
           thinking: active.streamedThinking || undefined,
           turnLog: active.turnLog.length > 0 ? active.turnLog : undefined,
@@ -2477,6 +2526,24 @@ export const clawRuntime = {
       threadService.setStatus(threadId, "error");
       runService.markStatus(run.id, "error");
       streamService.publish(threadId, { type: "status", status: "error" });
+    }
+
+    // Auto-title the thread after the user's first successful exchange.
+    // Gated on an opt-in setting because it costs one extra short API call
+    // per new thread. `messageCount === 2` means 1 user + 1 assistant, i.e.
+    // the opening turn just finished — user can't have renamed yet.
+    if (
+      finalSuccess &&
+      autoGenerateTitle &&
+      telemetryTarget &&
+      messageService.get(telemetryTarget) &&
+      threadService.messageCount(threadId) === 2
+    ) {
+      const userMsg = content;
+      const assistantMsg = messageService.get(telemetryTarget)?.content ?? "";
+      if (assistantMsg.trim()) {
+        void generateThreadTitle(threadId, userMsg, assistantMsg, models);
+      }
     }
 
     // Clean up MCP config files so they don't slow down non-vault threads

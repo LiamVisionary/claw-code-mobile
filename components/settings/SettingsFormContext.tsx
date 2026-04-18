@@ -68,6 +68,10 @@ type SettingsFormValue = {
   setAutoContinueEnabled: (v: boolean) => void;
   telemetryEnabled: boolean;
   setTelemetryEnabled: (v: boolean) => void;
+  zenMode: boolean;
+  setZenMode: (v: boolean) => void;
+  autoGenerateThreadTitles: boolean;
+  setAutoGenerateThreadTitles: (v: boolean) => void;
 
   // Obsidian
   obsidianEnabled: boolean;
@@ -179,6 +183,10 @@ export function SettingsFormProvider({ children }: { children: ReactNode }) {
   const [autoContinueEnabled, setAutoContinueEnabled] = useState(
     settings.autoContinueEnabled ?? true
   );
+  const [zenMode, setZenMode] = useState(settings.zenMode ?? false);
+  const [autoGenerateThreadTitles, setAutoGenerateThreadTitles] = useState(
+    settings.autoGenerateThreadTitles ?? false
+  );
 
   const [obsidianEnabled, setObsidianEnabled] = useState(
     settings.obsidianVault?.enabled ?? false
@@ -233,6 +241,8 @@ export function SettingsFormProvider({ children }: { children: ReactNode }) {
     autoCompactThreshold: settings.autoCompactThreshold ?? 70,
     telemetryEnabled: settings.telemetryEnabled ?? true,
     autoContinueEnabled: settings.autoContinueEnabled ?? true,
+    zenMode: settings.zenMode ?? false,
+    autoGenerateThreadTitles: settings.autoGenerateThreadTitles ?? false,
     obsidianEnabled: settings.obsidianVault?.enabled ?? false,
     obsidianProvider: (settings.obsidianVault?.provider ?? "sync") as ObsidianProvider,
     obsidianPath: settings.obsidianVault?.path ?? "",
@@ -253,6 +263,8 @@ export function SettingsFormProvider({ children }: { children: ReactNode }) {
     setAutoCompactThreshold(settings.autoCompactThreshold ?? 70);
     setTelemetryEnabled(settings.telemetryEnabled ?? true);
     setAutoContinueEnabled(settings.autoContinueEnabled ?? true);
+    setZenMode(settings.zenMode ?? false);
+    setAutoGenerateThreadTitles(settings.autoGenerateThreadTitles ?? false);
     setObsidianEnabled(settings.obsidianVault?.enabled ?? false);
     setObsidianProvider(settings.obsidianVault?.provider ?? "sync");
     setObsidianPath(settings.obsidianVault?.path ?? "");
@@ -273,6 +285,8 @@ export function SettingsFormProvider({ children }: { children: ReactNode }) {
       autoCompactThreshold: settings.autoCompactThreshold ?? 70,
       telemetryEnabled: settings.telemetryEnabled ?? true,
       autoContinueEnabled: settings.autoContinueEnabled ?? true,
+      zenMode: settings.zenMode ?? false,
+      autoGenerateThreadTitles: settings.autoGenerateThreadTitles ?? false,
       obsidianEnabled: settings.obsidianVault?.enabled ?? false,
       obsidianProvider: (settings.obsidianVault?.provider ?? "sync") as ObsidianProvider,
       obsidianPath: settings.obsidianVault?.path ?? "",
@@ -289,14 +303,16 @@ export function SettingsFormProvider({ children }: { children: ReactNode }) {
   // a re-render cycle. The ref is flushed on unmount (modal close).
   const pendingRef = useRef({
     serverUrl, bearerToken, queue, autoCompact, streamingEnabled,
-    autoCompactThreshold, telemetryEnabled, autoContinueEnabled,
+    autoCompactThreshold, telemetryEnabled, autoContinueEnabled, zenMode,
+    autoGenerateThreadTitles,
     obsidianEnabled, obsidianProvider, obsidianPath, obsidianLocalUri,
     obsidianLocalDisplay, obsidianUseForMemory, obsidianUseForReference,
     obsidianUseMcpVault,
   });
   pendingRef.current = {
     serverUrl, bearerToken, queue, autoCompact, streamingEnabled,
-    autoCompactThreshold, telemetryEnabled, autoContinueEnabled,
+    autoCompactThreshold, telemetryEnabled, autoContinueEnabled, zenMode,
+    autoGenerateThreadTitles,
     obsidianEnabled, obsidianProvider, obsidianPath, obsidianLocalUri,
     obsidianLocalDisplay, obsidianUseForMemory, obsidianUseForReference,
     obsidianUseMcpVault,
@@ -314,6 +330,8 @@ export function SettingsFormProvider({ children }: { children: ReactNode }) {
         autoCompactThreshold: s.autoCompactThreshold,
         telemetryEnabled: s.telemetryEnabled,
         autoContinueEnabled: s.autoContinueEnabled,
+        zenMode: s.zenMode,
+        autoGenerateThreadTitles: s.autoGenerateThreadTitles,
         obsidianVault: {
           enabled: s.obsidianEnabled,
           provider: s.obsidianProvider,
@@ -767,6 +785,8 @@ export function SettingsFormProvider({ children }: { children: ReactNode }) {
     autoCompactThreshold !== initialRef.current.autoCompactThreshold ||
     telemetryEnabled !== initialRef.current.telemetryEnabled ||
     autoContinueEnabled !== initialRef.current.autoContinueEnabled ||
+    zenMode !== initialRef.current.zenMode ||
+    autoGenerateThreadTitles !== initialRef.current.autoGenerateThreadTitles ||
     obsidianEnabled !== initialRef.current.obsidianEnabled ||
     JSON.stringify(queue.map((q) => q.id)) !==
       JSON.stringify(initialRef.current.queue.map((q) => q.id));
@@ -792,6 +812,8 @@ export function SettingsFormProvider({ children }: { children: ReactNode }) {
     setAutoCompactThreshold(s.autoCompactThreshold);
     setTelemetryEnabled(s.telemetryEnabled);
     setAutoContinueEnabled(s.autoContinueEnabled);
+    setZenMode(s.zenMode);
+    setAutoGenerateThreadTitles(s.autoGenerateThreadTitles);
     setObsidianEnabled(s.obsidianEnabled);
     setObsidianProvider(s.obsidianProvider);
     setObsidianPath(s.obsidianPath);
@@ -845,6 +867,10 @@ export function SettingsFormProvider({ children }: { children: ReactNode }) {
     setAutoContinueEnabled,
     telemetryEnabled,
     setTelemetryEnabled,
+    zenMode,
+    setZenMode,
+    autoGenerateThreadTitles,
+    setAutoGenerateThreadTitles,
 
     obsidianEnabled,
     setObsidianEnabled,

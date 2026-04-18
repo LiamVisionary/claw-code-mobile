@@ -46,6 +46,15 @@ export interface Message {
   tokensOut?: number;
   costUsd?: number;
   turnDurationMs?: number;
+  /**
+   * Composer-mode selections the turn ran under. NULL for pre-migration
+   * rows and for non-assistant messages. Populated from the user's
+   * Plan/Act and reasoning-effort pill choices at the time they sent
+   * the message — so analytics can answer "how much am I using Plan
+   * mode?" / "what does High effort cost me?" after the fact.
+   */
+  planMode?: "act" | "plan";
+  reasoningEffort?: "low" | "medium" | "high";
   /** Display-only blob. */
   metadata?: MessageMetadata;
 }
@@ -92,4 +101,5 @@ export type StreamEvent =
       };
     }
   | { type: "permission_request"; id: string; tool: string; description: string; message?: string }
-  | { type: "thinking_content"; messageId: string; content: string };
+  | { type: "thinking_content"; messageId: string; content: string }
+  | { type: "title_updated"; title: string };

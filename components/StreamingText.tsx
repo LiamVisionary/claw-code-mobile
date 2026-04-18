@@ -120,10 +120,14 @@ function StreamingTextBase({ content, mdStyles, streaming, palette }: Props) {
         // Compute delay offset: how many new chars came before this node
         const newCharsBeforeThisNode = Math.max(0, startIdx - prevLen);
 
+        // Iterate by code points (not UTF-16 code units) so surrogate-pair
+        // emojis like 🔒 / 💰 stay intact. `String.prototype.split("")`
+        // splits into high/low surrogates which each render as "?".
+        const newGlyphs = Array.from(newPart);
         return (
           <Text key={node.key} style={[inheritedStyles, styles.text]}>
             {oldPart}
-            {newPart.split("").map((char, i) => {
+            {newGlyphs.map((char, i) => {
               if (char === " " || char === "\n") {
                 return <Text key={i}>{char}</Text>;
               }

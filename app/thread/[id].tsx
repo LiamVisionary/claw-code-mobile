@@ -55,6 +55,11 @@ const EMPTY_MESSAGES: Message[] = [];
 
 const TOP_BAR_HEIGHT = 52;
 
+// Inter-message spacer. Used via FlatList's ItemSeparatorComponent instead
+// of contentContainerStyle `gap`, which FlatList doesn't always include in
+// contentSize — causing scrollToEnd to land short of the real bottom.
+const ITEM_SEPARATOR = () => <View style={{ height: 18 }} />;
+
 type QueuedItem = {
   id: string;
   text: string;
@@ -627,9 +632,10 @@ export default function ThreadScreen() {
         isCompacting={isCompacting}
         runPhase={runPhase}
         thinkingContent={liveThinking}
+        zenMode={settings.zenMode ?? false}
       />
     ) : null;
-  }, [threadStatus, messages, liveCycleSteps, permissionReqs, actions, id, isDark, isCompacting, runPhase, liveThinking]);
+  }, [threadStatus, messages, liveCycleSteps, permissionReqs, actions, id, isDark, isCompacting, runPhase, liveThinking, settings.zenMode]);
 
   // Pass the element directly — wrapping in `() => listFooterElem` would give
   // FlatList a new component *type* on every messages tick, causing React to
@@ -769,8 +775,11 @@ export default function ThreadScreen() {
             paddingBottom: keyboardUp
               ? keyboardHeight + 80
               : 100 + bottom,
-            gap: 18,
           }}
+          // ItemSeparatorComponent rather than `gap` — FlatList measures
+          // separators natively, whereas container-level `gap` isn't always
+          // reflected in contentSize, making scrollToEnd stop short.
+          ItemSeparatorComponent={ITEM_SEPARATOR}
           onScroll={handleScroll}
           scrollEventThrottle={16}
           onContentSizeChange={() => {
@@ -945,6 +954,11 @@ export default function ThreadScreen() {
               overflow: "hidden",
               paddingVertical: 6,
               minWidth: 220,
+              // GlassView's native view doesn't report an intrinsic content size,
+              // so Yoga can measure it short and clip the last row. Pin the height:
+              // paddingVertical (6+6) + 3 dividers + per-row heights. A hint row
+              // (label 14pt + 11pt) is ~62pt; a plain row is ~44pt.
+              height: supportsImage ? 15 + 44 * 4 : 15 + 62 * 2 + 44 * 2,
               zIndex: 40,
             }}
           >
@@ -1982,7 +1996,11 @@ function MessageBubble({
       )}
 
       {/* ── Message bubble ─────────────────────────────────────── */}
-      <TouchableBounce sensory onPress={onCopy}>
+      <TouchableBounce
+        sensory
+        onPress={onCopy}
+        style={isUser ? undefined : { alignSelf: "stretch" }}
+      >
         {message.error ? (
           /* ── Error bubble — muted, low-contrast, no shadow ── */
           <View
@@ -2646,7 +2664,10 @@ function AttachmentMenuItem({
       <View style={{ flex: 1 }}>
         <Text style={{ color: palette.text, fontSize: 14 }}>{label}</Text>
         {hint && (
-          <Text style={{ color: palette.textSoft, fontSize: 11, marginTop: 2 }}>
+          <Text
+            numberOfLines={1}
+            style={{ color: palette.textSoft, fontSize: 11, marginTop: 2 }}
+          >
             {hint}
           </Text>
         )}
@@ -3257,6 +3278,76 @@ function CyclingLabel({ color }: { color: string }) {
   );
 }
 
+const ZEN_INHALE_REFLECTIONS = [
+  "meditation brings clarity",
+  "breathwork sharpens the mind",
+  "deep breathing brings inner peace",
+  "inhale — stillness arrives",
+];
+const ZEN_EXHALE_REFLECTIONS = [
+  "release what no longer serves",
+  "soften — let the code flow",
+  "exhale the complexity",
+  "tranquility settles in",
+];
+
+/** Pick a random index != `exclude`. Falls back to 0 if the pool is tiny. */
+function randomOther(poolSize: number, exclude: number): number {
+  if (poolSize <= 1) return 0;
+  let next = Math.floor(Math.random() * (poolSize - 1));
+  if (next >= exclude) next += 1;
+  return next;
+}
+
+/**
+ * Zen-mode breath cycle. Each breath phase is a 3s window:
+ *   [0s–1s]  "Breathe in…" / "Breathe out…"  (anchor cue)
+ *   [1s–3s]  a random reflection from the phase's pool
+ *
+ * Inhale and exhale alternate. On mount (new thinking turn) the cycle
+ * always starts fresh at "Breathe in…".
+ */
+function ZenBreathLabel({ color }: { color: string }) {
+  // Step 0 = "Breathe in…", 1 = inhale reflection,
+  // Step 2 = "Breathe out…", 3 = exhale reflection.
+  const [step, setStep] = useState(0);
+  const [inhaleIdx, setInhaleIdx] = useState(() =>
+    Math.floor(Math.random() * ZEN_INHALE_REFLECTIONS.length)
+  );
+  const [exhaleIdx, setExhaleIdx] = useState(() =>
+    Math.floor(Math.random() * ZEN_EXHALE_REFLECTIONS.length)
+  );
+
+  useEffect(() => {
+    // 1s → reflection, then 2s → next breath cue. Total 3s per breath.
+    const delay = step === 0 || step === 2 ? 1000 : 2000;
+    const timer = setTimeout(() => {
+      setStep((s) => {
+        const next = (s + 1) % 4;
+        // Just before we re-enter an anchor, roll a fresh reflection for
+        // the *next* phase so the repeat doesn't feel templated.
+        if (next === 0) setExhaleIdx((i) => randomOther(ZEN_EXHALE_REFLECTIONS.length, i));
+        if (next === 2) setInhaleIdx((i) => randomOther(ZEN_INHALE_REFLECTIONS.length, i));
+        return next;
+      });
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [step]);
+
+  const text =
+    step === 0 ? "Breathe in"
+    : step === 1 ? ZEN_INHALE_REFLECTIONS[inhaleIdx]
+    : step === 2 ? "Breathe out"
+    : ZEN_EXHALE_REFLECTIONS[exhaleIdx];
+
+  return (
+    <View style={{ flexDirection: "row", alignItems: "flex-end" }}>
+      <Text style={{ color, fontSize: 13, fontWeight: "500" }}>{text}</Text>
+      <PulsingDots color={color} />
+    </View>
+  );
+}
+
 function CompactingLabel({ color }: { color: string }) {
   return (
     <View style={{ flexDirection: "row", alignItems: "flex-end" }}>
@@ -3285,6 +3376,7 @@ function ThinkingIndicator({
   isCompacting = false,
   runPhase = "idle",
   thinkingContent = "",
+  zenMode = false,
 }: {
   status: ThreadStatus;
   toolSteps: ToolStep[];
@@ -3295,6 +3387,7 @@ function ThinkingIndicator({
   isCompacting?: boolean;
   runPhase?: string;
   thinkingContent?: string;
+  zenMode?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [thinkingExpanded, setThinkingExpanded] = useState(false);
@@ -3333,7 +3426,9 @@ function ThinkingIndicator({
               ? <CompactingLabel color="#F59E0B" />
               : runPhase === "responding"
                 ? <RespondingLabel color={dotColor} />
-                : <CyclingLabel color={dotColor} />
+                : zenMode
+                  ? <ZenBreathLabel color={dotColor} />
+                  : <CyclingLabel color={dotColor} />
             }
             {hasThinking && (
               <IconSymbol

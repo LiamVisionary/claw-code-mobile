@@ -4,7 +4,7 @@ import { createId } from "../utils/ids";
 import { threadService } from "./threadService";
 
 const messageColumns =
-  "id, threadId, role, content, createdAt, error, model, tokensIn, tokensOut, costUsd, turnDurationMs, metadata";
+  "id, threadId, role, content, createdAt, error, model, tokensIn, tokensOut, costUsd, turnDurationMs, planMode, reasoningEffort, metadata";
 
 const parseMetadata = (raw: unknown): MessageMetadata | undefined => {
   if (typeof raw !== "string" || raw.length === 0) return undefined;
@@ -32,6 +32,10 @@ const mapRow = (row: any): Message => {
     ...(row.turnDurationMs != null
       ? { turnDurationMs: row.turnDurationMs as number }
       : {}),
+    ...(row.planMode ? { planMode: row.planMode as "act" | "plan" } : {}),
+    ...(row.reasoningEffort
+      ? { reasoningEffort: row.reasoningEffort as "low" | "medium" | "high" }
+      : {}),
     ...(metadata ? { metadata } : {}),
   };
 };
@@ -42,6 +46,8 @@ export interface TurnTelemetry {
   tokensOut?: number;
   costUsd?: number;
   turnDurationMs?: number;
+  planMode?: "act" | "plan";
+  reasoningEffort?: "low" | "medium" | "high";
   metadata?: MessageMetadata;
 }
 
@@ -123,12 +129,14 @@ export const messageService = {
     const metadataJson = metaHasAny ? JSON.stringify(meta) : null;
     db.prepare(
       `UPDATE messages
-       SET model          = @model,
-           tokensIn       = @tokensIn,
-           tokensOut      = @tokensOut,
-           costUsd        = @costUsd,
-           turnDurationMs = @turnDurationMs,
-           metadata       = @metadata
+       SET model           = @model,
+           tokensIn        = @tokensIn,
+           tokensOut       = @tokensOut,
+           costUsd         = @costUsd,
+           turnDurationMs  = @turnDurationMs,
+           planMode        = @planMode,
+           reasoningEffort = @reasoningEffort,
+           metadata        = @metadata
        WHERE id = @id`
     ).run({
       id: messageId,
@@ -137,6 +145,8 @@ export const messageService = {
       tokensOut: telemetry.tokensOut ?? null,
       costUsd: telemetry.costUsd ?? null,
       turnDurationMs: telemetry.turnDurationMs ?? null,
+      planMode: telemetry.planMode ?? null,
+      reasoningEffort: telemetry.reasoningEffort ?? null,
       metadata: metadataJson,
     });
   },

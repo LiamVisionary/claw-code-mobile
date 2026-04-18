@@ -6,10 +6,12 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "node": "22.14.0"
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "node": "22.14.0"
     },
     "simulator": {
       "environment": "production",
@@ -17,12 +19,14 @@
         "simulator": true,
         "buildConfiguration": "Release"
       },
-      "resourceClass": "large"
+      "resourceClass": "large",
+      "node": "22.14.0"
     },
     "production": {
       "environment": "production",
       "autoIncrement": true,
-      "resourceClass": "large"
+      "resourceClass": "large",
+      "node": "22.14.0"
     }
   },
   "submit": {

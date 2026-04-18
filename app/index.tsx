@@ -3,12 +3,13 @@ import {
   ActivityIndicator,
   Alert,
   AppState,
+  Modal,
   Platform,
+  Pressable,
   Text,
   View,
 } from "react-native";
 import { FlatList } from "react-native-gesture-handler";
-import { Pressable, useColorScheme } from "react-native";
 import { useRouter, Link } from "expo-router";
 import { useFocusEffect } from "expo-router";
 import Swipeable from "react-native-gesture-handler/Swipeable";
@@ -24,6 +25,7 @@ import DirectoryBrowser from "@/components/DirectoryBrowser";
 import { VaultNotesPane } from "@/components/VaultNotesPane";
 import { usePalette } from "@/hooks/usePalette";
 import type { Palette } from "@/constants/palette";
+import { GlassView } from "expo-glass-effect";
 
 // ─── Right-side swipe actions (Rename + Duplicate + Delete) ─────────────────
 
@@ -81,7 +83,6 @@ export default function ChatListScreen() {
   const { top, bottom } = useSafeAreaInsets();
   const headerHeight = useHeaderHeight();
   const palette = usePalette();
-  const isDark = useColorScheme() === "dark";
   const [showProjectPicker, setShowProjectPicker] = useState(false);
 
   // Only show the Chats/Notes toggle when the user has actually connected
@@ -166,9 +167,6 @@ export default function ChatListScreen() {
       "plain-text"
     );
   };
-
-  const dropBg = isDark ? "#1c1c1e" : "#fff";
-  const dropBorder = isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)";
 
   const handleNewChat = () => setShowBrowser(true);
 
@@ -330,60 +328,62 @@ export default function ChatListScreen() {
           </Text>
         )}
 
-        {/* ── Project picker dropdown ── */}
-        {showProjectPicker && (
-          <>
-            <Pressable
-              style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 }}
-              onPress={() => setShowProjectPicker(false)}
-            />
-            <View
-              style={{
-                position: "absolute",
-                top: headerHeight - 24,
-                left: 0,
-                right: 0,
-                zIndex: 101,
-                alignItems: "center",
-              }}
-            >
-              <View
+        {/* ── Project picker dropdown (liquid glass) ── */}
+        {/* Rendered in a Modal so it sits above the native nav bar —
+            a zIndex on content can't outrank the header's iOS layer. */}
+        <Modal
+          visible={showProjectPicker}
+          transparent
+          animationType="none"
+          onRequestClose={() => setShowProjectPicker(false)}
+        >
+          <Pressable
+            style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
+            onPress={() => setShowProjectPicker(false)}
+          />
+          <View
+            style={{
+              position: "absolute",
+              top: headerHeight - 24,
+              left: 0,
+              right: 0,
+              alignItems: "center",
+            }}
+          >
+              <GlassView
+                glassEffectStyle="regular"
                 style={{
-                  backgroundColor: dropBg,
-                  borderRadius: 14,
-                  borderWidth: 1,
-                  borderColor: dropBorder,
-                  minWidth: 200,
+                  borderRadius: 16,
                   overflow: "hidden",
-                  shadowColor: "#000",
-                  shadowOffset: { width: 0, height: 6 },
-                  shadowOpacity: isDark ? 0.5 : 0.15,
-                  shadowRadius: 16,
-                  elevation: 12,
+                  minWidth: 220,
+                  maxWidth: 320,
+                  paddingVertical: 6,
                 }}
               >
-                {allProjects.map((p) => {
+                {allProjects.map((p, i) => {
                   const label = p || "General";
                   const selected = p === activeProject;
                   return (
-                    <TouchableBounce
-                      key={label}
-                      sensory
-                      onPress={() => { actions.setActiveProject(p); setShowProjectPicker(false); }}
-                    >
-                      <View
-                        style={{
+                    <View key={label}>
+                      {i > 0 && (
+                        <View
+                          style={{
+                            height: 1,
+                            marginLeft: 18,
+                            backgroundColor: palette.divider,
+                            opacity: 0.5,
+                          }}
+                        />
+                      )}
+                      <Pressable
+                        onPress={() => { actions.setActiveProject(p); setShowProjectPicker(false); }}
+                        style={({ pressed }) => ({
                           flexDirection: "row",
                           alignItems: "center",
-                          gap: 10,
-                          paddingHorizontal: 16,
+                          paddingHorizontal: 18,
                           paddingVertical: 12,
-                          borderBottomWidth: 1,
-                          borderBottomColor: dropBorder,
-                          backgroundColor: selected
-                            ? isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.03)"
-                            : "transparent",
-                        }}
+                          backgroundColor: pressed ? palette.surfaceAlt : "transparent",
+                        })}
                       >
                         <Text
                           style={{
@@ -391,36 +391,56 @@ export default function ChatListScreen() {
                             fontSize: 15,
                             fontWeight: selected ? "600" : "400",
                             color: palette.text,
+                            letterSpacing: -0.1,
                           }}
                           numberOfLines={1}
                         >
                           {label}
                         </Text>
-                        {selected && <IconSymbol name="checkmark" size={13} color={palette.accent} />}
-                      </View>
-                    </TouchableBounce>
+                        {selected && (
+                          <IconSymbol
+                            name="checkmark"
+                            size={14}
+                            color={palette.text}
+                          />
+                        )}
+                      </Pressable>
+                    </View>
                   );
                 })}
-                <TouchableBounce sensory onPress={handleNewProject}>
-                  <View
+                <View
+                  style={{
+                    height: 1,
+                    marginLeft: 18,
+                    backgroundColor: palette.divider,
+                    opacity: 0.5,
+                  }}
+                />
+                <Pressable
+                  onPress={handleNewProject}
+                  style={({ pressed }) => ({
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 10,
+                    paddingHorizontal: 18,
+                    paddingVertical: 12,
+                    backgroundColor: pressed ? palette.surfaceAlt : "transparent",
+                  })}
+                >
+                  <IconSymbol name="plus" size={14} color={palette.textMuted} />
+                  <Text
                     style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 8,
-                      paddingHorizontal: 16,
-                      paddingVertical: 12,
+                      fontSize: 15,
+                      color: palette.text,
+                      letterSpacing: -0.1,
                     }}
                   >
-                    <IconSymbol name="plus" size={13} color={palette.accent} />
-                    <Text style={{ fontSize: 15, color: palette.accent, fontWeight: "500" }}>
-                      New project
-                    </Text>
-                  </View>
-                </TouchableBounce>
-              </View>
+                    New project
+                  </Text>
+                </Pressable>
+              </GlassView>
             </View>
-          </>
-        )}
+        </Modal>
 
         {view === "notes" ? (
           <VaultNotesPane palette={palette} />

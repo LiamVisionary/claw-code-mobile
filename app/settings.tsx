@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
@@ -20,6 +20,7 @@ import { ModelsTab } from "@/components/settings/ModelsTab";
 import { BehaviourTab } from "@/components/settings/BehaviourTab";
 import { VaultTab } from "@/components/settings/VaultTab";
 import { LogsTab } from "@/components/settings/LogsTab";
+import { BudgetingTab } from "@/components/settings/BudgetingTab";
 
 type TabKey =
   | "connection"
@@ -27,6 +28,7 @@ type TabKey =
   | "appearance"
   | "behaviour"
   | "vault"
+  | "budgeting"
   | "logs";
 
 const BASE_TABS: { key: TabKey; label: string }[] = [
@@ -35,6 +37,7 @@ const BASE_TABS: { key: TabKey; label: string }[] = [
   { key: "appearance", label: "Appearance" },
   { key: "behaviour", label: "Behaviour" },
   { key: "vault", label: "Notes" },
+  { key: "budgeting", label: "Budgeting" },
 ];
 
 export default function SettingsScreen() {
@@ -52,6 +55,23 @@ function SettingsContent() {
     (s) => s.settings.telemetryEnabled ?? true
   );
   const [activeTab, setActiveTab] = useState<TabKey>("connection");
+  const scrollRef = useRef<ScrollView>(null);
+  const [pendingScrollTarget, setPendingScrollTarget] = useState<
+    "telemetry" | null
+  >(null);
+
+  const scrollToY = useCallback((y: number) => {
+    scrollRef.current?.scrollTo({ y, animated: true });
+  }, []);
+
+  const handleGoToTelemetry = useCallback(() => {
+    setActiveTab("behaviour");
+    setPendingScrollTarget("telemetry");
+  }, []);
+
+  const handleScrolledToTarget = useCallback(() => {
+    setPendingScrollTarget(null);
+  }, []);
 
   const tabs = useMemo<{ key: TabKey; label: string }[]>(
     () =>
@@ -73,6 +93,7 @@ function SettingsContent() {
       keyboardVerticalOffset={Platform.OS === "ios" ? 100 : 0}
     >
       <ScrollView
+        ref={scrollRef}
         style={{ backgroundColor: palette.bg }}
         contentInsetAdjustmentBehavior="automatic"
         automaticallyAdjustsScrollIndicatorInsets
@@ -131,8 +152,18 @@ function SettingsContent() {
           {activeTab === "connection" && <ConnectionTab />}
           {activeTab === "models" && <ModelsTab />}
           {activeTab === "appearance" && <AppearanceTab />}
-          {activeTab === "behaviour" && <BehaviourTab />}
+          {activeTab === "behaviour" && (
+            <BehaviourTab
+              scrollParentRef={scrollRef}
+              scrollToY={scrollToY}
+              pendingScrollTarget={pendingScrollTarget}
+              onScrolledToTarget={handleScrolledToTarget}
+            />
+          )}
           {activeTab === "vault" && <VaultTab />}
+          {activeTab === "budgeting" && (
+            <BudgetingTab onGoToTelemetry={handleGoToTelemetry} />
+          )}
           {activeTab === "logs" && telemetryEnabled && <LogsTab />}
 
           <View style={{ height: 40 }} />

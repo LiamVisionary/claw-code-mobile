@@ -72,7 +72,15 @@ export const applyMigrations = () => {
   // Display-only metadata blob: thinking text, tool steps, turn log.
   // Stored as a JSON string so new fields don't need a schema migration.
   try { db.exec(`ALTER TABLE messages ADD COLUMN metadata TEXT`); } catch {}
+  // Which composer-mode selections the turn ran under. NULL for pre-
+  // migration rows; populated by the runtime at turn finalize so the
+  // analytics route can group aggregates (turn count, cost, tokens) by
+  // plan vs. act and by reasoning-effort level.
+  try { db.exec(`ALTER TABLE messages ADD COLUMN planMode TEXT`); } catch {}
+  try { db.exec(`ALTER TABLE messages ADD COLUMN reasoningEffort TEXT`); } catch {}
   // Indexes for the common aggregate queries we'll want to run.
   try { db.exec(`CREATE INDEX IF NOT EXISTS messages_model_idx ON messages(model)`); } catch {}
   try { db.exec(`CREATE INDEX IF NOT EXISTS messages_cost_idx ON messages(costUsd)`); } catch {}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS messages_plan_mode_idx ON messages(planMode)`); } catch {}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS messages_effort_idx ON messages(reasoningEffort)`); } catch {}
 };

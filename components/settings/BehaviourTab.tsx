@@ -1,9 +1,26 @@
-import { Text, View } from "react-native";
+import { useEffect, useRef, useState, type RefObject } from "react";
+import {
+  findNodeHandle,
+  ScrollView,
+  Text,
+  View,
+  type View as RNView,
+} from "react-native";
 import { usePalette } from "@/hooks/usePalette";
 import { Card, Hairline, Segmented, ToggleRow } from "./_shared";
 import { useSettingsForm } from "./SettingsFormContext";
 
-export function BehaviourTab() {
+export function BehaviourTab({
+  scrollParentRef,
+  scrollToY,
+  pendingScrollTarget,
+  onScrolledToTarget,
+}: {
+  scrollParentRef?: RefObject<ScrollView | null>;
+  scrollToY?: (y: number) => void;
+  pendingScrollTarget?: "telemetry" | null;
+  onScrolledToTarget?: () => void;
+} = {}) {
   const palette = usePalette();
   const {
     autoCompact,
@@ -16,7 +33,36 @@ export function BehaviourTab() {
     setAutoContinueEnabled,
     telemetryEnabled,
     setTelemetryEnabled,
+    zenMode,
+    setZenMode,
   } = useSettingsForm();
+
+  const telemetryRowRef = useRef<RNView>(null);
+  const [highlightTelemetry, setHighlightTelemetry] = useState(false);
+
+  useEffect(() => {
+    if (pendingScrollTarget !== "telemetry") return;
+    const parentNode = scrollParentRef?.current
+      ? findNodeHandle(scrollParentRef.current)
+      : null;
+    if (parentNode == null) return;
+
+    // Give the tab content a frame to lay out before measuring.
+    const timer = setTimeout(() => {
+      telemetryRowRef.current?.measureLayout(
+        parentNode,
+        (_x, y) => {
+          scrollToY?.(Math.max(0, y - 80));
+          setHighlightTelemetry(true);
+          setTimeout(() => setHighlightTelemetry(false), 1600);
+          onScrolledToTarget?.();
+        },
+        () => {}
+      );
+    }, 60);
+
+    return () => clearTimeout(timer);
+  }, [pendingScrollTarget, scrollParentRef, scrollToY, onScrolledToTarget]);
 
   return (
     <Card>
@@ -82,11 +128,26 @@ export function BehaviourTab() {
       />
       <Hairline inset={20} />
       <ToggleRow
-        title="Diagnostic telemetry"
-        description="Mirror every SSE event the client receives to the backend events table. Used to diff what the server sent against what the client rendered."
-        value={telemetryEnabled}
-        onValueChange={setTelemetryEnabled}
+        title="Zen mode"
+        description="Swap the thinking indicator's playful phrases for a guided breath cycle — inhale, reflect, exhale."
+        value={zenMode}
+        onValueChange={setZenMode}
       />
+      <Hairline inset={20} />
+      <View
+        ref={telemetryRowRef}
+        style={{
+          backgroundColor: highlightTelemetry ? palette.surfaceAlt : "transparent",
+          borderRadius: 12,
+        }}
+      >
+        <ToggleRow
+          title="Diagnostic telemetry"
+          description="Mirror every SSE event the client receives to the backend events table. Used to diff what the server sent against what the client rendered."
+          value={telemetryEnabled}
+          onValueChange={setTelemetryEnabled}
+        />
+      </View>
     </Card>
   );
 }
