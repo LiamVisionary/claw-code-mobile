@@ -7,7 +7,7 @@ import {
   Text,
   View,
 } from "react-native";
-import { FlatList, Pressable } from "react-native-gesture-handler";
+import { FlatList } from "react-native-gesture-handler";
 import { useRouter, Link } from "expo-router";
 import { useFocusEffect } from "expo-router";
 import ReanimatedSwipeable, {
@@ -571,12 +571,7 @@ function ChatRow({ thread, onPress, palette }: { thread: Thread; onPress: () => 
   const isRunning = thread.status === "running";
   const dirName = thread.workDir ? thread.workDir.split("/").filter(Boolean).pop() : null;
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => ({
-        backgroundColor: pressed ? palette.surfaceAlt : palette.bg,
-      })}
-    >
+    <TouchableBounce sensory onPress={onPress}>
       <View
         style={{
           paddingHorizontal: 24,
@@ -644,6 +639,6 @@ function ChatRow({ thread, onPress, palette }: { thread: Thread; onPress: () => 
           </Text>
         )}
       </View>
-    </Pressable>
+    </TouchableBounce>
   );
 }
