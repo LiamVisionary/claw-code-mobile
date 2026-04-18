@@ -10,6 +10,35 @@ Chat with an AI that can execute code, edit files, and manage projects on your r
 
 ---
 
+## Foreword
+
+I built this for three reasons.
+
+First, I burned through $5,000 worth of Claude Code tokens in a single month while building my AI companion app, [Ami](https://withami.ai).
+
+Second, I got smacked by the Claude Code Pro and Max token-burn problem that I know I'm far from alone in dealing with. We're all feeling the pain.
+
+Third, I had to send my MacBook in for repairs, but I just couldn't stop myself from building. So I tried working from mobile via GitHub Codespaces, vscode.dev, and other options. Absolutely no way — worst UX I've ever experienced.
+
+So I decided to build a better way to code on the go. Something intuitive, mobile-friendly, and actually enjoyable to use. It's powered by the Claw Code harness and supports remote sessions, OpenRouter, local LLMs, and Anthropic through either API access or OAuth via subscription.
+
+This project is open source because I want people to be able to benefit from it, improve it, and shape it with me. Open source gives builders more freedom, more transparency, and more control — especially at a time when costs are high and a lot of people are trying to do more with less. Affordable remote agents, local agents, and flexible coding workflows should be accessible to everyone, not exclusive to the wealthy or well-off.
+
+Building this from my phone in just a few days was a fun challenge, and I genuinely enjoyed it. I hope you have just as much fun using it.
+
+Contributions are very welcome. The bigger goal is to give people an intuitive mobile UI and UX for building from anywhere, with affordable OpenRouter options, strong local-model support, and an open foundation the community can keep pushing forward.
+
+This project wouldn't be possible without:
+
+- **[ultraworkers/claw-code](https://github.com/ultraworkers/claw-code)** — the Rust agent harness that does all the actual coding work. The mobile app is a UI in front of it.
+- **[EvanBacon/expo-ai](https://github.com/EvanBacon/expo-ai)** — the Expo Router AI-chat starter the mobile shell descended from.
+
+I merely worked on integrations, UX, and design direction.
+
+**Support ongoing development:** if you find this project useful, you can help support future improvements here: [Buy Me a Coffee](https://buymeacoffee.com/) <!-- TODO: replace with your bmc URL -->
+
+---
+
 ## Features
 
 - **Streaming chat** — Watch AI responses appear word-by-word in real-time
