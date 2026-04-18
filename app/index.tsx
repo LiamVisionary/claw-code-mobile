@@ -8,8 +8,13 @@ import {
   View,
 } from "react-native";
 import { FlatList } from "react-native-gesture-handler";
-import { GlassView } from "expo-glass-effect";
-import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
+import Animated, {
+  FadeIn,
+  FadeOut,
+  SlideInUp,
+  SlideOutUp,
+} from "react-native-reanimated";
+import { useColorScheme } from "react-native";
 import { useRouter, Link } from "expo-router";
 import { useFocusEffect } from "expo-router";
 import Swipeable from "react-native-gesture-handler/Swipeable";
@@ -83,6 +88,7 @@ export default function ChatListScreen() {
   const { top, bottom } = useSafeAreaInsets();
   const headerHeight = useHeaderHeight();
   const palette = usePalette();
+  const isDark = useColorScheme() === "dark";
 
   // Only show the Chats/Notes toggle when the user has actually connected
   // a vault. Enabled-but-unconfigured states (e.g. toggle flipped on with
@@ -334,82 +340,85 @@ export default function ChatListScreen() {
         {/* ── Project picker dropdown ── */}
         {showProjectPicker && (
           <Animated.View
-            entering={FadeIn.duration(150)}
-            exiting={FadeOut.duration(100)}
+            entering={FadeIn.duration(120)}
+            exiting={FadeOut.duration(80)}
             style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 }}
           >
             <TouchableBounce onPress={() => setShowProjectPicker(false)}>
-              <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} />
+              <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.15)" }} />
             </TouchableBounce>
             <Animated.View
-              entering={FadeIn.duration(200).springify().damping(20).stiffness(300)}
+              entering={SlideInUp.duration(200).springify().damping(18).stiffness(280)}
+              exiting={SlideOutUp.duration(120)}
               style={{
-                marginTop: headerHeight,
-                marginHorizontal: 60,
+                marginTop: headerHeight - 4,
+                marginHorizontal: 56,
+                backgroundColor: isDark ? "#2c2c2e" : "#ffffff",
+                borderRadius: 14,
+                overflow: "hidden",
+                shadowColor: "#000",
+                shadowOffset: { width: 0, height: 6 },
+                shadowOpacity: isDark ? 0.5 : 0.18,
+                shadowRadius: 20,
+                elevation: 12,
+                borderWidth: isDark ? 0.5 : 0,
+                borderColor: "rgba(255,255,255,0.1)",
               }}
             >
-              <GlassView
-                glassEffectStyle="regular"
-                isInteractive
-                style={{
-                  borderRadius: 16,
-                  overflow: "hidden",
-                }}
-              >
-                {allProjects.map((p) => {
-                  const label = p || "General";
-                  const selected = p === activeProject;
-                  return (
-                    <TouchableBounce
-                      key={label}
-                      sensory
-                      onPress={() => { actions.setActiveProject(p); setShowProjectPicker(false); }}
+              {allProjects.map((p) => {
+                const label = p || "General";
+                const selected = p === activeProject;
+                return (
+                  <TouchableBounce
+                    key={label}
+                    sensory
+                    onPress={() => { actions.setActiveProject(p); setShowProjectPicker(false); }}
+                  >
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        paddingHorizontal: 18,
+                        paddingVertical: 13,
+                        backgroundColor: selected ? (isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.03)") : "transparent",
+                        borderBottomWidth: 0.5,
+                        borderBottomColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)",
+                      }}
                     >
-                      <View
+                      <Text
                         style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          paddingHorizontal: 18,
-                          paddingVertical: 14,
-                          borderBottomWidth: 0.5,
-                          borderBottomColor: "rgba(128,128,128,0.15)",
+                          flex: 1,
+                          fontSize: 16,
+                          fontWeight: selected ? "600" : "400",
+                          color: selected ? palette.accent : palette.text,
                         }}
                       >
-                        <Text
-                          style={{
-                            flex: 1,
-                            fontSize: 16,
-                            fontWeight: selected ? "600" : "400",
-                            color: palette.text,
-                          }}
-                        >
-                          {label}
-                        </Text>
-                        {selected && <IconSymbol name="checkmark" size={15} color={palette.accent} />}
-                      </View>
-                    </TouchableBounce>
-                  );
-                })}
-                <TouchableBounce
-                  sensory
-                  onPress={() => { setShowProjectPicker(false); handleNewProject(); }}
+                        {label}
+                      </Text>
+                      {selected && <IconSymbol name="checkmark" size={14} color={palette.accent} />}
+                    </View>
+                  </TouchableBounce>
+                );
+              })}
+              <TouchableBounce
+                sensory
+                onPress={() => { setShowProjectPicker(false); handleNewProject(); }}
+              >
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    paddingHorizontal: 18,
+                    paddingVertical: 13,
+                    gap: 7,
+                  }}
                 >
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      paddingHorizontal: 18,
-                      paddingVertical: 14,
-                      gap: 7,
-                    }}
-                  >
-                    <IconSymbol name="plus.circle.fill" size={18} color={palette.accent} />
-                    <Text style={{ fontSize: 16, color: palette.accent, fontWeight: "500" }}>
-                      New project
-                    </Text>
-                  </View>
-                </TouchableBounce>
-              </GlassView>
+                  <IconSymbol name="plus.circle.fill" size={17} color={palette.accent} />
+                  <Text style={{ fontSize: 16, color: palette.accent, fontWeight: "500" }}>
+                    New project
+                  </Text>
+                </View>
+              </TouchableBounce>
             </Animated.View>
           </Animated.View>
         )}
