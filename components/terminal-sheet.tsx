@@ -12,6 +12,7 @@ import {
   View,
   useColorScheme,
 } from "react-native";
+import * as Haptics from "expo-haptics";
 import { useGatewayStore } from "@/store/gatewayStore";
 import { usePalette } from "@/hooks/usePalette";
 import TouchableBounce from "@/components/ui/TouchableBounce";
@@ -56,6 +57,12 @@ export default function TerminalSheet({ threadId, visible, onClose, onSendToClaw
   const slideAnim = useRef(new Animated.Value(1000)).current;
   const scrollRef = useRef<ScrollView>(null);
   const inputRef = useRef<TextInput>(null);
+  // Command history (local to this sheet instance — not persisted).
+  // historyIdx points at the entry currently surfaced; when equal to
+  // history.length the input is a fresh draft.
+  const historyRef = useRef<string[]>([]);
+  const historyIdxRef = useRef<number>(0);
+  const draftRef = useRef<string>("");
 
   // ── Slide in / out ─────────────────────────────────────────────
   useEffect(() => {
@@ -140,6 +147,11 @@ export default function TerminalSheet({ threadId, visible, onClose, onSendToClaw
   const send = useCallback(() => {
     const trimmed = command.trim();
     if (!trimmed) return;
+    // Push to history, but dedupe consecutive duplicates the way bash does.
+    const h = historyRef.current;
+    if (h[h.length - 1] !== trimmed) h.push(trimmed);
+    historyIdxRef.current = h.length;
+    draftRef.current = "";
     setCommand("");
     actions.sendTerminalCommand(threadId, trimmed).catch(() => {});
   }, [command, threadId, actions]);
@@ -147,6 +159,41 @@ export default function TerminalSheet({ threadId, visible, onClose, onSendToClaw
   const stop = useCallback(() => {
     actions.interruptTerminal(threadId).catch(() => {});
   }, [threadId, actions]);
+
+  const historyUp = useCallback(() => {
+    const h = historyRef.current;
+    if (h.length === 0) return;
+    // First ↑ stashes the current draft so ↓ back to "now" can restore it.
+    if (historyIdxRef.current === h.length) {
+      draftRef.current = command;
+    }
+    const next = Math.max(0, historyIdxRef.current - 1);
+    historyIdxRef.current = next;
+    setCommand(h[next] ?? "");
+  }, [command]);
+
+  const historyDown = useCallback(() => {
+    const h = historyRef.current;
+    if (h.length === 0) return;
+    const next = historyIdxRef.current + 1;
+    if (next >= h.length) {
+      historyIdxRef.current = h.length;
+      setCommand(draftRef.current);
+    } else {
+      historyIdxRef.current = next;
+      setCommand(h[next] ?? "");
+    }
+  }, []);
+
+  const insertAtEnd = useCallback((s: string) => {
+    setCommand((prev) => prev + s);
+  }, []);
+
+  const clearInput = useCallback(() => {
+    setCommand("");
+    historyIdxRef.current = historyRef.current.length;
+    draftRef.current = "";
+  }, []);
 
   const sendToClaw = useCallback(async () => {
     let snap: string[] = [];
@@ -318,9 +365,21 @@ export default function TerminalSheet({ threadId, visible, onClose, onSendToClaw
             </ScrollView>
           </Pressable>
 
+          {/* Accessory key row — only while the keyboard is visible,
+              otherwise it'd take screen space with no function. */}
+          {keyboardHeight > 0 && (
+            <AccessoryBar
+              onInsert={insertAtEnd}
+              onUp={historyUp}
+              onDown={historyDown}
+              onClear={clearInput}
+              onCtrlC={stop}
+              onDismissKeyboard={() => Keyboard.dismiss()}
+            />
+          )}
+
           {/* Bottom spacer that tracks the keyboard so the prompt doesn't
-              hide under it. No visible input — the prompt line above IS
-              the input. */}
+              hide under it. */}
           <View style={{ height: keyboardHeight > 0 ? keyboardHeight : Platform.OS === "ios" ? 28 : 8 }} />
         </Animated.View>
       </View>
@@ -349,30 +408,14 @@ function PromptLine({
     <View
       style={{
         flexDirection: "row",
-        alignItems: "flex-start",
+        alignItems: "center",
+        minHeight: 20,
         marginTop: 2,
       }}
     >
-      <Text
-        style={{
-          color: CWD_COLOR,
-          fontFamily: MONO,
-          fontSize: TYPOGRAPHY.fontSizes.xs,
-          lineHeight: 20,
-        }}
-      >
-        {cwd || "~"}
-      </Text>
-      <Text
-        style={{
-          color: PROMPT_COLOR,
-          fontFamily: MONO,
-          fontSize: TYPOGRAPHY.fontSizes.xs,
-          lineHeight: 20,
-          marginHorizontal: 6,
-        }}
-      >
-        {busy ? "…" : "$"}
+      <Text style={{ fontFamily: MONO, fontSize: TYPOGRAPHY.fontSizes.xs }}>
+        <Text style={{ color: CWD_COLOR }}>{cwd || "~"}</Text>
+        <Text style={{ color: PROMPT_COLOR }}>{busy ? " … " : " $ "}</Text>
       </Text>
       <TextInput
         ref={inputRef}
@@ -393,12 +436,132 @@ function PromptLine({
           color: TERMINAL_FG,
           fontFamily: MONO,
           fontSize: TYPOGRAPHY.fontSizes.xs,
-          lineHeight: 20,
           padding: 0,
-          marginTop: Platform.OS === "ios" ? 0 : -4,
+          margin: 0,
+          includeFontPadding: false,
         }}
       />
     </View>
+  );
+}
+
+function AccessoryBar({
+  onInsert,
+  onUp,
+  onDown,
+  onClear,
+  onCtrlC,
+  onDismissKeyboard,
+}: {
+  onInsert: (s: string) => void;
+  onUp: () => void;
+  onDown: () => void;
+  onClear: () => void;
+  onCtrlC: () => void;
+  onDismissKeyboard: () => void;
+}) {
+  const tap = (fn: () => void) => () => {
+    if (Platform.OS === "ios") {
+      Haptics.selectionAsync().catch(() => {});
+    }
+    fn();
+  };
+  return (
+    <View
+      style={{
+        height: 40,
+        backgroundColor: "#17191C",
+        borderTopWidth: 1,
+        borderTopColor: "rgba(255,255,255,0.06)",
+      }}
+    >
+      <ScrollView
+        horizontal
+        keyboardShouldPersistTaps="always"
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{
+          alignItems: "center",
+          paddingHorizontal: 8,
+          gap: 6,
+        }}
+      >
+        <AccKey label="⌃C" onPress={tap(onCtrlC)} danger />
+        <AccKey label="⎋" onPress={tap(onClear)} />
+        <AccKey label="⇥" onPress={tap(() => onInsert("\t"))} />
+        <AccSep />
+        <AccKey label="↑" onPress={tap(onUp)} />
+        <AccKey label="↓" onPress={tap(onDown)} />
+        <AccSep />
+        <AccKey label="/" onPress={tap(() => onInsert("/"))} />
+        <AccKey label="-" onPress={tap(() => onInsert("-"))} />
+        <AccKey label="_" onPress={tap(() => onInsert("_"))} />
+        <AccKey label="~" onPress={tap(() => onInsert("~"))} />
+        <AccKey label="|" onPress={tap(() => onInsert("|"))} />
+        <AccKey label="\\" onPress={tap(() => onInsert("\\"))} />
+        <AccKey label="*" onPress={tap(() => onInsert("*"))} />
+        <AccKey label="&" onPress={tap(() => onInsert("&"))} />
+        <AccKey label=">" onPress={tap(() => onInsert(">"))} />
+        <AccKey label="<" onPress={tap(() => onInsert("<"))} />
+        <AccKey label="$" onPress={tap(() => onInsert("$"))} />
+        <AccKey label="`" onPress={tap(() => onInsert("`"))} />
+        <AccSep />
+        <AccKey label="⌄" onPress={tap(onDismissKeyboard)} />
+      </ScrollView>
+    </View>
+  );
+}
+
+function AccKey({
+  label,
+  onPress,
+  danger,
+}: {
+  label: string;
+  onPress: () => void;
+  danger?: boolean;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={6}
+      style={({ pressed }) => ({
+        minWidth: 36,
+        height: 30,
+        borderRadius: 7,
+        paddingHorizontal: 10,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: pressed
+          ? "rgba(255,255,255,0.18)"
+          : danger
+          ? "rgba(255,59,48,0.18)"
+          : "rgba(255,255,255,0.08)",
+      })}
+    >
+      <Text
+        style={{
+          color: danger ? "#FF6B5E" : TERMINAL_FG,
+          fontFamily: MONO,
+          fontSize: 14,
+          fontWeight: "600",
+        }}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function AccSep() {
+  return (
+    <View
+      style={{
+        width: 1,
+        height: 18,
+        backgroundColor: "rgba(255,255,255,0.12)",
+        marginHorizontal: 2,
+      }}
+    />
   );
 }
 
