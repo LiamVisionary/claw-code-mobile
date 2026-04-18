@@ -61,6 +61,48 @@ obsidianRouter.get("/obsidian/notes/read", async (req, res, next) => {
   }
 });
 
+/** Write/update a note by vault-relative path. */
+obsidianRouter.put("/obsidian/notes/write", async (req, res, next) => {
+  try {
+    const schema = z.object({
+      path: z.string().min(1),
+      note: z.string().min(1),
+      content: z.string(),
+    });
+    const body = schema.parse(req.body);
+    const provider = getProvider({ path: body.path });
+    const result = await provider.writeNote(body.note, body.content);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Delete a note by vault-relative path. */
+obsidianRouter.delete("/obsidian/notes/delete", async (req, res, next) => {
+  try {
+    const schema = z.object({
+      path: z.string().min(1),
+      note: z.string().min(1),
+    });
+    const body = schema.parse(req.body);
+    const provider = getProvider({ path: body.path });
+    // Use the filesystem directly since VaultProvider doesn't have delete
+    const fs = await import("fs");
+    const pathMod = await import("path");
+    const fullPath = pathMod.resolve(body.path, body.note);
+    // Safety: ensure it's inside the vault
+    if (!fullPath.startsWith(pathMod.resolve(body.path))) {
+      res.status(400).json({ error: "Path traversal not allowed" });
+      return;
+    }
+    fs.unlinkSync(fullPath);
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
 /** Scan common locations for Obsidian vaults on the backend host. */
 obsidianRouter.get("/obsidian/detect", async (_req, res, next) => {
   try {
