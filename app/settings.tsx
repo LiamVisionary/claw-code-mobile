@@ -14,7 +14,7 @@ import TouchableBounce from "@/components/ui/TouchableBounce";
 import { IconSymbol } from "@/components/ui/IconSymbol";
 import { GlassButton } from "@/components/ui/GlassButton";
 import SegmentedControl from "@react-native-segmented-control/segmented-control";
-import { type ModelEntry, type OAuthTokenSet, useGatewayStore } from "@/store/gatewayStore";
+import { modelEntryMatchesBackend, normalizeServerUrlForMatch, type ModelEntry, type OAuthTokenSet, useGatewayStore } from "@/store/gatewayStore";
 import {
   buildPalette,
   ACCENT_OPTIONS,
@@ -140,10 +140,21 @@ function Caption({
 
 // ─── Segmented control (native iOS) ─────────────────────────────────────────
 
+function isDarkPalette(p?: Palette): boolean {
+  if (!p) return false;
+  const hex = p.bg.replace("#", "");
+  if (hex.length < 6) return false;
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+  return (r + g + b) / 3 < 128;
+}
+
 function Segmented<T extends string>({
   options,
   value,
   onChange,
+  palette,
 }: {
   options: { key: T; label: string }[];
   value: T;
@@ -151,6 +162,7 @@ function Segmented<T extends string>({
   palette?: Palette;
 }) {
   const selectedIndex = options.findIndex((o) => o.key === value);
+  const dark = isDarkPalette(palette);
   return (
     <SegmentedControl
       values={options.map((o) => o.label)}
@@ -159,6 +171,7 @@ function Segmented<T extends string>({
         const idx = e.nativeEvent.selectedSegmentIndex;
         if (options[idx]) onChange(options[idx].key);
       }}
+      appearance={dark ? "dark" : "light"}
     />
   );
 }
@@ -389,11 +402,16 @@ function AddModelForm({
   existingEntries,
   onAdd,
   palette,
+  expanded,
+  onExpandedChange,
 }: {
   existingEntries: ModelEntry[];
   onAdd: (entry: ModelEntry) => void;
   palette: Palette;
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
 }) {
+  const setExpanded = onExpandedChange;
   const [provider, setProvider] = useState<ModelEntry["provider"]>("claude");
   const [authMethod, setAuthMethod] = useState<"apiKey" | "oauth">(
     () => existingEntries.some((e) => e.provider === "claude" && e.authMethod === "oauth") ? "oauth" : "apiKey"
@@ -404,7 +422,6 @@ function AddModelForm({
   const [apiKeyBlurred, setApiKeyBlurred] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [endpoint, setEndpoint] = useState("http://127.0.0.1:11434/v1");
-  const [expanded, setExpanded] = useState(false);
   const [oauthLoading, setOauthLoading] = useState(false);
   // Reuse OAuth token from any existing Claude OAuth entry in the queue
   const [oauthToken, setOauthToken] = useState<OAuthTokenSet | null>(
@@ -704,9 +721,20 @@ function AddModelForm({
     setExpanded(false);
   };
 
+  // Dedupe within the active backend on (provider, name, endpoint) so the
+  // same model name can be registered against multiple endpoints (e.g.
+  // gpt-oss:20b at 127.0.0.1 and at a cloudflared URL). existingEntries is
+  // already filtered to the active backend by the parent.
+  const candidateEndpoint =
+    provider === "local" ? endpoint.trim() || "http://127.0.0.1:11434/v1" : "";
   const isDuplicate = !!(
     name.trim() &&
-    existingEntries.some((e) => e.provider === provider && e.name === name.trim())
+    existingEntries.some(
+      (e) =>
+        e.provider === provider &&
+        e.name === name.trim() &&
+        ((e.endpoint ?? "") === candidateEndpoint)
+    )
   );
 
   const canAdd = !isDuplicate && !!(
@@ -719,29 +747,6 @@ function AddModelForm({
 
   return (
     <View>
-      {!expanded && (
-        <TouchableBounce sensory onPress={() => setExpanded(true)}>
-          <View
-            style={{
-              paddingVertical: 16,
-              paddingHorizontal: 18,
-              alignItems: "center",
-            }}
-          >
-            <Text
-              style={{
-                color: palette.accent,
-                fontSize: 14,
-                fontWeight: "600",
-                letterSpacing: 0.2,
-              }}
-            >
-              Add a model
-            </Text>
-          </View>
-        </TouchableBounce>
-      )}
-
       {expanded && (
         <View style={{ padding: 18, paddingTop: 4, gap: 14 }}>
           <Segmented
@@ -1233,6 +1238,7 @@ function AddModelForm({
                   setLocalModels(null);
                   setLocalDiscoverError(null);
                 }}
+                appearance={isDarkPalette(palette) ? "dark" : "light"}
               />
               <Text
                 style={{
@@ -1678,7 +1684,7 @@ export default function SettingsScreen() {
     autoCompact: settings.autoCompact ?? true,
     streamingEnabled: settings.streamingEnabled ?? true,
     darkMode: (settings.darkMode ?? "system") as "system" | "light" | "dark",
-    accentTheme: (settings.accentTheme ?? "lavender") as "claude" | "lavender",
+    accentTheme: (settings.accentTheme ?? "lavender") as AccentTheme,
     autoCompactThreshold: settings.autoCompactThreshold ?? 70,
     telemetryEnabled: settings.telemetryEnabled ?? true,
     autoContinueEnabled: settings.autoContinueEnabled ?? true,
@@ -2122,33 +2128,63 @@ export default function SettingsScreen() {
     }
   };
 
-  const moveUp = (i: number) =>
+  // Each entry is scoped to the backend it was added under; the queue UI
+  // and dispatch only see entries matching the active Server URL. The full
+  // `queue` state still holds entries for other backends so switching back
+  // restores them — but they're invisible (and silent) until then.
+  const activeServerUrl = useMemo(
+    () => normalizeServerUrlForMatch(serverUrl),
+    [serverUrl]
+  );
+  const visibleQueue = useMemo(
+    () => queue.filter((e) => modelEntryMatchesBackend(e, activeServerUrl)),
+    [queue, activeServerUrl]
+  );
+
+  const moveUpById = (id: string) =>
     setQueue((q) => {
-      if (i === 0) return q;
+      // Operate on the visible slice so reordering one backend doesn't
+      // shuffle entries from another. We then splice the result back into
+      // the full queue at the same offsets the visible entries occupied.
+      const visibleIdxs = q
+        .map((e, idx) => (modelEntryMatchesBackend(e, activeServerUrl) ? idx : -1))
+        .filter((idx) => idx >= 0);
+      const pos = visibleIdxs.findIndex((idx) => q[idx].id === id);
+      if (pos <= 0) return q;
       const next = [...q];
-      [next[i - 1], next[i]] = [next[i], next[i - 1]];
+      const a = visibleIdxs[pos - 1];
+      const b = visibleIdxs[pos];
+      [next[a], next[b]] = [next[b], next[a]];
       return next;
     });
 
-  const moveDown = (i: number) =>
+  const moveDownById = (id: string) =>
     setQueue((q) => {
-      if (i === q.length - 1) return q;
+      const visibleIdxs = q
+        .map((e, idx) => (modelEntryMatchesBackend(e, activeServerUrl) ? idx : -1))
+        .filter((idx) => idx >= 0);
+      const pos = visibleIdxs.findIndex((idx) => q[idx].id === id);
+      if (pos < 0 || pos >= visibleIdxs.length - 1) return q;
       const next = [...q];
-      [next[i], next[i + 1]] = [next[i + 1], next[i]];
+      const a = visibleIdxs[pos];
+      const b = visibleIdxs[pos + 1];
+      [next[a], next[b]] = [next[b], next[a]];
       return next;
     });
 
-  const toggleEntry = (i: number) =>
-    setQueue((q) =>
-      q.map((e, idx) => (idx === i ? { ...e, enabled: !e.enabled } : e))
-    );
+  const toggleEntryById = (id: string) =>
+    setQueue((q) => q.map((e) => (e.id === id ? { ...e, enabled: !e.enabled } : e)));
 
-  const deleteEntry = (i: number) =>
-    setQueue((q) => q.filter((_, idx) => idx !== i));
+  const deleteEntryById = (id: string) =>
+    setQueue((q) => q.filter((e) => e.id !== id));
 
-  const addEntry = (entry: ModelEntry) => setQueue((q) => [...q, entry]);
+  const addEntry = (entry: ModelEntry) =>
+    // Stamp the active backend so this entry only surfaces (and only fires)
+    // when the user is connected to the same backend later.
+    setQueue((q) => [...q, { ...entry, serverUrl: activeServerUrl || undefined }]);
 
-  const enabledCount = queue.filter((e) => e.enabled).length;
+  const enabledCount = visibleQueue.filter((e) => e.enabled).length;
+  const [addModelExpanded, setAddModelExpanded] = useState(false);
 
 
   return (
@@ -2274,6 +2310,8 @@ export default function SettingsScreen() {
           {" "}
           {accentTheme === "lavender"
             ? "Lavender accent."
+            : accentTheme === "neo"
+            ? "Neo — phosphor green on black. Always dark."
             : "Terracotta accent — the original warm tone."}
         </Caption>
 
@@ -2301,22 +2339,44 @@ export default function SettingsScreen() {
           >
             Models
           </Text>
-          {queue.length > 0 && (
-            <Text
-              style={{
-                color: palette.textMuted,
-                fontSize: 12,
-                fontWeight: "500",
-                letterSpacing: 0.4,
-              }}
-            >
-              {enabledCount} of {queue.length} active
-            </Text>
-          )}
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+            {visibleQueue.length > 0 && (
+              <Text
+                style={{
+                  color: palette.textMuted,
+                  fontSize: 12,
+                  fontWeight: "500",
+                  letterSpacing: 0.4,
+                }}
+              >
+                {enabledCount} of {visibleQueue.length} active
+              </Text>
+            )}
+            {!addModelExpanded && (
+              <TouchableBounce
+                sensory
+                onPress={() => setAddModelExpanded(true)}
+                hitSlop={10}
+              >
+                <View
+                  style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: 14,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    backgroundColor: palette.surfaceAlt,
+                  }}
+                >
+                  <IconSymbol name="plus" color={palette.text} size={14} />
+                </View>
+              </TouchableBounce>
+            )}
+          </View>
         </View>
 
         <Card palette={palette}>
-          {queue.length === 0 ? (
+          {visibleQueue.length === 0 && !addModelExpanded ? (
             <View style={{ paddingVertical: 32, alignItems: "center" }}>
               <Text
                 style={{
@@ -2329,27 +2389,29 @@ export default function SettingsScreen() {
               </Text>
             </View>
           ) : (
-            queue.map((entry, i) => (
+            visibleQueue.map((entry, i) => (
               <View key={entry.id}>
                 {i > 0 && <Hairline palette={palette} inset={18} />}
                 <QueueRow
                   entry={entry}
                   index={i}
-                  total={queue.length}
-                  onToggle={() => toggleEntry(i)}
-                  onDelete={() => deleteEntry(i)}
-                  onMoveUp={() => moveUp(i)}
-                  onMoveDown={() => moveDown(i)}
+                  total={visibleQueue.length}
+                  onToggle={() => toggleEntryById(entry.id)}
+                  onDelete={() => deleteEntryById(entry.id)}
+                  onMoveUp={() => moveUpById(entry.id)}
+                  onMoveDown={() => moveDownById(entry.id)}
                   palette={palette}
                 />
               </View>
             ))
           )}
-          {queue.length > 0 && <Hairline palette={palette} inset={18} />}
+          {visibleQueue.length > 0 && addModelExpanded && <Hairline palette={palette} inset={18} />}
           <AddModelForm
-            existingEntries={queue}
+            existingEntries={visibleQueue}
             onAdd={addEntry}
             palette={palette}
+            expanded={addModelExpanded}
+            onExpandedChange={setAddModelExpanded}
           />
         </Card>
         <Caption palette={palette}>
@@ -2647,32 +2709,40 @@ export default function SettingsScreen() {
                 )}
                 {obsidianStatus !== "ok" && (
                   <View style={{ flexDirection: "row", gap: 10 }}>
-                    <TouchableBounce sensory onPress={detectVaultsOnBackend} style={{ flex: 1 }}>
-                      <View style={{
-                        borderRadius: 12,
-                        paddingVertical: 13,
-                        alignItems: "center",
-                        backgroundColor: palette.accent,
-                        opacity: obsidianChecking ? 0.6 : 1,
-                      }}>
+                    <View style={{ flex: 1 }}>
+                      <GlassButton
+                        onPress={detectVaultsOnBackend}
+                        disabled={obsidianChecking}
+                        tintColor={palette.accent}
+                        style={{
+                          borderRadius: 12,
+                          paddingVertical: 14,
+                          width: "100%",
+                          opacity: obsidianChecking ? 0.6 : 1,
+                        }}
+                      >
                         <Text style={{ color: "#fff", fontWeight: "600", fontSize: 14, letterSpacing: 0.2 }}>
                           {obsidianChecking ? "Scanning…" : "Detect"}
                         </Text>
-                      </View>
-                    </TouchableBounce>
-                    <TouchableBounce sensory onPress={createVaultOnBackend} style={{ flex: 1 }}>
-                      <View style={{
-                        borderRadius: 12,
-                        paddingVertical: 13,
-                        alignItems: "center",
-                        backgroundColor: palette.surfaceAlt,
-                        opacity: obsidianChecking ? 0.6 : 1,
-                      }}>
-                        <Text style={{ color: palette.text, fontWeight: "600", fontSize: 14, letterSpacing: 0.2 }}>
+                      </GlassButton>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <GlassButton
+                        onPress={createVaultOnBackend}
+                        disabled={obsidianChecking}
+                        tintColor={palette.text}
+                        style={{
+                          borderRadius: 12,
+                          paddingVertical: 14,
+                          width: "100%",
+                          opacity: obsidianChecking ? 0.6 : 1,
+                        }}
+                      >
+                        <Text style={{ color: palette.bg, fontWeight: "600", fontSize: 14, letterSpacing: 0.2 }}>
                           {obsidianChecking ? "Creating…" : "Create vault"}
                         </Text>
-                      </View>
-                    </TouchableBounce>
+                      </GlassButton>
+                    </View>
                   </View>
                 )}
                 {obsidianStatus !== "ok" && obsidianPath.trim() && (

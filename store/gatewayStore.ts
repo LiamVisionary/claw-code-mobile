@@ -403,7 +403,40 @@ export type ModelEntry = {
   /** OpenAI-compatible base URL used when provider === "local"
    *  (e.g. Ollama: http://127.0.0.1:11434/v1). Ignored for other providers. */
   endpoint?: string;
+  /** Backend (gateway) URL this entry was created for. Each entry only
+   *  shows up — and only fires — when the active Server URL matches.
+   *  Without this, a model registered against a local backend would
+   *  silently appear in the queue when the user switches to a remote
+   *  backend that can't reach it. */
+  serverUrl?: string;
 };
+
+/**
+ * Normalize a server URL for comparison: trim whitespace, default scheme
+ * to http://, drop trailing slashes. Both sides of an entry/server-url
+ * match must be normalized the same way.
+ */
+export function normalizeServerUrlForMatch(raw: string | undefined | null): string {
+  if (!raw) return "";
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)
+    ? trimmed
+    : `http://${trimmed}`;
+  return withScheme.replace(/\/+$/, "");
+}
+
+/** Whether a model entry belongs to the given normalized backend URL. */
+export function modelEntryMatchesBackend(
+  entry: Pick<ModelEntry, "serverUrl">,
+  normalizedActiveUrl: string
+): boolean {
+  // Legacy entries without a serverUrl stamp are treated as universal so
+  // existing setups don't lose their queue on first load. Migration
+  // (in onRehydrateStorage) stamps them with the active URL on next save.
+  if (!entry.serverUrl) return true;
+  return normalizeServerUrlForMatch(entry.serverUrl) === normalizedActiveUrl;
+}
 
 export type ObsidianVaultSettings = {
   /** Master switch. Defaults to true once a vault has been validated. */
@@ -442,7 +475,7 @@ type Settings = {
   autoCompact: boolean;       // auto-compact context when window is full
   streamingEnabled: boolean;  // stream response word-by-word (vs. show all at once)
   darkMode: "system" | "light" | "dark";  // appearance preference
-  accentTheme: "claude" | "lavender";  // which accent palette to use
+  accentTheme: "claude" | "lavender" | "neo";  // which accent palette to use
   /**
    * Percentage (0–100) of the active model's context window at which to
    * proactively compact the conversation before the next turn. Also used
@@ -510,7 +543,7 @@ type GatewayState = {
   /** True once zustand-persist has finished rehydrating settings from disk */
   _hasHydrated: boolean;
   actions: {
-    setSettings: (input: Omit<Settings, "modelQueue" | "autoCompact" | "streamingEnabled" | "darkMode" | "accentTheme" | "autoCompactThreshold" | "telemetryEnabled" | "autoContinueEnabled" | "obsidianVault"> & { modelQueue?: ModelEntry[]; autoCompact?: boolean; streamingEnabled?: boolean; darkMode?: "system" | "light" | "dark"; accentTheme?: "claude" | "lavender"; autoCompactThreshold?: number; telemetryEnabled?: boolean; autoContinueEnabled?: boolean; obsidianVault?: ObsidianVaultSettings }) => void;
+    setSettings: (input: Omit<Settings, "modelQueue" | "autoCompact" | "streamingEnabled" | "darkMode" | "accentTheme" | "autoCompactThreshold" | "telemetryEnabled" | "autoContinueEnabled" | "obsidianVault"> & { modelQueue?: ModelEntry[]; autoCompact?: boolean; streamingEnabled?: boolean; darkMode?: "system" | "light" | "dark"; accentTheme?: "claude" | "lavender" | "neo"; autoCompactThreshold?: number; telemetryEnabled?: boolean; autoContinueEnabled?: boolean; obsidianVault?: ObsidianVaultSettings }) => void;
     loadThreads: () => Promise<void>;
     createThread: (workDir?: string) => Promise<Thread>;
     browseFsDirectory: (path?: string) => Promise<FsListing>;
@@ -859,7 +892,13 @@ export const useGatewayStore = create<GatewayState>()(
                 autoContinueEnabled: state.settings.autoContinueEnabled ?? true,
                 streamingEnabled: state.settings.streamingEnabled ?? true,
                 modelQueue: (() => {
-                  const q = (state.settings.modelQueue ?? []).filter((m) => m.enabled);
+                  // Only entries belonging to the active backend run — a
+                  // model registered against your local Mac shouldn't fire
+                  // when the phone is talking to your VPS, even if both
+                  // are in the same persisted queue.
+                  const activeUrl = normalizeServerUrlForMatch(state.settings.serverUrl);
+                  const q = (state.settings.modelQueue ?? [])
+                    .filter((m) => m.enabled && modelEntryMatchesBackend(m, activeUrl));
                   if (q.length > 0) return q.map(({ provider, name, apiKey, authMethod, oauthToken, endpoint }) => ({ provider, name, apiKey, authMethod, oauthToken, endpoint }));
                   if (state.settings.model) {
                     const { provider, name, apiKey } = state.settings.model;
@@ -1541,6 +1580,21 @@ export const useGatewayStore = create<GatewayState>()(
           if (s.autoCompactThreshold === undefined) patch.autoCompactThreshold = 70;
           if (s.accentTheme === undefined) patch.accentTheme = "lavender";
           if (s.autoContinueEnabled === undefined) patch.autoContinueEnabled = true;
+          // Migrate model-queue entries from before per-backend scoping
+          // existed: stamp any unstamped entry with the active server URL
+          // so it stays visible on this backend (and only this backend).
+          if (Array.isArray(s.modelQueue) && s.modelQueue.length > 0) {
+            const activeUrl = patch.serverUrl ?? s.serverUrl ?? "";
+            const stampedActive = activeUrl.trim();
+            if (stampedActive) {
+              const needsStamp = s.modelQueue.some((m) => !m.serverUrl);
+              if (needsStamp) {
+                patch.modelQueue = s.modelQueue.map((m) =>
+                  m.serverUrl ? m : { ...m, serverUrl: stampedActive }
+                );
+              }
+            }
+          }
           if (Object.keys(patch).length) {
             useGatewayStore.setState({
               settings: { ...s, ...patch },
