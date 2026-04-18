@@ -1,4 +1,4 @@
-import { spawn } from "child_process";
+import { execSync, spawn } from "child_process";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -241,6 +241,26 @@ function getBinary(model?: ModelConfig): string {
  *
  * Returns the path to the standalone config for --mcp-config.
  */
+/**
+ * Check if the `mcpvault` CLI is installed and resolvable on PATH. Result
+ * is cached per process — a missing binary won't appear without a restart
+ * since most installers (npm -g, brew) require it.
+ */
+let mcpVaultInstalledCache: boolean | null = null;
+function isMcpVaultInstalled(): boolean {
+  if (mcpVaultInstalledCache !== null) return mcpVaultInstalledCache;
+  try {
+    // `command -v` is portable across Linux/macOS shells and exits
+    // non-zero when the binary isn't found. Run via the shell so the
+    // builtin resolves correctly.
+    execSync("command -v mcpvault", { stdio: "ignore", shell: "/bin/sh" });
+    mcpVaultInstalledCache = true;
+  } catch {
+    mcpVaultInstalledCache = false;
+  }
+  return mcpVaultInstalledCache;
+}
+
 function cleanupMcpVaultConfig(cwd: string) {
   const paths = [
     path.join(cwd, ".claw", "settings.json"),
@@ -1848,11 +1868,24 @@ export const clawRuntime = {
       // Config is written before spawn and cleaned up after so it
       // doesn't persist and slow down non-vault threads.
       if (obsidianVault.useMcpVault !== false) {
-        try {
-          mcpConfigPath = writeMcpVaultConfig(cwd, obsidianVault.path);
-          logger.info({ threadId, vaultPath: obsidianVault.path }, "mcpvault MCP config written");
-        } catch (err) {
-          logger.warn({ err, threadId }, "Failed to write mcpvault config");
+        if (isMcpVaultInstalled()) {
+          try {
+            mcpConfigPath = writeMcpVaultConfig(cwd, obsidianVault.path);
+            logger.info({ threadId, vaultPath: obsidianVault.path }, "mcpvault MCP config written");
+          } catch (err) {
+            logger.warn({ err, threadId }, "Failed to write mcpvault config");
+          }
+        } else {
+          // Don't crash claw with ENOENT later — surface a clear message
+          // and continue without MCP tools so the run still works.
+          logger.warn(
+            { threadId },
+            "mcpvault not installed on PATH — skipping MCP config. Install with `npm i -g mcpvault` or disable Obsidian → Use MCP vault tools in settings."
+          );
+          emitTerminal(
+            threadId,
+            "⚠ mcpvault not installed on backend host — skipping vault MCP tools. Install with `npm i -g mcpvault` or turn off Use MCP vault tools in Settings → Obsidian."
+          );
         }
       }
     }
