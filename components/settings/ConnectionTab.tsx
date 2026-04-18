@@ -1,4 +1,4 @@
-import { Text, View } from "react-native";
+import { ActivityIndicator, Text, View } from "react-native";
 import { GlassButton } from "@/components/ui/GlassButton";
 import { usePalette } from "@/hooks/usePalette";
 import { Card, Field } from "./_shared";
@@ -14,6 +14,7 @@ export function ConnectionTab() {
     handleServerUrlBlur,
     handleBearerTokenBlur,
     testConnection,
+    connTesting,
     connStatus,
     connMessage,
   } = useSettingsForm();
@@ -38,18 +39,21 @@ export function ConnectionTab() {
           />
           <GlassButton
             onPress={testConnection}
-            style={{ borderRadius: 12, paddingVertical: 13, width: "100%" }}
+            disabled={connTesting}
+            style={{ borderRadius: 12, paddingVertical: 13, width: "100%", opacity: connTesting ? 0.7 : 1 }}
           >
-            <Text
-              style={{
-                color: palette.text,
-                fontWeight: "600",
-                fontSize: 14,
-                letterSpacing: 0.2,
-              }}
-            >
-              Test connection
-            </Text>
+            {connTesting ? (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <ActivityIndicator color={palette.text} size="small" />
+                <Text style={{ color: palette.text, fontWeight: "600", fontSize: 14, letterSpacing: 0.2 }}>
+                  Testing…
+                </Text>
+              </View>
+            ) : (
+              <Text style={{ color: palette.text, fontWeight: "600", fontSize: 14, letterSpacing: 0.2 }}>
+                Test connection
+              </Text>
+            )}
           </GlassButton>
           {connMessage && (
             <Text

@@ -39,6 +39,7 @@ type SettingsFormValue = {
   setBearerToken: (s: string) => void;
   connStatus: ConnStatus;
   connMessage: string | null;
+  connTesting: boolean;
   testConnection: () => Promise<void>;
   handleServerUrlBlur: () => void;
   handleBearerTokenBlur: () => void;
@@ -349,6 +350,7 @@ export function SettingsFormProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  const [connTesting, setConnTesting] = useState(false);
   const testConnection = async () => {
     const url = normalizeServerUrl(serverUrl);
     if (!url || !bearerToken) {
@@ -357,20 +359,29 @@ export function SettingsFormProvider({ children }: { children: ReactNode }) {
       return;
     }
     if (url !== serverUrl) setServerUrl(url);
+    setConnTesting(true);
     setConnStatus("idle");
     setConnMessage(null);
     try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10_000);
       const res = await fetch(`${url}/health`, {
         headers: { Authorization: `Bearer ${bearerToken}` },
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
       const data = await res.json();
       commitConnectionToStore({ serverUrl: url, bearerToken });
       setConnMessage(`Connected — ${data.service ?? "ok"}`);
       setConnStatus("ok");
     } catch (err: any) {
-      setConnMessage(err.message);
+      setConnMessage(
+        err?.name === "AbortError" ? "Connection timed out" : (err.message ?? "Connection failed")
+      );
       setConnStatus("error");
+    } finally {
+      setConnTesting(false);
     }
   };
 
@@ -807,6 +818,7 @@ export function SettingsFormProvider({ children }: { children: ReactNode }) {
     setBearerToken,
     connStatus,
     connMessage,
+    connTesting,
     testConnection,
     handleServerUrlBlur,
     handleBearerTokenBlur,
