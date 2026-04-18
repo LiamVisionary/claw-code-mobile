@@ -445,13 +445,13 @@ function ChatRow({ thread, onPress, palette }: { thread: Thread; onPress: () => 
   const isRunning = thread.status === "running";
   const dirName = thread.workDir ? thread.workDir.split("/").filter(Boolean).pop() : null;
   return (
+    <View style={{ backgroundColor: palette.bg }}>
     <TouchableBounce sensory onPress={onPress}>
       <View
         style={{
           paddingHorizontal: 24,
           paddingVertical: 18,
           gap: 6,
-          backgroundColor: palette.bg,
         }}
       >
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
@@ -515,5 +515,6 @@ function ChatRow({ thread, onPress, palette }: { thread: Thread; onPress: () => 
         )}
       </View>
     </TouchableBounce>
+    </View>
   );
 }
