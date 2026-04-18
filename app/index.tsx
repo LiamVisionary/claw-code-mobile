@@ -237,7 +237,7 @@ export default function ChatListScreen() {
       <Stack.Screen
         options={{
           headerTitle: () => (
-            <View style={{ alignItems: "center", gap: 3 }}>
+            <View style={{ alignItems: "center", gap: 8, paddingTop: 6 }}>
               {/* Project dropdown */}
               <TouchableBounce sensory onPress={() => setShowProjectPicker((v) => !v)}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
