@@ -22,7 +22,8 @@
     "production": {
       "environment": "production",
       "autoIncrement": true,
-      "resourceClass": "large"
+      "resourceClass": "large",
+      "node": "24.0.0"
     }
   },
   "submit": {
