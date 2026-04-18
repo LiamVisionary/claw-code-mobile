@@ -1709,6 +1709,13 @@ export default function SettingsScreen() {
     const s = initialRef.current;
     setServerUrl(s.serverUrl);
     setBearerToken(s.bearerToken);
+    // Connection settings are committed on blur, so revert must also
+    // push the original values back to the store — otherwise the store
+    // keeps whatever the user last typed even after the UI rewinds.
+    commitConnectionToStore({
+      serverUrl: s.serverUrl,
+      bearerToken: s.bearerToken,
+    });
     setQueue(s.queue);
     setAutoCompact(s.autoCompact);
     setStreamingEnabled(s.streamingEnabled);
@@ -2047,20 +2054,66 @@ export default function SettingsScreen() {
     }
   };
 
+  /**
+   * Default a missing scheme to http:// so users can paste bare host:port
+   * (e.g. "192.168.1.9:5000") without remembering the protocol. Strip
+   * trailing slashes since the rest of the app appends paths directly.
+   */
+  const normalizeServerUrl = (raw: string): string => {
+    const trimmed = raw.trim();
+    if (!trimmed) return "";
+    const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)
+      ? trimmed
+      : `http://${trimmed}`;
+    return withScheme.replace(/\/+$/, "");
+  };
+
+  /**
+   * Push the current connection settings to the store immediately, so
+   * other parts of the app (e.g. the Local model picker) see them without
+   * waiting for the settings modal to close. The initialRef snapshot is
+   * left untouched so the Revert button still restores the pre-edit
+   * values.
+   */
+  const commitConnectionToStore = (next: {
+    serverUrl: string;
+    bearerToken: string;
+  }) => {
+    actions.setSettings({
+      serverUrl: next.serverUrl,
+      bearerToken: next.bearerToken,
+    });
+  };
+
+  const handleServerUrlBlur = () => {
+    const normalized = normalizeServerUrl(serverUrl);
+    if (normalized !== serverUrl) setServerUrl(normalized);
+    commitConnectionToStore({ serverUrl: normalized, bearerToken });
+  };
+
+  const handleBearerTokenBlur = () => {
+    commitConnectionToStore({ serverUrl: normalizeServerUrl(serverUrl), bearerToken });
+  };
+
   const testConnection = async () => {
-    if (!serverUrl || !bearerToken) {
+    const url = normalizeServerUrl(serverUrl);
+    if (!url || !bearerToken) {
       setConnMessage("Set server URL and token first.");
       setConnStatus("error");
       return;
     }
+    if (url !== serverUrl) setServerUrl(url);
     setConnStatus("idle");
     setConnMessage(null);
     try {
-      const res = await fetch(`${serverUrl.replace(/\/+$/, "")}/health`, {
+      const res = await fetch(`${url}/health`, {
         headers: { Authorization: `Bearer ${bearerToken}` },
       });
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
       const data = await res.json();
+      // Persist immediately on a successful test so the rest of the app
+      // can use the new URL without waiting for the modal to close.
+      commitConnectionToStore({ serverUrl: url, bearerToken });
       setConnMessage(`Connected — ${data.service ?? "ok"}`);
       setConnStatus("ok");
     } catch (err: any) {
@@ -2135,9 +2188,10 @@ export default function SettingsScreen() {
         <Card palette={palette}>
           <View style={{ padding: 18, gap: 12 }}>
             <Field
-              placeholder="Server URL"
+              placeholder="Server URL (e.g. 192.168.1.9:5000)"
               value={serverUrl}
               onChangeText={setServerUrl}
+              onEndEditing={handleServerUrlBlur}
               palette={palette}
               keyboardType="url"
             />
@@ -2145,6 +2199,7 @@ export default function SettingsScreen() {
               placeholder="Bearer token"
               value={bearerToken}
               onChangeText={setBearerToken}
+              onEndEditing={handleBearerTokenBlur}
               palette={palette}
               secureTextEntry
             />
