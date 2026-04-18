@@ -451,6 +451,7 @@ function ChatRow({ thread, onPress, palette }: { thread: Thread; onPress: () => 
           paddingHorizontal: 24,
           paddingVertical: 18,
           gap: 6,
+          backgroundColor: palette.bg,
         }}
       >
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
