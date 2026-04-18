@@ -10,18 +10,7 @@ import {
 import { FlatList } from "react-native-gesture-handler";
 import { useRouter, Link } from "expo-router";
 import { useFocusEffect } from "expo-router";
-import ReanimatedSwipeable, {
-  SwipeDirection,
-} from "react-native-gesture-handler/ReanimatedSwipeable";
-import Reanimated, {
-  SharedValue,
-  useAnimatedStyle,
-  useAnimatedReaction,
-  interpolate,
-  runOnJS,
-  withTiming,
-} from "react-native-reanimated";
-import * as Haptics from "expo-haptics";
+import Swipeable from "react-native-gesture-handler/Swipeable";
 import TouchableBounce from "@/components/ui/TouchableBounce";
 import { GlassButton } from "@/components/ui/GlassButton";
 import { useGatewayStore } from "@/store/gatewayStore";
@@ -37,135 +26,40 @@ import type { Palette } from "@/constants/palette";
 
 // ─── Right-side swipe actions (Rename + Duplicate + Delete) ─────────────────
 
-const ACTION_WIDTH = 76;
-const TOTAL_ACTIONS_WIDTH = ACTION_WIDTH * 3;
-// Drag past this (in pixels) to arm the full-swipe-to-delete shortcut.
-// Just shy of the parked 228px rest position so a firm swipe triggers it.
-const FULL_SWIPE_THRESHOLD = 200;
+const ACTION_WIDTH = 72;
 
 function RightActions({
-  prog,
-  drag,
   onDelete,
   onDuplicate,
   onRename,
   palette,
-  onFullSwipeChange,
 }: {
-  prog: SharedValue<number>;
-  drag: SharedValue<number>;
   onDelete: () => void;
   onDuplicate: () => void;
   onRename: () => void;
   palette: Palette;
-  onFullSwipeChange: (armed: boolean) => void;
 }) {
-  const containerStyle = useAnimatedStyle(() => {
-    const width = interpolate(prog.value, [0, 1], [0, TOTAL_ACTIONS_WIDTH], "clamp");
-    return { width, overflow: "hidden" };
-  });
-
-  const normalActionsStyle = useAnimatedStyle(() => {
-    const armed = drag.value < -FULL_SWIPE_THRESHOLD;
-    return { opacity: withTiming(armed ? 0 : 1, { duration: 140 }) };
-  });
-
-  const overlayStyle = useAnimatedStyle(() => {
-    const armed = drag.value < -FULL_SWIPE_THRESHOLD;
-    return { opacity: withTiming(armed ? 1 : 0, { duration: 140 }) };
-  });
-
-  useAnimatedReaction(
-    () => drag.value < -FULL_SWIPE_THRESHOLD,
-    (armed, prev) => {
-      if (prev !== null && armed !== prev) {
-        runOnJS(onFullSwipeChange)(armed);
-      }
-    }
-  );
-
   return (
-    <Reanimated.View
-      style={[{ flexDirection: "row", alignItems: "stretch" }, containerStyle]}
-    >
-      <Reanimated.View style={[{ flexDirection: "row", flex: 1 }, normalActionsStyle]}>
-        {/* Rename */}
-        <TouchableBounce sensory onPress={onRename}>
-          <View
-            style={{
-              width: ACTION_WIDTH,
-              flex: 1,
-              backgroundColor: palette.textSoft,
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 4,
-            }}
-          >
-            <IconSymbol name="pencil" color="#fff" size={20} />
-            <Text style={{ color: "#fff", fontSize: 12, fontWeight: "600" }}>Rename</Text>
-          </View>
-        </TouchableBounce>
-
-        {/* Duplicate */}
-        <TouchableBounce sensory onPress={onDuplicate}>
-          <View
-            style={{
-              width: ACTION_WIDTH,
-              flex: 1,
-              backgroundColor: palette.accent,
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 4,
-            }}
-          >
-            <IconSymbol name="doc.on.doc" color="#fff" size={20} />
-            <Text style={{ color: "#fff", fontSize: 12, fontWeight: "600" }}>Duplicate</Text>
-          </View>
-        </TouchableBounce>
-
-        {/* Delete */}
-        <TouchableBounce sensory onPress={onDelete}>
-          <View
-            style={{
-              width: ACTION_WIDTH,
-              flex: 1,
-              backgroundColor: palette.danger,
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 4,
-            }}
-          >
-            <IconSymbol name="trash" color="#fff" size={20} />
-            <Text style={{ color: "#fff", fontSize: 12, fontWeight: "600" }}>Delete</Text>
-          </View>
-        </TouchableBounce>
-      </Reanimated.View>
-
-      {/* Full-swipe overlay — covers the whole action area once armed */}
-      <Reanimated.View
-        pointerEvents="none"
-        style={[
-          {
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: palette.danger,
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 8,
-          },
-          overlayStyle,
-        ]}
-      >
-        <IconSymbol name="trash" color="#fff" size={22} />
-        <Text style={{ color: "#fff", fontSize: 14, fontWeight: "700" }}>
-          Release to delete
-        </Text>
-      </Reanimated.View>
-    </Reanimated.View>
+    <View style={{ flexDirection: "row", alignItems: "stretch" }}>
+      <TouchableBounce sensory onPress={onRename}>
+        <View style={{ width: ACTION_WIDTH, flex: 1, backgroundColor: palette.textSoft, alignItems: "center", justifyContent: "center", gap: 4 }}>
+          <IconSymbol name="pencil" color="#fff" size={18} />
+          <Text style={{ color: "#fff", fontSize: 11, fontWeight: "600" }}>Rename</Text>
+        </View>
+      </TouchableBounce>
+      <TouchableBounce sensory onPress={onDuplicate}>
+        <View style={{ width: ACTION_WIDTH, flex: 1, backgroundColor: palette.accent, alignItems: "center", justifyContent: "center", gap: 4 }}>
+          <IconSymbol name="doc.on.doc" color="#fff" size={18} />
+          <Text style={{ color: "#fff", fontSize: 11, fontWeight: "600" }}>Duplicate</Text>
+        </View>
+      </TouchableBounce>
+      <TouchableBounce sensory onPress={onDelete}>
+        <View style={{ width: ACTION_WIDTH, flex: 1, backgroundColor: palette.danger, alignItems: "center", justifyContent: "center", gap: 4 }}>
+          <IconSymbol name="trash" color="#fff" size={18} />
+          <Text style={{ color: "#fff", fontSize: 11, fontWeight: "600" }}>Delete</Text>
+        </View>
+      </TouchableBounce>
+    </View>
   );
 }
 
@@ -500,7 +394,6 @@ function SwipeableChatRow({
   thread,
   onPress,
   onDelete,
-  onDeleteImmediate,
   onDuplicate,
   onRename,
   palette,
@@ -508,50 +401,31 @@ function SwipeableChatRow({
   thread: Thread;
   onPress: () => void;
   onDelete: () => void;
-  onDeleteImmediate: () => void;
+  onDeleteImmediate?: () => void;
   onDuplicate: () => void;
   onRename: () => void;
   palette: Palette;
 }) {
-  const swipeRef = useRef<any>(null);
-  const fullSwipeArmedRef = useRef(false);
-
+  const swipeRef = useRef<Swipeable>(null);
   const close = () => swipeRef.current?.close();
 
-  const handleFullSwipeChange = useCallback((armed: boolean) => {
-    fullSwipeArmedRef.current = armed;
-    if (armed) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    }
-  }, []);
-
   return (
-    <ReanimatedSwipeable
+    <Swipeable
       ref={swipeRef}
       friction={2}
       overshootRight={false}
-      rightThreshold={60}
-      onSwipeableWillOpen={(direction) => {
-        if (direction === SwipeDirection.RIGHT && fullSwipeArmedRef.current) {
-          fullSwipeArmedRef.current = false;
-          swipeRef.current?.close();
-          onDeleteImmediate();
-        }
-      }}
-      renderRightActions={(prog, drag) => (
+      rightThreshold={40}
+      renderRightActions={() => (
         <RightActions
-          prog={prog}
-          drag={drag}
           onDelete={() => { close(); onDelete(); }}
           onDuplicate={() => { close(); onDuplicate(); }}
           onRename={() => { close(); onRename(); }}
           palette={palette}
-          onFullSwipeChange={handleFullSwipeChange}
         />
       )}
     >
       <ChatRow thread={thread} onPress={onPress} palette={palette} />
-    </ReanimatedSwipeable>
+    </Swipeable>
   );
 }
 
