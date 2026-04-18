@@ -1244,34 +1244,43 @@ async function processSuccess(
     active.turnTokensOut = result.usage.output_tokens;
   }
 
-  // Local runners don't bill anyone — show a friendly note instead of
-  // claw's hardcoded Anthropic-rate guess (which would be off by orders
-  // of magnitude and misleading).
+  // Cost line is provider-specific so we never quote a rate that doesn't
+  // apply to the model that actually ran:
+  // - local: free; show electric-bill quip + savings vs Anthropic.
+  // - claude: claw's `estimated_cost` is correct (it IS the Anthropic rate).
+  // - openrouter / other: prefer OpenRouter's pricing table, fall back to
+  //   tokens-only when the model isn't in the cache (skip the bogus
+  //   Anthropic-rate estimate that claw emits for everyone).
   if (active.turnProvider === "local") {
+    const savingsLine = buildSavingsLine(active.turnModel, inTok, outTok, 0);
     emitTerminal(
       threadId,
-      `Cost: just your electric bill ;) | in: ${inTok} out: ${outTok}`
+      `Cost: just your electric bill ;) | in: ${inTok} out: ${outTok}${savingsLine}`
     );
     active.turnCostUsd = 0;
-  } else {
-    // Calculate cost from real OpenRouter pricing instead of claw's
-    // hardcoded Anthropic rates — claw can be 40-50x off for non-Anthropic
-    // models.
-    const realCost = calculateRealCost(active.turnModel, inTok, outTok);
-    const costDisplay = realCost ?? result.estimated_cost;
-    const savingsLine = buildSavingsLine(active.turnModel, inTok, outTok);
-    if (costDisplay) {
+  } else if (active.turnProvider === "claude" || isAnthropicModel(active.turnModel)) {
+    if (result.estimated_cost) {
       emitTerminal(
         threadId,
-        `Cost: ${costDisplay} | in: ${inTok} out: ${outTok}${savingsLine}`
+        `Cost: ${result.estimated_cost} | in: ${inTok} out: ${outTok}`
       );
-    }
-    if (realCost) {
-      const n = parseFloat(realCost.replace(/[^0-9.]/g, ""));
-      if (Number.isFinite(n)) active.turnCostUsd = n;
-    } else if (result.estimated_cost) {
       const n = parseFloat(String(result.estimated_cost).replace(/[^0-9.]/g, ""));
       if (Number.isFinite(n)) active.turnCostUsd = n;
+    }
+  } else {
+    const realCost = calculateRealCost(active.turnModel, inTok, outTok);
+    const savingsLine = buildSavingsLine(active.turnModel, inTok, outTok);
+    if (realCost) {
+      emitTerminal(
+        threadId,
+        `Cost: ${realCost} | in: ${inTok} out: ${outTok}${savingsLine}`
+      );
+      const n = parseFloat(realCost.replace(/[^0-9.]/g, ""));
+      if (Number.isFinite(n)) active.turnCostUsd = n;
+    } else {
+      // Model not in OpenRouter pricing data — show tokens but no
+      // dollar figure rather than claw's hardcoded Anthropic guess.
+      emitTerminal(threadId, `Tokens — in: ${inTok} out: ${outTok}`);
     }
   }
 
@@ -1413,14 +1422,22 @@ function buildSavingsLine(
   modelName: string | undefined,
   inputTokens: number,
   outputTokens: number,
+  /** Override the user's per-turn cost — used for local runs which are free. */
+  userCostOverride?: number,
 ): string {
-  if (!modelName || isAnthropicModel(modelName)) return "";
-  const userMeta = lookupModelMeta(modelName);
-  if (!userMeta) return "";
-  const userCost =
-    inputTokens * userMeta.inputCostPerToken +
-    outputTokens * userMeta.outputCostPerToken;
-  if (userCost <= 0) return "";
+  if (isAnthropicModel(modelName)) return "";
+  let userCost: number;
+  if (userCostOverride !== undefined) {
+    userCost = userCostOverride;
+  } else {
+    if (!modelName) return "";
+    const userMeta = lookupModelMeta(modelName);
+    if (!userMeta) return "";
+    userCost =
+      inputTokens * userMeta.inputCostPerToken +
+      outputTokens * userMeta.outputCostPerToken;
+    if (userCost <= 0) return "";
+  }
 
   const opusCost =
     inputTokens * ANTHROPIC_PRICING.opus.input +
