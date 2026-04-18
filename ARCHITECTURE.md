@@ -2,7 +2,7 @@
 
 ## Overview
 
-**Claw Code** is an AI chat client — a React Native (Expo) mobile app paired with an Express.js backend that acts as a gateway to an AI coding agent called **Claw**. The mobile app provides a chat interface where users converse with an AI that can execute code, edit files, and manage projects on a remote VPS.
+**Claw Code Mobile** is an AI chat client — a React Native (Expo) mobile app paired with an Express.js backend that acts as a gateway to an AI coding agent called **Claw**. The mobile app provides a chat interface where users converse with an AI that can execute code, edit files, and manage projects on a remote VPS.
 
 ---
 
