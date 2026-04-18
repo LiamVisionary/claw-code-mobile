@@ -215,6 +215,25 @@ ssh -N -R 11434:localhost:11434 -o ServerAliveInterval=30 -o ExitOnForwardFailur
 
 That makes your Mac's Ollama appear on the VPS as `127.0.0.1:11434` for as long as the SSH session is alive. Because it's the VPS's own loopback, you use **Current backend → Scan** in the app (not Other). Wrap with `autossh` if you want auto-reconnect.
 
+#### Model compatibility
+
+Tool-calling support depends on the format the model emits. Claw demuxes three dialects so they all flow through the same agent loop with clean tool-use events:
+
+| Model family | Tool-call format | Status | Notes |
+|--------------|------------------|:------:|-------|
+| **Anthropic** Claude (Opus / Sonnet / Haiku) | OpenAI-native `tool_calls` | ✅ | Reference implementation. |
+| **OpenAI** GPT-4 / GPT-4o / GPT-5 / o-series | OpenAI-native `tool_calls` | ✅ | Direct or via OpenRouter. |
+| **xAI** Grok 3 / 3-mini / 2 | OpenAI-native `tool_calls` | ✅ | |
+| **Anything via OpenRouter** | OpenAI-native `tool_calls` | ✅ | If the upstream emits structured `tool_calls`, it works. |
+| **OpenAI gpt-oss** (`gpt-oss:20b`, `gpt-oss-120b`) | Harmony channels (`<\|channel\|>`…) | ✅ | Demuxer routes `analysis` → thinking, `commentary` → tool_use, `final` → text. |
+| **Qwen Coder** (`qwen2.5-coder`, `qwen3-coder`, etc.) | Hermes XML (`<tool_call>{…}</tool_call>`) | ✅ | Demuxer extracts the JSON, keeps surrounding prose as text. |
+| **Qwen 2.5 / 3** instruct | Hermes XML | ✅ | Same demuxer. |
+| **Nous Hermes / Hermes-3** | Hermes XML | ✅ | Same demuxer. |
+| **Any chat-only model** (no `tools` capability) | n/a | ⚠️ chat works, no tools | Plain Q&A is fine; the agent loop has nothing to call. Examples: base Llama, Gemma E4B (Ollama doesn't declare `tools` for it). |
+| Custom / unknown tool-call format | n/a | ❌ | If the model emits a fourth dialect we haven't encoded, tool-use markers will leak as text. File an issue with a sample. |
+
+Format detection is by model name (`gpt-oss*` → Harmony, `qwen*coder*` / `hermes*` / `nous-*` → Hermes XML, everything else → OpenAI-native). The chunk-stream demuxer handles partial markers across SSE chunk boundaries, so a tool-call broken mid-token doesn't leak as text. Coverage is locked in by 9 integration tests in [`crates/api/src/providers/openai_compat.rs`](claw-code/rust/crates/api/src/providers/openai_compat.rs) — `cargo test -p api pipeline_` to run them.
+
 ---
 
 ### Obsidian vault integration
