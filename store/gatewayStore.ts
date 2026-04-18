@@ -3,6 +3,15 @@ import * as FileSystem from "expo-file-system/legacy";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { buildLocalPreamble } from "@/util/vault/localVault";
+import {
+  modelEntryMatchesBackend,
+  normalizeServerUrlForMatch,
+  selectQueueForBackend,
+  stampUnstampedEntries,
+} from "./queueScope";
+
+// Re-export so callers (settings.tsx) can keep importing from the store.
+export { modelEntryMatchesBackend, normalizeServerUrlForMatch } from "./queueScope";
 
 /**
  * Infer the gateway server URL from Expo's packager host.
@@ -411,32 +420,6 @@ export type ModelEntry = {
   serverUrl?: string;
 };
 
-/**
- * Normalize a server URL for comparison: trim whitespace, default scheme
- * to http://, drop trailing slashes. Both sides of an entry/server-url
- * match must be normalized the same way.
- */
-export function normalizeServerUrlForMatch(raw: string | undefined | null): string {
-  if (!raw) return "";
-  const trimmed = raw.trim();
-  if (!trimmed) return "";
-  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)
-    ? trimmed
-    : `http://${trimmed}`;
-  return withScheme.replace(/\/+$/, "");
-}
-
-/** Whether a model entry belongs to the given normalized backend URL. */
-export function modelEntryMatchesBackend(
-  entry: Pick<ModelEntry, "serverUrl">,
-  normalizedActiveUrl: string
-): boolean {
-  // Legacy entries without a serverUrl stamp are treated as universal so
-  // existing setups don't lose their queue on first load. Migration
-  // (in onRehydrateStorage) stamps them with the active URL on next save.
-  if (!entry.serverUrl) return true;
-  return normalizeServerUrlForMatch(entry.serverUrl) === normalizedActiveUrl;
-}
 
 export type ObsidianVaultSettings = {
   /** Master switch. Defaults to true once a vault has been validated. */
@@ -897,8 +880,10 @@ export const useGatewayStore = create<GatewayState>()(
                   // when the phone is talking to your VPS, even if both
                   // are in the same persisted queue.
                   const activeUrl = normalizeServerUrlForMatch(state.settings.serverUrl);
-                  const q = (state.settings.modelQueue ?? [])
-                    .filter((m) => m.enabled && modelEntryMatchesBackend(m, activeUrl));
+                  const q = selectQueueForBackend(
+                    state.settings.modelQueue ?? [],
+                    activeUrl
+                  );
                   if (q.length > 0) return q.map(({ provider, name, apiKey, authMethod, oauthToken, endpoint }) => ({ provider, name, apiKey, authMethod, oauthToken, endpoint }));
                   if (state.settings.model) {
                     const { provider, name, apiKey } = state.settings.model;
@@ -1584,16 +1569,9 @@ export const useGatewayStore = create<GatewayState>()(
           // existed: stamp any unstamped entry with the active server URL
           // so it stays visible on this backend (and only this backend).
           if (Array.isArray(s.modelQueue) && s.modelQueue.length > 0) {
-            const activeUrl = patch.serverUrl ?? s.serverUrl ?? "";
-            const stampedActive = activeUrl.trim();
-            if (stampedActive) {
-              const needsStamp = s.modelQueue.some((m) => !m.serverUrl);
-              if (needsStamp) {
-                patch.modelQueue = s.modelQueue.map((m) =>
-                  m.serverUrl ? m : { ...m, serverUrl: stampedActive }
-                );
-              }
-            }
+            const activeUrl = (patch.serverUrl ?? s.serverUrl ?? "").trim();
+            const stamped = stampUnstampedEntries(s.modelQueue, activeUrl);
+            if (stamped) patch.modelQueue = stamped;
           }
           if (Object.keys(patch).length) {
             useGatewayStore.setState({

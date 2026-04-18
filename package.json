@@ -20,7 +20,7 @@
     "deploy:web": "expo export -p web && npx eas-cli@latest deploy",
     "rebundle": "npx expo run:ios --configuration Release --unstable-rebundle --no-bundler",
     "prepare": "npx --yes patch-package",
-    "test": "npm --prefix backend run test && cd backend && node --test --import tsx --test-reporter=spec ../utils/markdownCleanup.test.ts",
+    "test": "npm --prefix backend run test && cd backend && node --test --import tsx --test-reporter=spec ../utils/markdownCleanup.test.ts ../store/queueScope.test.ts",
     "test:live": "npm --prefix backend run test:live"
   },
   "dependencies": {
