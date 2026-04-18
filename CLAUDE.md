@@ -15,6 +15,7 @@ For trivial edits (typo fixes, single-line tweaks) you can skip the read — but
 
 - [README.md](README.md) — user-facing setup, features, screens, runbook.
 - [FEATURES.md](FEATURES.md) — feature matrix.
+- [ROADMAP.md](ROADMAP.md) — what's planned, what's in progress, what's shipped.
 - [UX_IMPROVEMENTS.md](UX_IMPROVEMENTS.md) — open UX backlog.
 
 These are reference material — read on demand, not by default.

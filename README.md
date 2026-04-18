@@ -26,7 +26,7 @@ This project is open source because I want people to be able to benefit from it,
 
 Building this from my phone in just a few days was a fun challenge, and I genuinely enjoyed it. I hope you have just as much fun using it.
 
-Contributions are very welcome. The bigger goal is to give people an intuitive mobile UI and UX for building from anywhere, with affordable OpenRouter options, strong local-model support, and an open foundation the community can keep pushing forward.
+Contributions are very welcome. The bigger goal is to give people an intuitive mobile UI and UX for building from anywhere, with affordable OpenRouter options, strong local-model support, and an open foundation the community can keep pushing forward. See [ROADMAP.md](ROADMAP.md) for what's coming next and what's open to grab.
 
 This project wouldn't be possible without:
 
