@@ -504,6 +504,12 @@ type Settings = {
 
 type GatewayState = {
   settings: Settings;
+  /** User-defined project names for organizing threads. "General" is implicit. */
+  projects: string[];
+  /** Currently active project filter. Empty string = "General" (unassigned). */
+  activeProject: string;
+  /** Thread ID → project name mapping. Unassigned threads belong to "General". */
+  threadProject: Record<string, string>;
   threads: Thread[];
   messages: Record<string, Message[]>;
   terminal: Record<string, string[]>;
@@ -563,6 +569,11 @@ type GatewayState = {
     killTerminal: (threadId: string) => Promise<void>;
     snapshotTerminal: (threadId: string) => Promise<string[]>;
     setActiveThread: (threadId: string) => void;
+    // ── Project management ──
+    addProject: (name: string) => void;
+    deleteProject: (name: string) => void;
+    setActiveProject: (name: string) => void;
+    assignThreadToProject: (threadId: string, project: string) => void;
     /** Respond to a permission request (approve/deny) */
     respondToPermission: (threadId: string, permissionId: string, approved: boolean) => Promise<void>;
     refreshThread: (threadId: string) => Promise<void>;
@@ -698,6 +709,9 @@ export const useGatewayStore = create<GatewayState>()(
           useMcpVault: true,
         },
       },
+      projects: [],
+      activeProject: "",
+      threadProject: {},
       threads: [],
       messages: {},
       terminal: {},
@@ -784,10 +798,15 @@ export const useGatewayStore = create<GatewayState>()(
           });
           if (!res.ok) throw new Error("Failed to create thread");
           const data = await res.json();
+          const thread = data.thread as Thread;
           set((current) => ({
-            threads: [data.thread, ...current.threads],
+            threads: [thread, ...current.threads],
+            // Auto-assign to active project
+            threadProject: current.activeProject
+              ? { ...current.threadProject, [thread.id]: current.activeProject }
+              : current.threadProject,
           }));
-          return data.thread as Thread;
+          return thread;
         },
 
         browseFsDirectory: async (dirPath?: string) => {
@@ -1428,6 +1447,30 @@ export const useGatewayStore = create<GatewayState>()(
 
         setActiveThread: (threadId: string) => set({ activeThreadId: threadId }),
 
+        // ── Project management ──
+        addProject: (name: string) =>
+          set((s) => ({
+            projects: s.projects.includes(name) ? s.projects : [...s.projects, name],
+          })),
+        deleteProject: (name: string) =>
+          set((s) => {
+            // Move threads in this project back to General
+            const nextMap = { ...s.threadProject };
+            for (const [tid, p] of Object.entries(nextMap)) {
+              if (p === name) delete nextMap[tid];
+            }
+            return {
+              projects: s.projects.filter((p) => p !== name),
+              activeProject: s.activeProject === name ? "" : s.activeProject,
+              threadProject: nextMap,
+            };
+          }),
+        setActiveProject: (name: string) => set({ activeProject: name }),
+        assignThreadToProject: (threadId: string, project: string) =>
+          set((s) => ({
+            threadProject: { ...s.threadProject, [threadId]: project },
+          })),
+
         respondToPermission: async (threadId: string, permissionId: string, approved: boolean) => {
           const state = get();
           const { baseUrl, headers } = getClientConfig(state);
@@ -1585,7 +1628,12 @@ export const useGatewayStore = create<GatewayState>()(
     {
       name: "gateway-settings",
       storage: createJSONStorage(() => fileStorage),
-      partialize: (state) => ({ settings: state.settings }),
+      partialize: (state) => ({
+        settings: state.settings,
+        projects: state.projects,
+        activeProject: state.activeProject,
+        threadProject: state.threadProject,
+      }),
       onRehydrateStorage: () => (state) => {
         // Prefer EXPO_PUBLIC_GATEWAY_URL / EXPO_PUBLIC_GATEWAY_TOKEN when set
         // — these are baked into the bundle by scripts/dev-tunnel.mjs and must

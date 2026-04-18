@@ -4,6 +4,7 @@ import {
   Alert,
   AppState,
   Platform,
+  ScrollView,
   Text,
   View,
 } from "react-native";
@@ -70,9 +71,13 @@ export default function ChatListScreen() {
   const { threads, loadingThreads, _hasHydrated } = useGatewayStore();
   const actions = useGatewayStore((s) => s.actions);
   const obsidianVault = useGatewayStore((s) => s.settings.obsidianVault);
+  const projects = useGatewayStore((s) => s.projects);
+  const activeProject = useGatewayStore((s) => s.activeProject);
+  const threadProject = useGatewayStore((s) => s.threadProject);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showBrowser, setShowBrowser] = useState(false);
+  const [showProjectPicker, setShowProjectPicker] = useState(false);
   const [view, setView] = useState<"chats" | "notes">("chats");
   const { top, bottom } = useSafeAreaInsets();
   const headerHeight = useHeaderHeight();
@@ -124,9 +129,42 @@ export default function ChatListScreen() {
     return () => sub.remove();
   }, [_hasHydrated, actions]);
 
-  const sortedThreads = [...threads].sort(
-    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-  );
+  const sortedThreads = [...threads]
+    .filter((t) => {
+      const tp = threadProject[t.id] || "";
+      return tp === activeProject;
+    })
+    .sort(
+      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    );
+
+  const activeProjectLabel = activeProject || "General";
+  const allProjects = ["", ...projects]; // "" = General
+
+  const handleNewProject = () => {
+    Alert.prompt(
+      "New project",
+      "Enter a name for the project",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Create",
+          onPress: (name?: string) => {
+            const trimmed = name?.trim();
+            if (!trimmed) return;
+            if (projects.includes(trimmed)) {
+              Alert.alert("Already exists", `"${trimmed}" is already a project.`);
+              return;
+            }
+            actions.addProject(trimmed);
+            actions.setActiveProject(trimmed);
+            setShowProjectPicker(false);
+          },
+        },
+      ],
+      "plain-text"
+    );
+  };
 
   const handleNewChat = () => setShowBrowser(true);
 
@@ -280,6 +318,54 @@ export default function ChatListScreen() {
             {error}
           </Text>
         )}
+
+        {/* ── Project picker ── */}
+        <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4 }}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ gap: 6, alignItems: "center" }}
+          >
+            {allProjects.map((p) => {
+              const label = p || "General";
+              const selected = p === activeProject;
+              return (
+                <TouchableBounce key={label} sensory onPress={() => actions.setActiveProject(p)}>
+                  <View
+                    style={{
+                      paddingHorizontal: 14,
+                      paddingVertical: 7,
+                      borderRadius: 20,
+                      backgroundColor: selected ? palette.accent : palette.surfaceAlt,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 13,
+                        fontWeight: "600",
+                        color: selected ? "#fff" : palette.textMuted,
+                      }}
+                    >
+                      {label}
+                    </Text>
+                  </View>
+                </TouchableBounce>
+              );
+            })}
+            <TouchableBounce sensory onPress={handleNewProject}>
+              <View
+                style={{
+                  paddingHorizontal: 10,
+                  paddingVertical: 7,
+                  borderRadius: 20,
+                  backgroundColor: palette.surfaceAlt,
+                }}
+              >
+                <IconSymbol name="plus" size={14} color={palette.textMuted} />
+              </View>
+            </TouchableBounce>
+          </ScrollView>
+        </View>
 
         {view === "notes" ? (
           <VaultNotesPane palette={palette} />
