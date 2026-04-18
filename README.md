@@ -197,11 +197,13 @@ The VPS can't reach your Mac's loopback or LAN IP. You need to expose Ollama at 
 
 ```bash
 brew install cloudflared
-OLLAMA_ORIGINS='*' ollama serve                              # one terminal
-cloudflared tunnel --url http://localhost:11434              # another terminal
+ollama serve                                                                 # one terminal
+cloudflared tunnel --url http://localhost:11434 --http-host-header localhost # another terminal
 ```
 
 cloudflared prints a `https://<random>.trycloudflare.com` URL. In the app: **Local → Other → paste the URL → Scan**.
+
+> `--http-host-header localhost` is required: Ollama rejects requests whose Host header isn't `localhost`/`127.0.0.1` and you'll get 403s without it. The flag tells cloudflared to send `Host: localhost` upstream while keeping the public URL untouched.
 
 > The URL is unguessable but technically public — anyone with it can use your Ollama until you `Ctrl+C` the tunnel. Treat it like a password and kill it when you're done.
 
