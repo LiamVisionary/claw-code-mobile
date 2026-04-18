@@ -17,7 +17,7 @@ Chat with an AI that can execute code, edit files, and manage projects on your r
 - **Permission prompts** — Approve or deny dangerous operations inline before the agent proceeds
 - **Turn telemetry** — Expandable "Worked for X" row after each turn showing cost, tokens, tool steps, and savings vs Anthropic pricing
 - **Image & file attachments** — Send images/files to multimodal models via the `+` button; vision-capability gated per model
-- **Terminal drawer** — Pull-up bottom sheet with live terminal output and command input
+- **Interactive terminal** — Pull-up bottom sheet with a persistent shell on the backend host. Type commands with a real prompt that shows the current working directory; ANSI colors render inline, output is rate-limited and batched so `ls` feels instant. A keyboard accessory row adds the keys iOS buries (`|`, `~`, `/`, `\`, etc.), history ↑/↓, tab, esc, and sticky `ctrl`/`⌘` modifiers. **Send last output to Claw** pastes the results of the most recent command into the chat composer for easy follow-up. See [Interactive terminal](#interactive-terminal) for more.
 - **Model queue with fallback + retry** — Configure multiple AI models (Claude, OpenRouter, or any local OpenAI-compatible server — Ollama/LM Studio/llama.cpp) that retry transient errors with backoff before falling through to the next model. See [Local models](#local-models-ollama--lm-studio--llamacpp) for setup.
 - **Auto-compact** — Automatically summarizes conversation context when the window fills up
 - **Directory browser** — Browse your remote filesystem and pick a working directory per thread
@@ -228,6 +228,29 @@ Writes only work with the backend provider — the backend can't reach back into
 
 ---
 
+### Interactive terminal
+
+Tap the terminal icon in the thread header to open a full-height bottom sheet with a real shell running on the backend host — one persistent `bash` per thread, spawned lazily on the first command and killed when the thread is deleted. The shell starts in the thread's `workDir`, so `cd`, environment variables, and shell state persist across commands the way they would in a real terminal.
+
+**Why it exists:** sometimes the agent asks you to run something it can't run itself — an interactive installer, a command that needs your credentials, or a one-off you'd rather verify by hand. Before this, you'd switch to your laptop, SSH in, run it, and paste the result back. The terminal drawer does all of that from your phone.
+
+**What's in the UI:**
+
+- **Prompt line** with the live cwd (`~/scripts $ █`) — updated after every command via a sentinel capture, so `cd foo` gives you instant visual feedback even though it produces no output.
+- **ANSI rendering** — 8/16 + 256-color + truecolor, bold/dim/italic/underline. OSC and non-SGR escape sequences are stripped.
+- **Accessory key row** above the keyboard: sticky `ctrl` and `⌘` modifiers, history ↑/↓ with draft preservation, `⎋` clear, `⇥` tab, `⌄` dismiss keyboard, and the shell punctuation iOS hides behind long-press (`|`, `~`, `/`, `\`, `*`, `&`, `>`, `<`, `$`, `` ` ``).
+- **Sticky modifiers** — tap `ctrl` then `c` (from either the system keyboard or the accessory bar) to send SIGINT. Also: `ctrl+d` runs `exit`, `ctrl+l` clears the view, `ctrl+<a–z>` sends the matching control byte. `⌘+k` clears the view, `⌘+c` copies the last output to your clipboard, `⌘+v` pastes.
+- **Send last output to Claw** — grabs the output from the most recent command, wraps it in a fenced code block, and drops it into the chat composer so you can ask the agent to interpret/fix/continue.
+- **Swipe-down to dismiss** on the grabber; tap the backdrop to close.
+
+**Caveats:**
+
+- No PTY — full-screen TUI apps (`vim`, `less`, `top`, anything that checks `isatty`) won't render correctly. Swap in `node-pty` later if this becomes a pain point.
+- The shell shares auth with the rest of the gateway. Anyone with your bearer token has a shell on the backend host — no broader than the existing agent tool-use exposure, but worth knowing.
+- Rate-limited to 2000 lines per command and 200 lines/sec to keep the stream snappy; anything past that gets truncated with a notice.
+
+---
+
 ## Screens
 
 ### Chat List (`app/index.tsx`)
@@ -258,8 +281,12 @@ All routes require `Authorization: Bearer <token>` (except `/health`).
 | `GET` | `/threads/:id/stream` | SSE stream (deltas, tool steps, terminal, status) |
 | `POST` | `/threads/:id/stop` | Stop a running AI run |
 | `POST` | `/threads/:id/permissions/:pid` | Approve/deny a permission request |
-| `GET` | `/threads/:id/terminal` | Get terminal output |
-| `POST` | `/threads/:id/terminal` | Send a terminal command |
+| `GET` | `/threads/:id/terminal` | Get terminal output + active-shell flag + cwd |
+| `POST` | `/threads/:id/terminal` | Run a command in the thread's shell |
+| `POST` | `/threads/:id/terminal/stdin` | Write raw bytes to shell stdin |
+| `POST` | `/threads/:id/terminal/interrupt` | Send SIGINT to the running command |
+| `POST` | `/threads/:id/terminal/kill` | SIGTERM the shell (next command lazy-respawns) |
+| `GET` | `/threads/:id/terminal/snapshot` | Output lines since the most recent command |
 | `GET` | `/fs/browse` | Browse remote filesystem |
 | `POST` | `/obsidian/validate` | Check a backend-side vault path exists and count its `.md` files |
 
@@ -273,7 +300,7 @@ All routes require `Authorization: Bearer <token>` (except `/health`).
 | `tool_start` | `{ id, tool, label, messageId }` | Agent started a tool |
 | `tool_end` | `{ id, error? }` | Tool finished (or errored) |
 | `permission_request` | `{ id, tool, description }` | Agent needs user approval |
-| `terminal` | `{ chunk }` | Terminal output chunk |
+| `terminal` | `{ chunk, cwd?, busy? }` | Terminal output chunk (lines, often batched); `cwd`/`busy` are metadata-only when `chunk` is empty |
 | `done` | — | Run completed |
 | `error` | — | Run errored out |
 
@@ -321,7 +348,8 @@ All routes require `Authorization: Bearer <token>` (except `/health`).
 │       │   ├── messageService.ts
 │       │   ├── runService.ts
 │       │   ├── streamService.ts
-│       │   └── terminalService.ts
+│       │   ├── terminalService.ts
+│       │   └── shellService.ts   # Persistent per-thread bash + batching + cwd capture
 │       ├── runtime/
 │       │   └── clawRuntime.ts  # Claw binary adapter (swap for RunPod)
 │       ├── middleware/
