@@ -167,34 +167,51 @@ Each tester runs step 1 (register their device), then you rebuild once. The new 
 
 ### Local models (Ollama / LM Studio / llama.cpp)
 
-Claw talks to any OpenAI-compatible endpoint, so anything that serves `/v1/chat/completions` works — no API key required. Ollama is the easiest.
+Claw talks to any OpenAI-compatible endpoint, so anything that serves `/v1/chat/completions` works — no API key required. Ollama is the easiest, but the same flow works for LM Studio, llama.cpp, vLLM, etc.
 
-1. **Install and run Ollama.**
-   ```bash
-   brew install ollama
-   brew services start ollama            # or: ollama serve
-   ```
-
-2. **Pull a model.** For coding, `qwen2.5-coder:7b` is a solid default (~4.7 GB, fits comfortably on 16 GB+ machines). Drop to `:3b` for tighter memory, go up to `:14b`/`:32b` if you have the RAM.
-   ```bash
-   ollama pull qwen2.5-coder:7b
-   ```
-
-3. **Add the model in the app.** Settings → Models → *Add a model* → **Local**, then:
-   - **Model name** — the Ollama tag, e.g. `qwen2.5-coder:7b`
-   - **Endpoint** — `http://127.0.0.1:11434/v1` (prefilled)
-
-That's it — send a message and Claw will route through Ollama.
-
-**Networking note:** the endpoint is reached by the **backend**, not your phone. If the backend runs on the same Mac as Ollama, `127.0.0.1` is correct. If the backend runs on a different host (VPS, other laptop), use that host's reachable address and make sure Ollama is listening on it:
+#### 1. Host the model
 
 ```bash
-OLLAMA_HOST=0.0.0.0:11434 ollama serve
+brew install ollama
+brew services start ollama            # or: ollama serve
+ollama pull qwen2.5-coder:7b          # or gpt-oss:20b, deepseek-coder-v2, ...
 ```
 
-**Model quality caveat:** small local models (≤3B) usually handle plain Q&A fine but can stumble on tool-heavy loops (multi-step edits, bash chains). If runs end abruptly or the model "gives up" mid-turn, move up to 7B+ before blaming the integration.
+For coding, `qwen2.5-coder:7b` is a solid default (~4.7 GB; fits 16 GB+ machines). Drop to `:3b` for tight memory, scale to `:14b` / `:32b` if you have the RAM. Small models (≤3B) usually handle plain chat fine but can stumble on multi-step tool loops — go 7B+ for agent work.
 
-**LM Studio / llama.cpp / vLLM / etc.** work the same way — start their OpenAI-compatible server, paste its base URL (including `/v1`) into the Endpoint field, and use whatever model identifier that server expects.
+The same machine then needs to be reachable by your **backend** (not the phone) — see whichever path matches your setup below.
+
+#### 2a. Connect locally — backend and model on the same host
+
+This is the common case when you're running `npm run dev` on the same Mac as Ollama.
+
+In the app: **Settings → Models → Add a model → Local → Current backend → Scan for models**.
+
+The backend probes its own loopback for known runner ports (Ollama 11434, LM Studio 1234, llama.cpp 8080, vLLM 8000) and lists everything it finds. Tap the model pill, **Add to queue**, send a message. No URL to type, no API key to invent.
+
+#### 2b. Connect remotely — backend on a VPS, model on your Mac
+
+The VPS can't reach your Mac's loopback or LAN IP. You need to expose Ollama at a URL the VPS can reach. Two practical options:
+
+**Option A — cloudflared quick tunnel (zero config, public URL)**
+
+```bash
+brew install cloudflared
+OLLAMA_ORIGINS='*' ollama serve                              # one terminal
+cloudflared tunnel --url http://localhost:11434              # another terminal
+```
+
+cloudflared prints a `https://<random>.trycloudflare.com` URL. In the app: **Local → Other → paste the URL → Scan**.
+
+> The URL is unguessable but technically public — anyone with it can use your Ollama until you `Ctrl+C` the tunnel. Treat it like a password and kill it when you're done.
+
+**Option B — SSH reverse tunnel (private, no third party)**
+
+```bash
+ssh -N -R 11434:localhost:11434 -o ServerAliveInterval=30 -o ExitOnForwardFailure=yes <user>@<your-vps>
+```
+
+That makes your Mac's Ollama appear on the VPS as `127.0.0.1:11434` for as long as the SSH session is alive. Because it's the VPS's own loopback, you use **Current backend → Scan** in the app (not Other). Wrap with `autossh` if you want auto-reconnect.
 
 ---
 
