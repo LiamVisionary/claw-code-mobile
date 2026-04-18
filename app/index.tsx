@@ -8,13 +8,7 @@ import {
   View,
 } from "react-native";
 import { FlatList } from "react-native-gesture-handler";
-import Animated, {
-  FadeIn,
-  FadeOut,
-  SlideInUp,
-  SlideOutUp,
-} from "react-native-reanimated";
-import { useColorScheme } from "react-native";
+import { ActionSheetIOS } from "react-native";
 import { useRouter, Link } from "expo-router";
 import { useFocusEffect } from "expo-router";
 import Swipeable from "react-native-gesture-handler/Swipeable";
@@ -83,12 +77,10 @@ export default function ChatListScreen() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showBrowser, setShowBrowser] = useState(false);
-  const [showProjectPicker, setShowProjectPicker] = useState(false);
   const [view, setView] = useState<"chats" | "notes">("chats");
   const { top, bottom } = useSafeAreaInsets();
   const headerHeight = useHeaderHeight();
   const palette = usePalette();
-  const isDark = useColorScheme() === "dark";
 
   // Only show the Chats/Notes toggle when the user has actually connected
   // a vault. Enabled-but-unconfigured states (e.g. toggle flipped on with
@@ -148,28 +140,46 @@ export default function ChatListScreen() {
   const activeProjectLabel = activeProject || "General";
   const allProjects = ["", ...projects]; // "" = General
 
-  const handleNewProject = () => {
-    Alert.prompt(
-      "New project",
-      "Enter a name for the project",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Create",
-          onPress: (name?: string) => {
-            const trimmed = name?.trim();
-            if (!trimmed) return;
-            if (projects.includes(trimmed)) {
-              Alert.alert("Already exists", `"${trimmed}" is already a project.`);
-              return;
-            }
-            actions.addProject(trimmed);
-            actions.setActiveProject(trimmed);
-            setShowProjectPicker(false);
-          },
-        },
-      ],
-      "plain-text"
+  const openProjectPicker = () => {
+    const labels = allProjects.map((p) => p || "General");
+    const options = [...labels, "New project…", "Cancel"];
+    const cancelIndex = options.length - 1;
+    const newIndex = options.length - 2;
+
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        options,
+        cancelButtonIndex: cancelIndex,
+        title: "Switch project",
+      },
+      (idx) => {
+        if (idx === cancelIndex) return;
+        if (idx === newIndex) {
+          Alert.prompt(
+            "New project",
+            "Enter a name",
+            [
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Create",
+                onPress: (name?: string) => {
+                  const trimmed = name?.trim();
+                  if (!trimmed) return;
+                  if (projects.includes(trimmed)) {
+                    Alert.alert("Already exists", `"${trimmed}" is already a project.`);
+                    return;
+                  }
+                  actions.addProject(trimmed);
+                  actions.setActiveProject(trimmed);
+                },
+              },
+            ],
+            "plain-text"
+          );
+          return;
+        }
+        actions.setActiveProject(allProjects[idx]);
+      }
     );
   };
 
@@ -245,7 +255,7 @@ export default function ChatListScreen() {
       <Stack.Screen
         options={{
           headerTitle: () => (
-            <TouchableBounce sensory onPress={() => setShowProjectPicker((v) => !v)}>
+            <TouchableBounce sensory onPress={openProjectPicker}>
               <View style={{ alignItems: "center" }}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
                   <Text
@@ -259,11 +269,7 @@ export default function ChatListScreen() {
                   >
                     {activeProjectLabel}
                   </Text>
-                  <IconSymbol
-                    name={showProjectPicker ? "chevron.up" : "chevron.down"}
-                    size={11}
-                    color={palette.textMuted}
-                  />
+                  <IconSymbol name="chevron.down" size={11} color={palette.textMuted} />
                 </View>
                 {showNotesToggle && (
                   <View style={{ flexDirection: "row", marginTop: 4 }}>
@@ -338,90 +344,7 @@ export default function ChatListScreen() {
         )}
 
         {/* ── Project picker dropdown ── */}
-        {showProjectPicker && (
-          <Animated.View
-            entering={FadeIn.duration(120)}
-            exiting={FadeOut.duration(80)}
-            style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 }}
-          >
-            <TouchableBounce onPress={() => setShowProjectPicker(false)}>
-              <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.15)" }} />
-            </TouchableBounce>
-            <Animated.View
-              entering={SlideInUp.duration(200).springify().damping(18).stiffness(280)}
-              exiting={SlideOutUp.duration(120)}
-              style={{
-                marginTop: headerHeight - 4,
-                marginHorizontal: 56,
-                backgroundColor: isDark ? "#2c2c2e" : "#ffffff",
-                borderRadius: 14,
-                overflow: "hidden",
-                shadowColor: "#000",
-                shadowOffset: { width: 0, height: 6 },
-                shadowOpacity: isDark ? 0.5 : 0.18,
-                shadowRadius: 20,
-                elevation: 12,
-                borderWidth: isDark ? 0.5 : 0,
-                borderColor: "rgba(255,255,255,0.1)",
-              }}
-            >
-              {allProjects.map((p) => {
-                const label = p || "General";
-                const selected = p === activeProject;
-                return (
-                  <TouchableBounce
-                    key={label}
-                    sensory
-                    onPress={() => { actions.setActiveProject(p); setShowProjectPicker(false); }}
-                  >
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        paddingHorizontal: 18,
-                        paddingVertical: 13,
-                        backgroundColor: selected ? (isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.03)") : "transparent",
-                        borderBottomWidth: 0.5,
-                        borderBottomColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)",
-                      }}
-                    >
-                      <Text
-                        style={{
-                          flex: 1,
-                          fontSize: 16,
-                          fontWeight: selected ? "600" : "400",
-                          color: selected ? palette.accent : palette.text,
-                        }}
-                      >
-                        {label}
-                      </Text>
-                      {selected && <IconSymbol name="checkmark" size={14} color={palette.accent} />}
-                    </View>
-                  </TouchableBounce>
-                );
-              })}
-              <TouchableBounce
-                sensory
-                onPress={() => { setShowProjectPicker(false); handleNewProject(); }}
-              >
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    paddingHorizontal: 18,
-                    paddingVertical: 13,
-                    gap: 7,
-                  }}
-                >
-                  <IconSymbol name="plus.circle.fill" size={17} color={palette.accent} />
-                  <Text style={{ fontSize: 16, color: palette.accent, fontWeight: "500" }}>
-                    New project
-                  </Text>
-                </View>
-              </TouchableBounce>
-            </Animated.View>
-          </Animated.View>
-        )}
+
 
         {view === "notes" ? (
           <VaultNotesPane palette={palette} />
