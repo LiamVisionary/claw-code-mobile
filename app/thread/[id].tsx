@@ -1,5 +1,6 @@
 import DirectoryBrowser from "@/components/DirectoryBrowser";
 import FileBrowser from "@/components/FileBrowser";
+import FileMentionPicker from "@/components/FileMentionPicker";
 import SlashCommandPicker from "@/components/SlashCommandPicker";
 import { StreamingText } from "@/components/StreamingText";
 import TerminalSheet from "@/components/terminal-sheet";
@@ -96,6 +97,17 @@ export default function ThreadScreen() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [slashPickerVisible, setSlashPickerVisible] = useState(false);
+  // Cursor position, tracked so we can detect the @-mention token directly
+  // before the caret (walking back to the nearest whitespace or string start).
+  const [selection, setSelection] = useState<{ start: number; end: number }>({
+    start: 0,
+    end: 0,
+  });
+  // One-shot override used after programmatic inserts so the caret lands
+  // just after the inserted `@…` text instead of wherever the user left it.
+  const [selectionOverride, setSelectionOverride] = useState<
+    { start: number; end: number } | undefined
+  >(undefined);
   const [copiedConvo, setCopiedConvo] = useState(false);
   const [showDirBrowser, setShowDirBrowser] = useState(false);
   const [showFileBrowser, setShowFileBrowser] = useState(false);
@@ -323,6 +335,65 @@ export default function ThreadScreen() {
     setInput(text);
     setSlashPickerVisible(text.startsWith("/") && text.length > 0);
   };
+
+  // Returns the `@token` currently under the caret (start/end within `input`
+  // and the query after `@`), or null if the caret isn't on a mention. A
+  // mention starts with `@` at the beginning of the string or right after
+  // whitespace, and runs until whitespace closes it.
+  const mention = useMemo(() => {
+    const cursor = selection.end;
+    for (let i = cursor - 1; i >= 0; i--) {
+      const ch = input[i];
+      if (ch === "@") {
+        if (i === 0 || /\s/.test(input[i - 1])) {
+          return { start: i, end: cursor, query: input.slice(i + 1, cursor) };
+        }
+        return null;
+      }
+      if (/\s/.test(ch)) return null;
+    }
+    return null;
+  }, [input, selection.end]);
+
+  // Caret index of an @ token the user explicitly dismissed (by tapping
+  // away or on the input). A matching live mention with the same start is
+  // suppressed until it's gone — typing more letters doesn't resurrect the
+  // picker, but deleting the `@` and starting a fresh mention does.
+  const [dismissedMentionStart, setDismissedMentionStart] = useState<
+    number | null
+  >(null);
+
+  // Clear the dismiss latch once the mention token is gone so the next
+  // fresh `@` will open the picker again.
+  useEffect(() => {
+    if (mention === null && dismissedMentionStart !== null) {
+      setDismissedMentionStart(null);
+    }
+  }, [mention, dismissedMentionStart]);
+
+  const mentionPickerVisible =
+    !slashPickerVisible &&
+    mention !== null &&
+    mention.start !== dismissedMentionStart &&
+    !!thread?.workDir;
+
+  const dismissMentionPicker = useCallback(() => {
+    if (mention) setDismissedMentionStart(mention.start);
+  }, [mention]);
+
+  const insertMention = useCallback(
+    (relativePath: string) => {
+      if (!mention) return;
+      const insertion = "@" + relativePath + " ";
+      const before = input.slice(0, mention.start);
+      const after = input.slice(mention.end);
+      const next = before + insertion + after;
+      const caret = before.length + insertion.length;
+      setInput(next);
+      setSelectionOverride({ start: caret, end: caret });
+    },
+    [input, mention]
+  );
 
   const threadStatus = thread?.status ?? "idle";
 
@@ -642,6 +713,33 @@ export default function ThreadScreen() {
   // unmount/remount the whole footer subtree (sprite frame resets → flicker,
   // dot Animated.Values reset → animations restart from initial state).
 
+  // Same rationale for the empty state — an inline `() => (<View …/>)` would
+  // remount the sprite Image on every keystroke's re-render (the `<Image>`
+  // briefly shows a transparent frame while the bundled asset re-resolves).
+  const listEmptyElem = useMemo(
+    () => (
+      <View
+        style={{
+          flex: 1,
+          justifyContent: "center",
+          alignItems: "center",
+          gap: SPACING.sm,
+          paddingVertical: 48,
+        }}
+      >
+        <Image
+          source={require("@/assets/icons/claude-sprite-icon.png")}
+          style={{ width: 72, height: 72 }}
+          resizeMode="contain"
+        />
+        <Text style={{ color: palette.textMuted, fontSize: 14 }}>
+          Build something wild
+        </Text>
+      </View>
+    ),
+    [palette.textMuted]
+  );
+
   // While the thread is loading (e.g. after app resumes from background
   // and the Zustand store is briefly empty), show a loading screen with
   // the Claude sprite. Once refreshThread / loadThreads resolves, if the
@@ -871,26 +969,7 @@ export default function ThreadScreen() {
             }, 120);
           }}
           ListFooterComponent={listFooterElem}
-          ListEmptyComponent={() => (
-            <View
-              style={{
-                flex: 1,
-                justifyContent: "center",
-                alignItems: "center",
-                gap: SPACING.sm,
-                paddingVertical: 48,
-              }}
-            >
-              <Image
-                source={require("@/assets/icons/claude-sprite-icon.png")}
-                style={{ width: 72, height: 72 }}
-                resizeMode="contain"
-              />
-              <Text style={{ color: palette.textMuted, fontSize: 14 }}>
-                Build something wild
-              </Text>
-            </View>
-          )}
+          ListEmptyComponent={listEmptyElem}
         />
 
         {/* Slash command picker — floats above the input bar */}
@@ -926,6 +1005,23 @@ export default function ThreadScreen() {
         ))}
 
       </MaskedView>
+
+      {/* Tap-away catcher for the @-mention picker. Sits above the chat
+          area but below the composer (zIndex < 30) so the user can still
+          interact with the pill and its buttons without dismissing first. */}
+      {mentionPickerVisible ? (
+        <Pressable
+          onPress={dismissMentionPicker}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: 25,
+          }}
+        />
+      ) : null}
 
       {/* Attachment menu popup — rendered at the top level so no parent
           clips or constrains it. Liquid-glass styled to match the composer. */}
@@ -1124,6 +1220,17 @@ export default function ThreadScreen() {
           zIndex: 30,
         }}
       >
+        {/* @-mention file picker — stacks above attachments + pill since the
+            wrapper is a column anchored to the bottom. */}
+        {thread?.workDir ? (
+          <FileMentionPicker
+            visible={mentionPickerVisible}
+            workDir={thread.workDir}
+            query={mention?.query ?? ""}
+            onTag={insertMention}
+          />
+        ) : null}
+
         {/* Pending-attachment row */}
         {(pendingAttachments.length > 0 || uploadingPreviews.length > 0) && (
           <View
@@ -1182,6 +1289,17 @@ export default function ThreadScreen() {
               placeholderTextColor={palette.textSoft}
               value={input}
               onChangeText={handleInputChange}
+              selection={selectionOverride}
+              onSelectionChange={(e) => {
+                setSelection(e.nativeEvent.selection);
+                // Drop the one-shot override the next tick so the user
+                // regains free cursor control after a programmatic insert.
+                if (selectionOverride) setSelectionOverride(undefined);
+              }}
+              // Tapping the input itself (to reposition the caret) also
+              // dismisses the mention picker — matches the escape-hatch the
+              // backdrop offers for taps anywhere outside the tooltip.
+              onTouchStart={dismissMentionPicker}
               multiline
               keyboardAppearance={isDark ? "dark" : "light"}
               style={{
