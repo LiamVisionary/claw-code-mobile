@@ -1,5 +1,6 @@
 import Constants from "expo-constants";
 import * as FileSystem from "expo-file-system/legacy";
+import { Platform } from "react-native";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { buildLocalPreamble } from "@/util/vault/localVault";
@@ -282,6 +283,7 @@ function openNativeSSE(
 
 const fileStorage = {
   getItem: async (key: string): Promise<string | null> => {
+    if (Platform.OS === "web") return null;
     try {
       const uri = FileSystem.documentDirectory + encodeURIComponent(key) + ".json";
       const info = await FileSystem.getInfoAsync(uri);
@@ -292,10 +294,12 @@ const fileStorage = {
     }
   },
   setItem: async (key: string, value: string): Promise<void> => {
+    if (Platform.OS === "web") return;
     const uri = FileSystem.documentDirectory + encodeURIComponent(key) + ".json";
     await FileSystem.writeAsStringAsync(uri, value);
   },
   removeItem: async (key: string): Promise<void> => {
+    if (Platform.OS === "web") return;
     const uri = FileSystem.documentDirectory + encodeURIComponent(key) + ".json";
     await FileSystem.deleteAsync(uri, { idempotent: true });
   },
