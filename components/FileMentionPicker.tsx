@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -8,10 +8,15 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import * as FileSystem from "expo-file-system/legacy";
 import { IconSymbol, type IconSymbolName } from "@/components/ui/IconSymbol";
 import { BORDER_RADIUS, SHADOW, SPACING, TYPOGRAPHY } from "@/constants/theme";
 import { usePalette } from "@/hooks/usePalette";
 import { useGatewayStore, type FsEntry, type FsListing } from "@/store/gatewayStore";
+import {
+  normalizeServerUrlForMatch,
+  selectQueueForBackend,
+} from "@/store/queueScope";
 
 interface Props {
   visible: boolean;
@@ -40,15 +45,82 @@ function joinRel(base: string, full: string): string {
   return full.startsWith(prefix) ? full.slice(prefix.length) : full;
 }
 
+function stripFileScheme(pathOrUri: string): string {
+  return pathOrUri.replace(/^file:\/\//, "").replace(/\/$/, "");
+}
+
+// Mirrors the backend `/fs/browse` response shape using expo-file-system so
+// on-device threads can list their in-sandbox workspace without a network
+// round trip. Hidden files are filtered and dirs sort first — matches the
+// server behavior exactly so downstream render code stays identical.
+async function browseLocalDirectory(dirPath: string): Promise<FsListing> {
+  const uri = dirPath.startsWith("file://") ? dirPath : `file://${dirPath}`;
+  const trimmedUri = uri.replace(/\/$/, "");
+  const names = await FileSystem.readDirectoryAsync(trimmedUri);
+  const entries: FsEntry[] = [];
+  for (const name of names) {
+    if (name.startsWith(".")) continue;
+    const childUri = `${trimmedUri}/${name}`;
+    try {
+      const info = await FileSystem.getInfoAsync(childUri);
+      entries.push({
+        name,
+        path: stripFileScheme(childUri),
+        isDir: info.isDirectory ?? false,
+      });
+    } catch {
+      // A transient stat failure on one child shouldn't wipe the listing.
+    }
+  }
+  entries.sort((a, b) => {
+    if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+  const plain = stripFileScheme(trimmedUri);
+  const lastSlash = plain.lastIndexOf("/");
+  const parent = lastSlash > 0 ? plain.slice(0, lastSlash) : null;
+  return { path: plain, parent, entries };
+}
+
 const MAX_ENTRIES = 40;
+const DEFAULT_ON_DEVICE_WORKSPACE_SUBDIR = "claw-workspace";
 
 export default function FileMentionPicker({ visible, workDir, query, onTag }: Props) {
   const palette = usePalette();
   const browseFsDirectory = useGatewayStore((s) => s.actions.browseFsDirectory);
+  // True when the first enabled model on the active backend is on-device —
+  // same selection the send path uses, so the picker and the LLM agree on
+  // which filesystem is authoritative for this thread.
+  const isOnDevice = useGatewayStore((s) => {
+    const normalized = normalizeServerUrlForMatch(s.settings.serverUrl);
+    const scoped = selectQueueForBackend(s.settings.modelQueue ?? [], normalized);
+    return (scoped[0]?.provider as string | undefined) === "on-device";
+  });
   const anim = useRef(new Animated.Value(0)).current;
 
+  // Resolve the effective workspace root.
+  //
+  // On-device mode: always use `<documentDirectory>/claw-workspace`. The
+  // thread's `workDir` is commonly a backend/desktop path (e.g. the Mac
+  // repo root picked via DirectoryBrowser) which is outside the app
+  // sandbox and unreadable via expo-file-system. The on-device `read`
+  // tool operates on the sandbox workspace, so anchoring the picker
+  // there keeps what the user browses and what the LLM can actually
+  // read in sync.
+  //
+  // Backend mode: trust `workDir` as-is — that's a server-side path the
+  // `/fs/browse` endpoint can resolve.
+  const effectiveWorkDir = useMemo(() => {
+    if (isOnDevice) {
+      const base = FileSystem.documentDirectory?.replace(/\/$/, "");
+      if (!base) return "";
+      return stripFileScheme(`${base}/${DEFAULT_ON_DEVICE_WORKSPACE_SUBDIR}`);
+    }
+    return stripFileScheme(workDir?.trim() ?? "");
+  }, [workDir, isOnDevice]);
+
   // Picker's own internal navigation — starts at workDir, user can drill in.
-  const [currentPath, setCurrentPath] = useState(workDir);
+  const [currentPath, setCurrentPath] = useState(effectiveWorkDir);
   const [listing, setListing] = useState<FsListing | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,15 +129,33 @@ export default function FileMentionPicker({ visible, workDir, query, onTag }: Pr
   // and `workDir` — leaving the picker open and re-opening elsewhere should
   // always land the user at the root rather than wherever they last drilled to.
   useEffect(() => {
-    if (visible) setCurrentPath(workDir);
-  }, [visible, workDir]);
+    if (visible) setCurrentPath(effectiveWorkDir);
+  }, [visible, effectiveWorkDir]);
+
+  // First-ever on-device use: the default workspace subdir may not exist
+  // yet (the runner creates it lazily at send-time). Pre-create it so the
+  // picker can list immediately instead of surfacing a stat error.
+  useEffect(() => {
+    if (!isOnDevice || !effectiveWorkDir) return;
+    FileSystem.makeDirectoryAsync(`file://${effectiveWorkDir}`, {
+      intermediates: true,
+    }).catch(() => {
+      // Dir already exists or can't be created — either way, let the
+      // subsequent `readDirectoryAsync` surface the real problem.
+    });
+  }, [isOnDevice, effectiveWorkDir]);
 
   const load = useCallback(
     async (target: string) => {
+      if (!target) return;
       setLoading(true);
       setError(null);
       try {
-        const res = await browseFsDirectory(target);
+        // On-device: the workspace lives in the app sandbox, so the backend
+        // has no view into it. Go straight to expo-file-system.
+        const res = isOnDevice
+          ? await browseLocalDirectory(target)
+          : await browseFsDirectory(target);
         setListing(res);
       } catch (e: any) {
         setError(e?.message ?? "Cannot read directory");
@@ -73,11 +163,12 @@ export default function FileMentionPicker({ visible, workDir, query, onTag }: Pr
         setLoading(false);
       }
     },
-    [browseFsDirectory]
+    [browseFsDirectory, isOnDevice]
   );
 
   useEffect(() => {
     if (!visible) return;
+    if (!currentPath) return;
     load(currentPath);
   }, [visible, currentPath, load]);
 
@@ -99,8 +190,8 @@ export default function FileMentionPicker({ visible, workDir, query, onTag }: Pr
     : entries
   ).slice(0, MAX_ENTRIES);
 
-  const atRoot = currentPath === workDir;
-  const crumb = atRoot ? "." : joinRel(workDir, currentPath);
+  const atRoot = currentPath === effectiveWorkDir;
+  const crumb = atRoot ? "." : joinRel(effectiveWorkDir, currentPath);
 
   const goUp = () => {
     if (atRoot) return;
@@ -110,13 +201,13 @@ export default function FileMentionPicker({ visible, workDir, query, onTag }: Pr
   };
 
   const tagEntry = (entry: FsEntry) => {
-    const rel = joinRel(workDir, entry.path);
+    const rel = joinRel(effectiveWorkDir, entry.path);
     const ref = rel === "" ? "." : rel;
     onTag(entry.isDir ? ref + "/" : ref);
   };
 
   const tagCurrentDir = () => {
-    const rel = joinRel(workDir, currentPath);
+    const rel = joinRel(effectiveWorkDir, currentPath);
     onTag(rel === "" ? "./" : rel + "/");
   };
 

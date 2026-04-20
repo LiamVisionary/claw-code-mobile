@@ -375,7 +375,7 @@ export default function ThreadScreen() {
     !slashPickerVisible &&
     mention !== null &&
     mention.start !== dismissedMentionStart &&
-    !!thread?.workDir;
+    !!thread;
 
   const dismissMentionPicker = useCallback(() => {
     if (mention) setDismissedMentionStart(mention.start);
@@ -1221,11 +1221,14 @@ export default function ThreadScreen() {
         }}
       >
         {/* @-mention file picker — stacks above attachments + pill since the
-            wrapper is a column anchored to the bottom. */}
-        {thread?.workDir ? (
+            wrapper is a column anchored to the bottom. The picker resolves
+            its own effective workspace root (falling back to the on-device
+            default sandbox when the thread has no explicit workDir), so we
+            pass `workDir` through unconditionally. */}
+        {thread ? (
           <FileMentionPicker
             visible={mentionPickerVisible}
-            workDir={thread.workDir}
+            workDir={thread.workDir ?? ""}
             query={mention?.query ?? ""}
             onTag={insertMention}
           />
