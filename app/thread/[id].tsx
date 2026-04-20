@@ -16,14 +16,12 @@ import type { Attachment, Message, ModelEntry, PermissionRequest, ThreadStatus, 
 import { useGatewayStore } from "@/store/gatewayStore";
 import { nanoid } from "@/util/nanoid";
 import { cleanModelMarkdown } from "@/utils/markdownCleanup";
-import MaskedView from "@react-native-masked-view/masked-view";
 import { BlurView } from "expo-blur";
 import * as Clipboard from "expo-clipboard";
 import * as DocumentPicker from "expo-document-picker";
 import * as Haptics from "expo-haptics";
 import { GlassView } from "expo-glass-effect";
 import * as ImagePicker from "expo-image-picker";
-import { LinearGradient } from "expo-linear-gradient";
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
@@ -146,6 +144,7 @@ export default function ThreadScreen() {
   const { top, bottom } = useSafeAreaInsets();
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const keyboardUp = keyboardHeight > 0;
+  const [inputBarHeight, setInputBarHeight] = useState(80);
   useEffect(() => {
     const show = Keyboard.addListener(
       Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
@@ -159,7 +158,14 @@ export default function ThreadScreen() {
     );
     const hide = Keyboard.addListener(
       Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
-      () => setKeyboardHeight(0)
+      () => {
+        setKeyboardHeight(0);
+        // Keep pinned after keyboard closes — the footer spacer shrinks
+        // which changes contentSize; re-scroll so content stays visible.
+        if (isAtBottomRef.current) {
+          setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
+        }
+      }
     );
     return () => {
       show.remove();
@@ -216,6 +222,16 @@ export default function ThreadScreen() {
     }
   }, [id, thread, actions]);
 
+  // Height of the dead-zone below messages so scrollToEnd lands content
+  // above the floating input bar. Computed from the bar's measured height
+  // + its offset from the screen edge (keyboard or safe-area).
+  // Extra gap between last message and input bar. When the keyboard is
+  // closed the safe-area bottom inset provides natural breathing room;
+  // when the keyboard is open we add equivalent padding explicitly.
+  const inputGap = keyboardUp ? SPACING.lg + bottom : SPACING.lg;
+  const listBottomSpacing =
+    (keyboardUp ? keyboardHeight : bottom) + SPACING.sm + inputBarHeight + inputGap;
+
   // ── Auto-scroll + "scroll to bottom" FAB ─────────────────────────
   //
   // Design: follow iMessage/WhatsApp conventions.
@@ -231,6 +247,10 @@ export default function ThreadScreen() {
 
   const isAtBottomRef = useRef(true);
   const isDraggingRef = useRef(false);
+  // True when the user has deliberately scrolled away from the bottom.
+  // Only set by user-initiated drag+momentum that lands above the
+  // threshold. Cleared when the user scrolls back or taps "go to latest".
+  const userScrolledAwayRef = useRef(false);
   // True only while a user-initiated fling is in progress (drag → momentum).
   // Programmatic scrollToEnd({animated:true}) also fires onMomentumScrollBegin
   // on iOS — we must NOT treat those as user scrolling, otherwise they unpin
@@ -249,7 +269,9 @@ export default function ThreadScreen() {
 
   // Generous threshold — feels sticky and tolerates the small position
   // drift between a streaming chunk arriving and the follow-up scroll landing.
-  const AT_BOTTOM_THRESHOLD = 140;
+  // Must exceed the footer spacer height so keyboard open/close transitions
+  // don't falsely unpin the user.
+  const AT_BOTTOM_THRESHOLD = listBottomSpacing + 80;
 
   const handleScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -258,6 +280,8 @@ export default function ThreadScreen() {
         contentSize.height - (contentOffset.y + layoutMeasurement.height);
       const atBottom = distanceFromBottom < AT_BOTTOM_THRESHOLD;
 
+      isAtBottomRef.current = atBottom;
+
       if (suppressFabRef.current) {
         if (showGoToLatest) setShowGoToLatest(false);
         return;
@@ -265,21 +289,21 @@ export default function ThreadScreen() {
 
       const userScrolling = isDraggingRef.current || userMomentumRef.current;
 
-      if (!userScrolling) {
-        // Programmatic scroll or content-growth event — only allow re-pin.
-        if (atBottom && !isAtBottomRef.current) {
-          isAtBottomRef.current = true;
+      if (userScrolling) {
+        // User drag/fling — only source of truth for opting out of auto-scroll.
+        if (!atBottom) {
+          userScrolledAwayRef.current = true;
+          if (!showGoToLatest) setShowGoToLatest(true);
+        } else {
+          userScrolledAwayRef.current = false;
           if (showGoToLatest) setShowGoToLatest(false);
         }
-        return;
-      }
-
-      // User is scrolling — single source of truth for pin state.
-      isAtBottomRef.current = atBottom;
-      if (atBottom) {
-        if (showGoToLatest) setShowGoToLatest(false);
       } else {
-        if (!showGoToLatest) setShowGoToLatest(true);
+        // Programmatic or content-growth scroll — can re-pin but never unpin.
+        if (atBottom && userScrolledAwayRef.current) {
+          userScrolledAwayRef.current = false;
+          if (showGoToLatest) setShowGoToLatest(false);
+        }
       }
     },
     [showGoToLatest]
@@ -287,13 +311,9 @@ export default function ThreadScreen() {
 
   // Internal helper used by the follow-scroll effects. Always instant —
   // animated scrolls race with content growth and land at a stale offset.
-  // Two rAFs: first lets React commit the render, second lets the native
-  // FlatList finish its layout pass so contentSize is up-to-date.
   const followScrollToEnd = useCallback(() => {
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        listRef.current?.scrollToEnd({ animated: false });
-      });
+      listRef.current?.scrollToEnd({ animated: false });
     });
   }, []);
 
@@ -303,15 +323,17 @@ export default function ThreadScreen() {
 
   // Single follow-scroll effect: fires on new messages AND streaming chunks.
   // Both reduce to "content changed; if pinned, stay at bottom."
+  // Only stopped by explicit user scroll-away, never by position drift.
   useEffect(() => {
-    if (!isAtBottomRef.current) return;
-    if (isDraggingRef.current || userMomentumRef.current) return;
+    if (userScrolledAwayRef.current) return;
+    if (isDraggingRef.current) return;
     followScrollToEnd();
   }, [messages.length, lastMsgLen, followScrollToEnd]);
 
   const jumpToLatest = useCallback(() => {
     suppressFabRef.current = true;
     isAtBottomRef.current = true;
+    userScrolledAwayRef.current = false;
     setShowGoToLatest(false);
     // Animated for the satisfying smooth jump from far up; followed by an
     // instant correction in case content grew during the animation.
@@ -327,6 +349,7 @@ export default function ThreadScreen() {
   const pinToBottom = useCallback(() => {
     suppressFabRef.current = true;
     isAtBottomRef.current = true;
+    userScrolledAwayRef.current = false;
     setShowGoToLatest(false);
     setTimeout(() => { suppressFabRef.current = false; }, 600);
   }, []);
@@ -662,12 +685,12 @@ export default function ThreadScreen() {
   // not in the live indicator below the list.
   const runStartedAt = useGatewayStore((s) => s.runStartedAt[id ?? ""] ?? 0);
   const liveCycleSteps = useMemo(() => {
-    if (toolSteps.length === 0) return EMPTY_STEPS;
-    // Only show steps from the current run — prevents previous turn's
-    // badges from lingering during the "thinking" phase of a new turn.
-    const currentRunSteps = runStartedAt
-      ? toolSteps.filter((s) => (s.startedAt ?? 0) >= runStartedAt)
-      : toolSteps;
+    // No run boundary → no live steps. Prevents old tool badges from
+    // flashing when resuming an old chat before runStartedAt is set.
+    if (!runStartedAt || toolSteps.length === 0) return EMPTY_STEPS;
+    const currentRunSteps = toolSteps.filter(
+      (s) => (s.startedAt ?? 0) >= runStartedAt
+    );
     if (currentRunSteps.length === 0) return EMPTY_STEPS;
     const latestMsgId = currentRunSteps[currentRunSteps.length - 1].messageId;
     const out: typeof currentRunSteps = [];
@@ -678,21 +701,23 @@ export default function ThreadScreen() {
     return out;
   }, [toolSteps, runStartedAt]);
 
+  // listBottomSpacing is defined earlier, near the auto-scroll section.
+
   const listFooterElem = useMemo(() => {
     const lastMsg = messages[messages.length - 1];
     const phaseActive = runPhase !== "idle";
     const needsIndicator =
       isCompacting ||
-      phaseActive ||
+      threadStatus === "running" ||
       threadStatus === "waiting" ||
-      (threadStatus === "running" && (!lastMsg || lastMsg.role === "user"));
+      phaseActive;
     // Hide tool badges while the model is actively streaming response
     // text — no tool is currently running, and the badges for the tools
     // that produced this response are already attached to their own
     // bubble above. Showing them next to "responding…" is visually stale.
     const badgesForIndicator =
       runPhase === "responding" ? EMPTY_STEPS : liveCycleSteps;
-    return needsIndicator ? (
+    const indicator = needsIndicator ? (
       <ThinkingIndicator
         status={threadStatus}
         toolSteps={badgesForIndicator}
@@ -706,7 +731,14 @@ export default function ThreadScreen() {
         zenMode={settings.zenMode ?? false}
       />
     ) : null;
-  }, [threadStatus, messages, liveCycleSteps, permissionReqs, actions, id, isDark, isCompacting, runPhase, liveThinking, settings.zenMode]);
+    return (
+      <View>
+        {indicator}
+        {/* Spacer so scrollToEnd lands content above the input bar */}
+        <View style={{ height: listBottomSpacing }} />
+      </View>
+    );
+  }, [threadStatus, messages, liveCycleSteps, permissionReqs, actions, id, isDark, isCompacting, runPhase, liveThinking, settings.zenMode, listBottomSpacing]);
 
   // Pass the element directly — wrapping in `() => listFooterElem` would give
   // FlatList a new component *type* on every messages tick, causing React to
@@ -843,16 +875,7 @@ export default function ThreadScreen() {
         isDark={isDark}
       />
 
-      <MaskedView
-        style={{ flex: 1, backgroundColor: palette.bg }}
-        maskElement={
-          <LinearGradient
-            colors={["#000", "#000", "rgba(0,0,0,0.25)"]}
-            locations={[0, 0.85, 1]}
-            style={{ flex: 1 }}
-          />
-        }
-      >
+      <View style={{ flex: 1 }}>
         {/* Messages */}
         <FlatList
           ref={listRef}
@@ -861,18 +884,12 @@ export default function ThreadScreen() {
           contentInsetAdjustmentBehavior="never"
           automaticallyAdjustsScrollIndicatorInsets={false}
           scrollIndicatorInsets={{ top: top + 44 }}
-          keyboardDismissMode="interactive"
+          keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={{
             paddingHorizontal: 20,
             // Manual top padding for the transparent header (safe area + nav bar).
             paddingTop: top + 52,
-            // Extra bottom space for the floating input pill + safe area.
-            // When the keyboard is open, add its height so content isn't
-            // hidden behind it.
-            paddingBottom: keyboardUp
-              ? keyboardHeight + 80
-              : 100 + bottom,
           }}
           // ItemSeparatorComponent rather than `gap` — FlatList measures
           // separators natively, whereas container-level `gap` isn't always
@@ -883,11 +900,7 @@ export default function ThreadScreen() {
           onContentSizeChange={() => {
             // Layout-only growth (e.g. ListFooter expanding, attachments
             // measuring late). The content-length effect handles streaming.
-            if (
-              isAtBottomRef.current &&
-              !isDraggingRef.current &&
-              !userMomentumRef.current
-            ) {
+            if (!userScrolledAwayRef.current && !isDraggingRef.current) {
               listRef.current?.scrollToEnd({ animated: false });
             }
           }}
@@ -935,18 +948,13 @@ export default function ThreadScreen() {
                   // that would otherwise show "Go to latest".
                   suppressFabRef.current = true;
                   setShowGoToLatest(false);
+                  // Scroll to end so the expanded costs section is visible.
+                  // Two rAFs let React commit + FlatList re-measure.
                   requestAnimationFrame(() => {
-                    try {
-                      listRef.current?.scrollToIndex({
-                        index,
-                        animated: true,
-                        viewPosition: 1,
-                      });
-                    } catch {
+                    requestAnimationFrame(() => {
                       listRef.current?.scrollToEnd({ animated: true });
-                    }
-                    // Release suppression after the scroll animation
-                    setTimeout(() => { suppressFabRef.current = false; }, 500);
+                      setTimeout(() => { suppressFabRef.current = false; }, 500);
+                    });
                   });
                 }}
               />
@@ -1004,7 +1012,7 @@ export default function ThreadScreen() {
           />
         ))}
 
-      </MaskedView>
+      </View>
 
       {/* Tap-away catcher for the @-mention picker. Sits above the chat
           area but below the composer (zIndex < 30) so the user can still
@@ -1210,6 +1218,7 @@ export default function ThreadScreen() {
       {/* ── Input — absolutely positioned, keyboard-aware ─── */}
       <View
         pointerEvents="box-none"
+        onLayout={(e) => setInputBarHeight(e.nativeEvent.layout.height)}
         style={{
           position: "absolute",
           left: 0,
@@ -1477,7 +1486,7 @@ export default function ThreadScreen() {
             position: "absolute",
             left: 0,
             right: 0,
-            bottom: keyboardUp ? keyboardHeight + 64 : 64 + bottom,
+            bottom: (keyboardUp ? keyboardHeight : bottom) + SPACING.sm + inputBarHeight + SPACING.sm,
             alignItems: "center",
             zIndex: 40,
           }}
@@ -1868,6 +1877,49 @@ function MessageBubble({
     setTimeout(() => setCopied(false), 1800);
   }, [message.content]);
 
+  // Progressive hold-to-copy: scale shrinks + haptics accelerate over 2 s
+  const holdScale = useRef(new Animated.Value(1)).current;
+  const holdTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  const clearHoldTimers = useCallback(() => {
+    holdTimers.current.forEach(clearTimeout);
+    holdTimers.current = [];
+  }, []);
+
+  const onBubblePressIn = useCallback(() => {
+    // Animate scale 1 → 0.96 over 2 s
+    Animated.timing(holdScale, {
+      toValue: 0.96,
+      duration: 2000,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start();
+
+    // Progressive haptics — intervals shrink: 0, 400, 700, 950, 1150, 1300, 1420, 1520, 1600, 1670, 1730, 1780, 1830, 1870, 1910, 1940
+    clearHoldTimers();
+    const ticks = [0, 400, 700, 950, 1150, 1300, 1420, 1520, 1600, 1670, 1730, 1780, 1830, 1870, 1910, 1940];
+    ticks.forEach((ms) => {
+      holdTimers.current.push(
+        setTimeout(() => {
+          const style =
+            ms < 700 ? Haptics.ImpactFeedbackStyle.Light
+            : ms < 1400 ? Haptics.ImpactFeedbackStyle.Medium
+            : Haptics.ImpactFeedbackStyle.Heavy;
+          Haptics.impactAsync(style);
+        }, ms),
+      );
+    });
+  }, [holdScale, clearHoldTimers]);
+
+  const onBubblePressOut = useCallback(() => {
+    clearHoldTimers();
+    holdScale.stopAnimation();
+    Animated.spring(holdScale, {
+      toValue: 1,
+      useNativeDriver: true,
+    }).start();
+  }, [holdScale, clearHoldTimers]);
+
   // One badge per call (capped at 8 visible), for the collapsed icon strip
   const MAX_BADGE = 8;
   const visibleStepBadges = useMemo(() => msgSteps.slice(0, MAX_BADGE), [msgSteps]);
@@ -2117,11 +2169,18 @@ function MessageBubble({
       )}
 
       {/* ── Message bubble ─────────────────────────────────────── */}
-      <TouchableBounce
-        sensory
-        onPress={onCopy}
-        style={isUser ? undefined : { alignSelf: "stretch" }}
+      <Pressable
+        onPress={() => Keyboard.dismiss()}
+        onPressIn={onBubblePressIn}
+        onPressOut={onBubblePressOut}
+        onLongPress={() => {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          onCopy();
+        }}
+        delayLongPress={2000}
+        style={{ alignSelf: "stretch" }}
       >
+      <Animated.View style={{ transform: [{ scale: holdScale }] }}>
         {message.error ? (
           /* ── Error bubble — muted, low-contrast, no shadow ── */
           <View
@@ -2254,7 +2313,8 @@ function MessageBubble({
             )}
           </View>
         )}
-      </TouchableBounce>
+      </Animated.View>
+      </Pressable>
 
       {/* ── Turn conclusion: "Worked for X" (assistant only) ─────── */}
       {!isUser && message.turnDurationMs != null && (
@@ -2282,14 +2342,20 @@ function MessageBubble({
         {formatMsgTime(message.createdAt)}
       </Text>
 
-      {/* Subtle copy indicator */}
+      {/* Subtle copy indicator — overlaid on the timestamp so it
+          doesn't grow the cell height and trigger auto-scroll. */}
       {copied && (
         <View
           style={{
+            position: "absolute",
+            bottom: 0,
+            [isUser ? "right" : "left"]: 0,
             flexDirection: "row",
             alignItems: "center",
             gap: 3,
             paddingHorizontal: SPACING.sm,
+            backgroundColor: palette.bg,
+            borderRadius: 4,
           }}
         >
           <IconSymbol name="checkmark" size={10} color={palette.success} />
