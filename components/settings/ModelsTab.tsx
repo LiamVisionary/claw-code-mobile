@@ -273,9 +273,15 @@ function AddModelForm({
   );
   const [name, setName] = useState(CLAUDE_FALLBACK[0]?.id ?? "");
   const [useCustomModel, setUseCustomModel] = useState(false);
-  /** Flipped to true when the user blurs or submits the API key field */
-  const [apiKeyBlurred, setApiKeyBlurred] = useState(false);
-  const [apiKey, setApiKey] = useState("");
+  const [apiKey, setApiKey] = useState(
+    () =>
+      existingEntries.find((e) => e.provider === "claude" && e.apiKey)
+        ?.apiKey ?? ""
+  );
+  // Seed true when a saved key was pre-loaded so the model picker shows on reload without re-focusing the field.
+  const [apiKeyBlurred, setApiKeyBlurred] = useState(
+    () => apiKey.trim().length > 10
+  );
   const [endpoint, setEndpoint] = useState("http://127.0.0.1:11434/v1");
   const [oauthLoading, setOauthLoading] = useState(false);
   const [oauthToken, setOauthToken] = useState<OAuthTokenSet | null>(
@@ -446,7 +452,6 @@ function AddModelForm({
   const onProviderChange = (p: ModelEntry["provider"]) => {
     setProvider(p);
     setUseCustomModel(false);
-    setApiKeyBlurred(false);
     setAuthMethod("apiKey");
     setOauthToken(null);
     setOauthError(null);
@@ -458,7 +463,9 @@ function AddModelForm({
       setName("");
     }
     const existing = existingEntries.find((e) => e.provider === p && e.apiKey);
-    setApiKey(existing?.apiKey ?? "");
+    const existingKey = existing?.apiKey ?? "";
+    setApiKey(existingKey);
+    setApiKeyBlurred(existingKey.trim().length > 10);
     if (p === "local") {
       const existingLocal = existingEntries.find(
         (e) => e.provider === "local" && e.endpoint
@@ -566,13 +573,7 @@ function AddModelForm({
         ? { endpoint: endpoint.trim() || "http://127.0.0.1:11434/v1" }
         : {}),
     });
-    setName(CLAUDE_FALLBACK[0]?.id ?? "");
-    setApiKey("");
-    setApiKeyBlurred(false);
-    setOauthToken(null);
-    setOauthError(null);
-    setAuthMethod("apiKey");
-    setUseCustomModel(false);
+    onProviderChange("claude");
     setExpanded(false);
   };
 
@@ -1288,15 +1289,7 @@ function AddModelForm({
         sensory
         onPress={() => {
           setExpanded(false);
-          setName(CLAUDE_FALLBACK[0]?.id ?? "");
-          setApiKey("");
-          setApiKeyBlurred(false);
-          setOauthToken(null);
-          setOauthError(null);
-          setOauthPendingState(null);
-          setOauthCode("");
-          setAuthMethod("apiKey");
-          setUseCustomModel(false);
+          onProviderChange("claude");
         }}
       >
         <View style={{ paddingVertical: 12, alignItems: "center" }}>
